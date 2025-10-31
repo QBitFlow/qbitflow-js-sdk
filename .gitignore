@@ -1,0 +1,21 @@
+
+CONTRIBUTING.md
+PUBLISH.md
+PROJECT_SUMMARY.*
+.coverage
+
+# Development
+node_modules/
+*.log
+.env
+.DS_Store
+
+
+dist/
+
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

@@ -1,0 +1,35 @@
+
+# Source files
+src/
+tests/
+examples/
+
+PUBLISH.md
+CONTRIBUTING.md
+
+# Config files
+tsconfig*.json
+jest.config.*
+.eslintrc*
+.prettierrc
+
+
+# Development
+node_modules/
+*.log
+.env
+.DS_Store
+coverage/
+*.test.ts
+*.spec.ts
+
+# Git
+.git
+.github
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
