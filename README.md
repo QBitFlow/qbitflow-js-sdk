@@ -39,7 +39,7 @@ const client = new QBitFlow('your-api-key');
 // Create a one-time payment
 const payment = await client.oneTimePayments.createSession({
 	productId: 1,
-	customerUuid: 'customer-uuid',
+	customerUUID: 'customer-uuid',
 	webhookUrl: 'https://yourapp.com/webhook',
 });
 
@@ -75,7 +75,6 @@ const client = new QBitFlow('your-api-key');
 // With custom configuration
 const client = new QBitFlow({
 	apiKey: 'your-api-key',
-	baseUrl: 'https://api.qbitflow.com',
 	timeout: 30000, // 30 seconds
 	maxRetries: 3,
 });
@@ -85,12 +84,12 @@ const client = new QBitFlow({
 
 ### Configuration Options
 
-| Option       | Type   | Default                 | Description                                  |
-| ------------ | ------ | ----------------------- | -------------------------------------------- |
-| `apiKey`     | string | (required)              | Your QBitFlow API key                        |
-| `baseUrl`    | string | `http://localhost:3001` | API base URL                                 |
-| `timeout`    | number | `30000`                 | Request timeout in milliseconds              |
-| `maxRetries` | number | `3`                     | Number of retry attempts for failed requests |
+| Option       | Type   | Default                    | Description                                  |
+| ------------ | ------ | -------------------------- | -------------------------------------------- |
+| `apiKey`     | string | (required)                 | Your QBitFlow API key                        |
+| `baseUrl`    | string | `https://api.qbitflow.app` | API base URL                                 |
+| `timeout`    | number | `30000`                    | Request timeout in milliseconds              |
+| `maxRetries` | number | `3`                        | Number of retry attempts for failed requests |
 
 ## One-Time Payments
 
@@ -102,7 +101,7 @@ Create a payment session for a one-time purchase:
 // Using an existing product
 const payment = await client.oneTimePayments.createSession({
 	productId: 1,
-	customerUuid: 'customer-uuid',
+	customerUUID: 'customer-uuid',
 	webhookUrl: 'https://yourapp.com/webhook',
 });
 
@@ -111,7 +110,7 @@ const payment = await client.oneTimePayments.createSession({
 	productName: 'Custom Product',
 	description: 'Product description',
 	price: 99.99, // USD
-	customerUuid: 'customer-uuid',
+	customerUUID: 'customer-uuid',
 	webhookUrl: 'https://yourapp.com/webhook',
 });
 
@@ -128,7 +127,7 @@ const payment = await client.oneTimePayments.createSession({
 	productId: 1,
 	successUrl: 'https://yourapp.com/success?uuid={{UUID}}&type={{TRANSACTION_TYPE}}',
 	cancelUrl: 'https://yourapp.com/cancel',
-	customerUuid: 'customer-uuid',
+	customerUUID: 'customer-uuid',
 });
 ```
 
@@ -162,12 +161,12 @@ List all one-time payments with pagination:
 ```typescript
 const result = await client.oneTimePayments.getAll({ limit: 10 });
 
-console.log(result.data); // Array of payments
-console.log(result.hasMore); // Whether there are more pages
+console.log(result.items); // Array of payments
+console.log(result.hasMore()); // Whether there are more pages
 console.log(result.nextCursor); // Cursor for next page
 
 // Fetch next page
-if (result.hasMore) {
+if (result.hasMore()) {
 	const nextPage = await client.oneTimePayments.getAll({
 		limit: 10,
 		cursor: result.nextCursor,
@@ -181,7 +180,7 @@ Get all payments (one-time and subscription payments combined):
 
 ```typescript
 const result = await client.oneTimePayments.getAllCombined({ limit: 20 });
-result.data.forEach((payment) => {
+result.items.forEach((payment) => {
 	console.log(payment.source); // "payment" or "subscription_history"
 	console.log(payment.amount);
 });
@@ -198,10 +197,9 @@ const subscription = await client.subscriptions.createSession({
 	productId: 1,
 	frequency: { unit: 'months', value: 1 }, // Bill monthly
 	trialPeriod: { unit: 'days', value: 7 }, // 7-day trial (optional)
-	freeCredits: 100, // Free credits (optional)
 	minPeriods: 3, // Minimum billing periods (optional)
 	webhookUrl: 'https://yourapp.com/webhook',
-	customerUuid: 'customer-uuid',
+	customerUUID: 'customer-uuid',
 });
 
 console.log(subscription.link); // Send to customer
@@ -227,24 +225,13 @@ const subscription = await client.subscriptions.get('subscription-uuid');
 console.log(subscription.status, subscription.nextBillingDate);
 ```
 
-### List Subscriptions
-
-List all subscriptions with pagination:
+### Get all payments for subscription
 
 ```typescript
-const result = await client.subscriptions.getAll({ limit: 10 });
-result.data.forEach((sub) => {
-	console.log(sub.productName, sub.status);
+const history = await client.subscriptions.getPaymentHistory('subscription-uuid');
+history.forEach((record) => {
+	console.log(record.uuid, record.amount, record.createdAt);
 });
-```
-
-### Cancel Subscription
-
-Cancel an active subscription:
-
-```typescript
-await client.subscriptions.cancel('subscription-uuid');
-console.log('Subscription cancelled');
 ```
 
 ## Pay-As-You-Go Subscriptions
@@ -259,7 +246,7 @@ const payg = await client.payAsYouGo.createSession({
 	frequency: { unit: 'months', value: 1 }, // Bill monthly
 	freeCredits: 100, // Initial free credits (optional)
 	webhookUrl: 'https://yourapp.com/webhook',
-	customerUuid: 'customer-uuid',
+	customerUUID: 'customer-uuid',
 });
 
 console.log(payg.link);
@@ -269,22 +256,25 @@ console.log(payg.link);
 
 ```typescript
 const payg = await client.payAsYouGo.get('payg-uuid');
-console.log(payg.allowance, payg.maxAmount);
+console.log(payg.allowance, payg.unitsCurrentPeriod);
 ```
 
-### List PAYG Subscriptions
+### Get all payments for PAYG subscription
 
 ```typescript
-const result = await client.payAsYouGo.getAll({ limit: 10 });
-result.data.forEach((payg) => {
-	console.log(payg.productName, payg.allowance);
+const history = await client.payAsYouGo.getPaymentHistory('payg-uuid');
+history.forEach((record) => {
+	console.log(record.uuid, record.amount, record.createdAt);
 });
 ```
 
-### Cancel PAYG Subscription
+### Increase units current period
+
+Increase the number of units for the current billing period:
 
 ```typescript
-await client.payAsYouGo.cancel('payg-uuid');
+// For example, the product is billed per hour of usage, and the customer consumed 5 additional hours
+const response = await client.payAsYouGo.increaseUnitsCurrentPeriod('payg-uuid', 5);
 ```
 
 ## Transaction Status
@@ -309,13 +299,21 @@ console.log(status.txHash); // Blockchain transaction hash
 
 ```typescript
 enum TransactionType {
+	/** One-time payment transaction */
 	ONE_TIME_PAYMENT = 'payment',
+	/** Create subscription transaction */
 	CREATE_SUBSCRIPTION = 'createSubscription',
+	/** Cancel subscription transaction */
 	CANCEL_SUBSCRIPTION = 'cancelSubscription',
+	/** Execute subscription payment transaction */
 	EXECUTE_SUBSCRIPTION_PAYMENT = 'executeSubscription',
+	/** Create pay-as-you-go subscription transaction */
 	CREATE_PAYG_SUBSCRIPTION = 'createPAYGSubscription',
+	/** Cancel pay-as-you-go subscription transaction */
 	CANCEL_PAYG_SUBSCRIPTION = 'cancelPAYGSubscription',
+	/** Increase allowance transaction */
 	INCREASE_ALLOWANCE = 'increaseAllowance',
+	/** Update max amount transaction */
 	UPDATE_MAX_AMOUNT = 'updateMaxAmount',
 }
 ```
@@ -324,12 +322,19 @@ enum TransactionType {
 
 ```typescript
 enum TransactionStatusValue {
+	/** Transaction has been created but not yet processed */
 	CREATED = 'created',
+	/** Waiting for blockchain confirmation */
 	WAITING_CONFIRMATION = 'waitingConfirmation',
+	/** Transaction is pending processing */
 	PENDING = 'pending',
+	/** Transaction has been successfully completed */
 	COMPLETED = 'completed',
+	/** Transaction has failed */
 	FAILED = 'failed',
+	/** Transaction has been cancelled */
 	CANCELLED = 'cancelled',
+	/** Transaction has expired */
 	EXPIRED = 'expired',
 }
 ```
@@ -404,8 +409,11 @@ app.listen(3000, () => {
 
 ```typescript
 interface SessionWebhookResponse {
+	/** Session UUID */
 	uuid: string;
+	/** Current transaction status */
 	status: TransactionStatus;
+	/** Complete session information */
 	session: Session;
 }
 ```
@@ -464,45 +472,6 @@ try {
 
 The SDK is written in TypeScript and includes complete type definitions.
 
-### Type Imports
-
-```typescript
-import {
-	QBitFlow,
-	// Configuration
-	QBitFlowConfig,
-
-	// Payment types
-	CreateSessionDto,
-	LinkResponse,
-	Session,
-	Payment,
-	CombinedPayment,
-
-	// Subscription types
-	Subscription,
-	PayAsYouGoSubscription,
-	SubscriptionStatus,
-
-	// Status types
-	TransactionStatus,
-	TransactionType,
-	TransactionStatusValue,
-	StatusResponse,
-
-	// Common types
-	Duration,
-	DurationUnit,
-	Currency,
-	CursorData,
-
-	// Errors
-	QBitFlowError,
-	NotFoundException,
-	// ... other errors
-} from 'qbitflow-sdk';
-```
-
 ### Usage with TypeScript
 
 ```typescript
@@ -512,7 +481,7 @@ const client = new QBitFlow('api-key');
 
 const sessionData: CreateSessionDto = {
 	productId: 1,
-	customerUuid: 'uuid',
+	customerUUID: 'uuid',
 	webhookUrl: 'https://example.com/webhook',
 };
 
@@ -567,6 +536,10 @@ new QBitFlow(config: QBitFlowConfig)
 
 #### Properties
 
+- `customers: CustomerRequests` - Customer operations
+- `products: ProductRequests` - Product operations
+- `users: UserRequests` - User operations
+- `apiKeys: ApiKeyRequests` - API key operations
 - `oneTimePayments: PaymentRequests` - One-time payment operations
 - `subscriptions: SubscriptionRequests` - Subscription operations
 - `payAsYouGo: PayAsYouGoRequests` - PAYG subscription operations
@@ -576,52 +549,6 @@ new QBitFlow(config: QBitFlowConfig)
 
 - `getApiKey(): string` - Get current API key
 - `getBaseUrl(): string` - Get current base URL
-- `setApiKey(apiKey: string): void` - Update API key
-
-### PaymentRequests
-
-One-time payment operations.
-
-#### Methods
-
-- `createSession(options): Promise<LinkResponse>` - Create payment session
-- `getSession(sessionUuid): Promise<Session>` - Get session details
-- `get(paymentUuid): Promise<Payment>` - Get completed payment
-- `getAll(options?): Promise<CursorData<Payment>>` - List all payments
-- `getAllCombined(options?): Promise<CursorData<CombinedPayment>>` - List all payments (combined)
-
-### SubscriptionRequests
-
-Subscription operations.
-
-#### Methods
-
-- `createSession(options): Promise<LinkResponse>` - Create subscription session
-- `getSession(sessionUuid): Promise<Session>` - Get session details
-- `get(subscriptionUuid): Promise<Subscription>` - Get subscription
-- `getAll(options?): Promise<CursorData<Subscription>>` - List subscriptions
-- `cancel(subscriptionUuid): Promise<{message: string}>` - Cancel subscription
-
-### PayAsYouGoRequests
-
-Pay-as-you-go subscription operations.
-
-#### Methods
-
-- `createSession(options): Promise<LinkResponse>` - Create PAYG session
-- `getSession(sessionUuid): Promise<Session>` - Get session details
-- `get(paygUuid): Promise<PayAsYouGoSubscription>` - Get PAYG subscription
-- `getAll(options?): Promise<CursorData<PayAsYouGoSubscription>>` - List PAYG subscriptions
-- `cancel(paygUuid): Promise<{message: string}>` - Cancel PAYG subscription
-
-### TransactionStatusRequests
-
-Transaction status operations.
-
-#### Methods
-
-- `get(transactionUuid, transactionType): Promise<TransactionStatus>` - Get status
-- `connectAndHandleMessages(transactionUuid, transactionType, handler): Promise<void>` - WebSocket connection
 
 ## Testing
 
@@ -652,30 +579,16 @@ npm run build
 # The compiled code will be in the dist/ directory
 ```
 
-## Publishing to npm
-
-```bash
-# Update version in package.json
-npm version patch  # or minor, or major
-
-# Build and test
-npm run build
-npm test
-
-# Publish
-npm publish
-```
-
 ## License
 
-MIT License - see LICENSE file for details
+MPL-2.0 License - see LICENSE file for details
 
 ## Support
 
-- 📧 Email: support@qbitflow.com
+- 📧 Email: support@qbitflow.app
 - 🐛 Issues: [GitHub Issues](https://github.com/qbitflow/qbitflow-js-sdk/issues)
-- 📚 Documentation: [Official Docs](https://docs.qbitflow.com)
-- 💬 Discord: [Join our community](https://discord.gg/qbitflow)
+- 📚 Documentation: [Official Docs](https://qbitflow.app/docs)
+      <!-- - 💬 Discord: [Join our community](https://discord.gg/qbitflow) -->
 
 ## Changelog
 

@@ -37,7 +37,7 @@ export class SubscriptionRequests extends Request {
 	 *   frequency: { unit: 'months', value: 1 },
 	 *   trialPeriod: { unit: 'days', value: 7 },
 	 *   webhookUrl: 'https://example.com/webhook',
-	 *   customerUuid: 'customer-uuid'
+	 *   customerUUID: 'customer-uuid'
 	 * });
 	 * console.log(subscription.link);
 	 * ```

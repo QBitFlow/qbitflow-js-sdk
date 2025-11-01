@@ -18,7 +18,9 @@
 		"noUnusedParameters": true,
 		"noImplicitReturns": true,
 		"noFallthroughCasesInSwitch": true,
-		"isolatedModules": true
+		"isolatedModules": true,
+		"module": "nodenext",
+		"moduleResolution": "nodenext"
 	},
 	"include": ["src/**/*"],
 	"exclude": ["node_modules", "dist", "tests", "examples"]

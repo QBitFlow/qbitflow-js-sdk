@@ -37,7 +37,7 @@ export class PayAsYouGoRequests extends Request {
 	 *   frequency: { unit: 'months', value: 1 },
 	 *   freeCredits: 100,
 	 *   webhookUrl: 'https://example.com/webhook',
-	 *   customerUuid: 'customer-uuid'
+	 *   customerUUID: 'customer-uuid'
 	 * });
 	 * console.log(payg.link);
 	 * ```
@@ -100,7 +100,7 @@ export class PayAsYouGoRequests extends Request {
 	 *
 	 * @example
 	 * ```typescript
-	 * const history = await client.subscriptions.getPaymentHistory('subscription-uuid');
+	 * const history = await client.payAsYouGo.getPaymentHistory('payg-uuid');
 	 * history.forEach(record => {
 	 *   console.log(record.uuid, record.amount, record.createdAt);
 	 * });
@@ -149,5 +149,36 @@ export class PayAsYouGoRequests extends Request {
 			`${PayAsYouGoRequests.BASE_ROUTE}/processing/execute-billing/${subscriptionUUID}`,
 			{}
 		);
+	}
+
+	/**
+	 * Increase the units for the current billing period of a PAYG subscription
+	 * @param subscriptionUUID - Subscription UUID
+	 * @param unitsToAdd - Number of units to add (for example the product unit is in hours, and you want to add 5 hours of usage)
+	 * @returns Success response
+	 *
+	 * @example
+	 * ```typescript
+	 * const response = await client.payAsYouGo.increaseUnitsCurrentPeriod('payg-uuid', 5);
+	 * ```
+	 */
+	async increaseUnitsCurrentPeriod(
+		subscriptionUUID: string,
+		unitsToAdd: number
+	): Promise<SuccessResponse> {
+		if (!subscriptionUUID) {
+			throw new ValidationException('Subscription UUID is required');
+		}
+		if (unitsToAdd <= 0) {
+			throw new ValidationException('Units to add must be greater than zero');
+		}
+
+		const endpoint = `${PayAsYouGoRequests.BASE_ROUTE}/payg/increase-units-current-period`;
+		const body = {
+			subscriptionUUID,
+			increaseByAmount: unitsToAdd,
+		};
+
+		return this.postReq<SuccessResponse>(endpoint, body);
 	}
 }

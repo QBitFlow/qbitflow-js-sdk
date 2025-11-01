@@ -1,4 +1,3 @@
-
 /**
  * Example Express server demonstrating webhook handling
  * This file shows how to set up a webhook endpoint to receive payment notifications
@@ -19,112 +18,112 @@ app.use(express.json());
 /**
  * Webhook endpoint to receive payment notifications
  * This endpoint will be called by QBitFlow when a payment status changes
- * 
+ *
  * POST /webhook
  * Body: SessionWebhookResponse
  */
 app.post('/webhook', (req: Request, res: Response) => {
-  console.log('\n=== Webhook Received ===');
-  
-  try {
-    // Parse the webhook payload
-    const event = req.body as SessionWebhookResponse;
-    
-    console.log('Session UUID:', event.uuid);
-    console.log('Transaction Status:', event.status.status);
-    console.log('Transaction Type:', event.status.type);
-    
-    // Log session details
-    console.log('\nSession Details:');
-    console.log('Product:', event.session.productName);
-    console.log('Description:', event.session.description);
-    console.log('Price:', event.session.price, 'USD');
-    console.log('Customer UUID:', event.session.customerUuid);
-    console.log('Organization:', event.session.organizationName);
-    
-    if (event.status.txHash) {
-      console.log('Transaction Hash:', event.status.txHash);
-    }
-    
-    // Handle different transaction statuses
-    switch (event.status.status) {
-      case TransactionStatusValue.COMPLETED:
-        console.log('✓ Payment completed successfully!');
-        // TODO: Update your database, fulfill order, etc.
-        handleCompletedPayment(event);
-        break;
-        
-      case TransactionStatusValue.FAILED:
-        console.log('✗ Payment failed');
-        // TODO: Notify customer, log failure, etc.
-        handleFailedPayment(event);
-        break;
-        
-      case TransactionStatusValue.PENDING:
-        console.log('⏳ Payment is pending');
-        // TODO: Update status in your system
-        break;
-        
-      case TransactionStatusValue.CANCELLED:
-        console.log('✗ Payment was cancelled');
-        // TODO: Handle cancellation
-        break;
-        
-      default:
-        console.log('Status:', event.status.status);
-    }
-    
-    // Always respond with 200 to acknowledge receipt
-    res.status(200).json({ 
-      received: true,
-      uuid: event.uuid,
-      status: event.status.status 
-    });
-  } catch (error) {
-    console.error('Error processing webhook:', error);
-    res.status(500).json({ error: 'Failed to process webhook' });
-  }
+	console.log('\n=== Webhook Received ===');
+
+	try {
+		// Parse the webhook payload
+		const event = req.body as SessionWebhookResponse;
+
+		console.log('Session UUID:', event.uuid);
+		console.log('Transaction Status:', event.status.status);
+		console.log('Transaction Type:', event.status.type);
+
+		// Log session details
+		console.log('\nSession Details:');
+		console.log('Product:', event.session.productName);
+		console.log('Description:', event.session.description);
+		console.log('Price:', event.session.price, 'USD');
+		console.log('Customer UUID:', event.session.customerUUID);
+		console.log('Organization:', event.session.organizationName);
+
+		if (event.status.txHash) {
+			console.log('Transaction Hash:', event.status.txHash);
+		}
+
+		// Handle different transaction statuses
+		switch (event.status.status) {
+			case TransactionStatusValue.COMPLETED:
+				console.log('✓ Payment completed successfully!');
+				// TODO: Update your database, fulfill order, etc.
+				handleCompletedPayment(event);
+				break;
+
+			case TransactionStatusValue.FAILED:
+				console.log('✗ Payment failed');
+				// TODO: Notify customer, log failure, etc.
+				handleFailedPayment(event);
+				break;
+
+			case TransactionStatusValue.PENDING:
+				console.log('⏳ Payment is pending');
+				// TODO: Update status in your system
+				break;
+
+			case TransactionStatusValue.CANCELLED:
+				console.log('✗ Payment was cancelled');
+				// TODO: Handle cancellation
+				break;
+
+			default:
+				console.log('Status:', event.status.status);
+		}
+
+		// Always respond with 200 to acknowledge receipt
+		res.status(200).json({
+			received: true,
+			uuid: event.uuid,
+			status: event.status.status,
+		});
+	} catch (error) {
+		console.error('Error processing webhook:', error);
+		res.status(500).json({ error: 'Failed to process webhook' });
+	}
 });
 
 /**
  * Success redirect endpoint
  * This endpoint is called when a payment is successful (if successUrl is provided)
- * 
+ *
  * GET /success?uuid={sessionUuid}&transactionType={type}
  */
 app.get('/success', async (req: Request, res: Response) => {
-  console.log('\n=== Success Redirect ===');
-  
-  const uuid = req.query.uuid as string;
-  const transactionType = req.query.transactionType as TransactionType;
-  
-  if (!uuid || !transactionType) {
-    return res.status(400).send('Missing uuid or transactionType parameter');
-  }
-  
-  try {
-    // Fetch the transaction status to verify completion
-    const transactionStatus = await qbitflowClient.transactionStatus.get(uuid, transactionType);
-    
-    console.log('Transaction UUID:', uuid);
-    console.log('Transaction Type:', transactionType);
-    console.log('Status:', transactionStatus.status);
-    
-    // If status is completed, fetch the session details
-    if (transactionStatus.status === TransactionStatusValue.COMPLETED) {
-      const session = await qbitflowClient.oneTimePayments.getSession(uuid);
-      
-      console.log('\nPayment Session Details:');
-      console.log('Product:', session.productName);
-      console.log('Price:', session.price, 'USD');
-      console.log('Customer UUID:', session.customerUuid);
-      
-      // TODO: Handle successful payment in your application
-      // - Update order status
-      // - Send confirmation email
-      // - Grant access to product/service
-      
-      res.send(`
+	console.log('\n=== Success Redirect ===');
+
+	const uuid = req.query.uuid as string;
+	const transactionType = req.query.transactionType as TransactionType;
+
+	if (!uuid || !transactionType) {
+		return res.status(400).send('Missing uuid or transactionType parameter');
+	}
+
+	try {
+		// Fetch the transaction status to verify completion
+		const transactionStatus = await qbitflowClient.transactionStatus.get(uuid, transactionType);
+
+		console.log('Transaction UUID:', uuid);
+		console.log('Transaction Type:', transactionType);
+		console.log('Status:', transactionStatus.status);
+
+		// If status is completed, fetch the session details
+		if (transactionStatus.status === TransactionStatusValue.COMPLETED) {
+			const session = await qbitflowClient.oneTimePayments.getSession(uuid);
+
+			console.log('\nPayment Session Details:');
+			console.log('Product:', session.productName);
+			console.log('Price:', session.price, 'USD');
+			console.log('Customer UUID:', session.customerUUID);
+
+			// TODO: Handle successful payment in your application
+			// - Update order status
+			// - Send confirmation email
+			// - Grant access to product/service
+
+			res.send(`
         <!DOCTYPE html>
         <html>
           <head>
@@ -159,10 +158,10 @@ app.get('/success', async (req: Request, res: Response) => {
           </body>
         </html>
       `);
-    } else {
-      console.log(`Transaction status is ${transactionStatus.status}, not completed yet.`);
-      
-      res.send(`
+		} else {
+			console.log(`Transaction status is ${transactionStatus.status}, not completed yet.`);
+
+			res.send(`
         <!DOCTYPE html>
         <html>
           <head>
@@ -183,29 +182,31 @@ app.get('/success', async (req: Request, res: Response) => {
           </body>
         </html>
       `);
-    }
-  } catch (error) {
-    console.error('Error fetching transaction details:', error);
-    res.status(500).send('Error processing payment verification');
-  }
+		}
+	} catch (error) {
+		console.error('Error fetching transaction details:', error);
+		res.status(500).send('Error processing payment verification');
+	}
+
+	return null;
 });
 
 /**
  * Cancel redirect endpoint
  * This endpoint is called when a payment is cancelled (if cancelUrl is provided)
- * 
+ *
  * GET /cancel
  */
-app.get('/cancel', (req: Request, res: Response) => {
-  console.log('\n=== Cancel Redirect ===');
-  console.log('Payment was cancelled by the user');
-  
-  // TODO: Handle payment cancellation
-  // - Update order status
-  // - Log cancellation
-  // - Optionally send notification
-  
-  res.send(`
+app.get('/cancel', (_: Request, res: Response) => {
+	console.log('\n=== Cancel Redirect ===');
+	console.log('Payment was cancelled by the user');
+
+	// TODO: Handle payment cancellation
+	// - Update order status
+	// - Log cancellation
+	// - Optionally send notification
+
+	res.send(`
     <!DOCTYPE html>
     <html>
       <head>
@@ -235,19 +236,19 @@ app.get('/cancel', (req: Request, res: Response) => {
  * This is where you would implement your business logic for successful payments
  */
 function handleCompletedPayment(event: SessionWebhookResponse) {
-  // Example business logic:
-  // 1. Update order status in database
-  // 2. Send confirmation email to customer
-  // 3. Trigger fulfillment process
-  // 4. Update inventory
-  // 5. Log the transaction
-  
-  console.log('\nHandling completed payment...');
-  console.log('Customer UUID:', event.session.customerUuid);
-  console.log('Product ID:', event.session.productId);
-  console.log('Amount:', event.session.price, 'USD');
-  
-  // Your implementation here
+	// Example business logic:
+	// 1. Update order status in database
+	// 2. Send confirmation email to customer
+	// 3. Trigger fulfillment process
+	// 4. Update inventory
+	// 5. Log the transaction
+
+	console.log('\nHandling completed payment...');
+	console.log('Customer UUID:', event.session.customerUUID);
+	console.log('Product ID:', event.session.productId);
+	console.log('Amount:', event.session.price, 'USD');
+
+	// Your implementation here
 }
 
 /**
@@ -255,23 +256,23 @@ function handleCompletedPayment(event: SessionWebhookResponse) {
  * This is where you would implement your business logic for failed payments
  */
 function handleFailedPayment(event: SessionWebhookResponse) {
-  // Example business logic:
-  // 1. Update order status to failed
-  // 2. Notify customer about the failure
-  // 3. Log the failure
-  // 4. Optionally retry or offer alternative payment methods
-  
-  console.log('\nHandling failed payment...');
-  console.log('Session UUID:', event.uuid);
-  console.log('Reason:', event.status.message || 'Unknown');
-  
-  // Your implementation here
+	// Example business logic:
+	// 1. Update order status to failed
+	// 2. Notify customer about the failure
+	// 3. Log the failure
+	// 4. Optionally retry or offer alternative payment methods
+
+	console.log('\nHandling failed payment...');
+	console.log('Session UUID:', event.uuid);
+	console.log('Reason:', event.status.message || 'Unknown');
+
+	// Your implementation here
 }
 
 // Start the server
 app.listen(PORT, () => {
-  console.log(`\n🚀 Webhook server is running on http://localhost:${PORT}`);
-  console.log(`\nWebhook endpoint: http://localhost:${PORT}/webhook`);
-  console.log(`Success endpoint: http://localhost:${PORT}/success`);
-  console.log(`Cancel endpoint: http://localhost:${PORT}/cancel\n`);
+	console.log(`\n🚀 Webhook server is running on http://localhost:${PORT}`);
+	console.log(`\nWebhook endpoint: http://localhost:${PORT}/webhook`);
+	console.log(`Success endpoint: http://localhost:${PORT}/success`);
+	console.log(`Cancel endpoint: http://localhost:${PORT}/cancel\n`);
 });
