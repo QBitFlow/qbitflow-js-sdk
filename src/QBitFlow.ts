@@ -23,7 +23,7 @@ import { ApiKeyRequests } from './requests/ApiKeyRequests';
  * // Create a payment
  * const payment = await client.oneTimePayments.createSession({
  *   productId: 1,
- *   customerUuid: 'customer-uuid',
+ *   customerUUID: 'customer-uuid',
  *   webhookUrl: 'https://example.com/webhook'
  * });
  * ```
