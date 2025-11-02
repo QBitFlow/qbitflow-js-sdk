@@ -48,11 +48,13 @@ Official JavaScript/TypeScript SDK for [QBitFlow](https://qbitflow.app) - a comp
     - [Frequency Units](#frequency-units)
     - [Get Subscription](#get-subscription)
     - [Get all payments for subscription](#get-all-payments-for-subscription)
+    - [Execute Test Billing Cycle](#execute-test-billing-cycle)
 - [Pay-As-You-Go Subscriptions](#pay-as-you-go-subscriptions)
     - [Create PAYG Subscription](#create-payg-subscription)
     - [Get PAYG Subscription](#get-payg-subscription)
     - [Get all payments for PAYG subscription](#get-all-payments-for-payg-subscription)
-    - [Increase units current period](#increase-units-current-period)
+    - [Execute Test Billing Cycle](#execute-test-billing-cycle-1)
+        - [Increase units current period](#increase-units-current-period)
 - [Transaction Status](#transaction-status)
     - [Check Status](#check-status)
     - [Transaction Types](#transaction-types)
@@ -305,6 +307,17 @@ history.forEach((record) => {
 });
 ```
 
+### Execute Test Billing Cycle
+
+**Test Mode Only**: Manually trigger a billing cycle for testing.
+
+**For live mode**: Billing cycles are executed automatically based on the subscription frequency.
+
+```typescript
+const result = await client.subscriptions.executeTestBilling('subscription-uuid');
+console.log('Transaction status link:', result.statusLink);
+```
+
 ## Pay-As-You-Go Subscriptions
 
 PAYG subscriptions allow customers to pay based on usage with a billing cycle.
@@ -337,6 +350,17 @@ const history = await client.payAsYouGo.getPaymentHistory('payg-uuid');
 history.forEach((record) => {
 	console.log(record.uuid, record.amount, record.createdAt);
 });
+```
+
+### Execute Test Billing Cycle
+
+**Test Mode Only**: Manually trigger a billing cycle for testing.
+
+**For live mode**: Billing cycles are executed automatically based on the subscription frequency.
+
+```typescript
+const result = await client.payAsYouGo.executeTestBilling('subscription-uuid');
+console.log('Transaction status link:', result.statusLink);
 ```
 
 ### Increase units current period
@@ -621,7 +645,7 @@ This project is licensed under the MPL-2.0 License - see the [LICENSE](LICENSE) 
 - 📖 [Documentation](https://qbitflow.app/docs)
 - 📧 [Email Support](mailto:support@qbitflow.app)
 - 🐛 [Issue Tracker](https://github.com/qbitflow/qbitflow-python-sdk/issues)
-    <!-- -   💬 [Community Forum](https://community.qbitflow.app) -->
+      <!-- -   💬 [Community Forum](https://community.qbitflow.app) -->
 
 ## Changelog
 
