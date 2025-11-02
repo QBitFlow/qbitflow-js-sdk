@@ -54,7 +54,7 @@ Official JavaScript/TypeScript SDK for [QBitFlow](https://qbitflow.app) - a comp
     - [Get PAYG Subscription](#get-payg-subscription)
     - [Get all payments for PAYG subscription](#get-all-payments-for-payg-subscription)
     - [Execute Test Billing Cycle](#execute-test-billing-cycle-1)
-        - [Increase units current period](#increase-units-current-period)
+    - [Increase units current period](#increase-units-current-period)
 - [Transaction Status](#transaction-status)
     - [Check Status](#check-status)
     - [Transaction Types](#transaction-types)
@@ -645,7 +645,7 @@ This project is licensed under the MPL-2.0 License - see the [LICENSE](LICENSE) 
 - 📖 [Documentation](https://qbitflow.app/docs)
 - 📧 [Email Support](mailto:support@qbitflow.app)
 - 🐛 [Issue Tracker](https://github.com/qbitflow/qbitflow-python-sdk/issues)
-      <!-- -   💬 [Community Forum](https://community.qbitflow.app) -->
+    <!-- -   💬 [Community Forum](https://community.qbitflow.app) -->
 
 ## Changelog
 
