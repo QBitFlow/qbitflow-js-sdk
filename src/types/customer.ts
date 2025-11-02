@@ -60,7 +60,6 @@ export interface CreateCustomerDto {
  * @param address - (Optional) Address of the customer
  */
 export interface UpdateCustomerDto {
-	uuid: string;
 	name?: string;
 	lastName?: string;
 	email?: string;

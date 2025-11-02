@@ -1,7 +1,7 @@
 # QBitFlow JavaScript/TypeScript SDK
 
-[![npm version](https://i.ytimg.com/vi/LkHy0YWvpRI/mqdefault.jpg)
-[![License: MIT](https://upload.wikimedia.org/wikipedia/commons/thumb/2/2e/MIT_Logo_New.svg/1200px-MIT_Logo_New.svg.png)
+[![npm version](https://i.ytimg.com/vi/LkHy0YWvpRI/mqdefault.jpg)](https://www.npmjs.com/package/qbitflow-sdk)
+[![License: MPL-2.0](https://upload.wikimedia.org/wikipedia/commons/thumb/9/95/Mozilla_Logo_2024.svg/1920px-Mozilla_Logo_2024.svg.png)](https://opensource.org/licenses/MPL-2.0)
 
 Official JavaScript/TypeScript SDK for [QBitFlow](https://qbitflow.app) - a comprehensive cryptocurrency payment processing platform that enables seamless integration of crypto payments, recurring subscriptions, and pay-as-you-go models into your applications.
 
@@ -15,6 +15,67 @@ Official JavaScript/TypeScript SDK for [QBitFlow](https://qbitflow.app) - a comp
 - 🧪 **Well Tested**: Comprehensive test coverage
 - 📚 **Great Documentation**: Detailed docs with examples
 - 🔌 **Webhook Support**: Handle payment notifications easily
+- 💳 **One-Time Payments**: Accept cryptocurrency payments with ease
+- 🔄 **Recurring Subscriptions**: Automated recurring billing in cryptocurrency
+- 📊 **Pay-as-You-Go**: Usage-based billing with cryptocurrency
+- 👥 **Customer Management**: Create and manage customer profiles
+- 🛍️ **Product Management**: Organize your products and pricing
+- 📈 **Transaction Tracking**: Real-time transaction status updates
+- 🔐 **Secure Authentication**: API key-based authentication
+- 🎯 **Type-Safe**: Full type hints for better IDE support
+- 📝 **Comprehensive Documentation**: Detailed docstrings and examples
+
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+    - [1. Get Your API Key](#1-get-your-api-key)
+    - [2. Initialize the Client](#2-initialize-the-client)
+    - [3. Create a One-Time Payment](#3-create-a-one-time-payment)
+    - [4. Create a Recurring Subscription](#4-create-a-recurring-subscription)
+    - [5. Check Transaction Status](#5-check-transaction-status)
+- [Configuration](#configuration)
+- [One-Time Payments](#one-time-payments)
+    - [Create a Payment Session](#create-a-payment-session)
+    - [With Redirect URLs](#with-redirect-urls)
+    - [Get Payment Session](#get-payment-session)
+    - [Get Completed Payment](#get-completed-payment)
+    - [List All Payments](#list-all-payments)
+    - [List Combined Payments](#list-combined-payments)
+- [Subscriptions](#subscriptions)
+    - [Create a Subscription](#create-a-subscription)
+    - [Frequency Units](#frequency-units)
+    - [Get Subscription](#get-subscription)
+    - [Get all payments for subscription](#get-all-payments-for-subscription)
+- [Pay-As-You-Go Subscriptions](#pay-as-you-go-subscriptions)
+    - [Create PAYG Subscription](#create-payg-subscription)
+    - [Get PAYG Subscription](#get-payg-subscription)
+    - [Get all payments for PAYG subscription](#get-all-payments-for-payg-subscription)
+    - [Increase units current period](#increase-units-current-period)
+- [Transaction Status](#transaction-status)
+    - [Check Status](#check-status)
+    - [Transaction Types](#transaction-types)
+    - [Status Values](#status-values)
+- [Customer Management](#customer-management)
+    - [Create a Customer](#create-a-customer)
+    - [Get Customer by UUID](#get-customer-by-uuid)
+    - [Update Customer](#update-customer)
+    - [Delete Customer](#delete-customer)
+- [Product Management](#product-management)
+    - [Create a Product](#create-a-product)
+    - [Update Product](#update-product)
+    - [Delete Product](#delete-product)
+- [Webhook Handling](#webhook-handling)
+    - [Express.js Example](#expressjs-example)
+- [Error Handling](#error-handling)
+- [API Reference](#api-reference)
+    - [QBitFlow](#qbitflow)
+        - [Constructor](#constructor)
+        - [Properties](#properties)
+- [License](#license)
+- [Support](#support)
+- [Changelog](#changelog)
 
 ## Installation
 
@@ -30,54 +91,64 @@ yarn add qbitflow-sdk
 
 ## Quick Start
 
+### 1. Get Your API Key
+
+Sign up at [QBitFlow](https://qbitflow.app) and obtain your API key from the dashboard.
+
+### 2. Initialize the Client
+
 ```typescript
 import { QBitFlow } from 'qbitflow-sdk';
 
 // Initialize the client
 const client = new QBitFlow('your-api-key');
+```
 
+### 3. Create a One-Time Payment
+
+```typescript
 // Create a one-time payment
 const payment = await client.oneTimePayments.createSession({
 	productId: 1,
 	customerUUID: 'customer-uuid',
 	webhookUrl: 'https://yourapp.com/webhook',
+	successUrl: 'https://yourapp.com/success',
+	cancelUrl: 'https://yourapp.com/cancel',
 });
 
 console.log('Payment link:', payment.link);
 // Send this link to your customer
 ```
 
-## Table of Contents
-
-- [Authentication](#authentication)
-- [Configuration](#configuration)
-- [One-Time Payments](#one-time-payments)
-- [Subscriptions](#subscriptions)
-- [Pay-As-You-Go Subscriptions](#pay-as-you-go-subscriptions)
-- [Transaction Status](#transaction-status)
-- [Webhook Handling](#webhook-handling)
-- [Error Handling](#error-handling)
-- [TypeScript Support](#typescript-support)
-- [Examples](#examples)
-- [API Reference](#api-reference)
-- [Testing](#testing)
-
-## Authentication
-
-Get your API key from the QBitFlow dashboard. The SDK requires an API key for all operations.
+### 4. Create a Recurring Subscription
 
 ```typescript
-import { QBitFlow } from 'qbitflow-sdk';
-
-// Simple initialization
-const client = new QBitFlow('your-api-key');
-
-// With custom configuration
-const client = new QBitFlow({
-	apiKey: 'your-api-key',
-	timeout: 30000, // 30 seconds
-	maxRetries: 3,
+const subscription = await client.subscriptions.createSession({
+	productId: 1,
+	frequency: { unit: 'months', value: 1 }, // Bill monthly
+	trialPeriod: { unit: 'days', value: 7 }, // 7-day trial (optional)
+	webhookUrl: 'https://yourapp.com/webhook',
+	customerUUID: 'customer-uuid',
 });
+
+console.log('Subscription link:', subscription.link);
+```
+
+### 5. Check Transaction Status
+
+```typescript
+import { TransactionType, TransactionStatusValue } from 'qbitflow-sdk';
+
+const status = await client.transactionStatus.get(
+	'transaction-uuid',
+	TransactionType.ONE_TIME_PAYMENT
+);
+
+if (status.status === TransactionStatusValue.COMPLETED) {
+	console.log('Payment completed! Transaction hash:', status.txHash);
+} else if (status.status === TransactionStatusValue.FAILED) {
+	console.log('Payment failed:', status.message);
+}
 ```
 
 ## Configuration
@@ -101,7 +172,7 @@ Create a payment session for a one-time purchase:
 // Using an existing product
 const payment = await client.oneTimePayments.createSession({
 	productId: 1,
-	customerUUID: 'customer-uuid',
+	customerUUID: 'customer-uuid', // optional
 	webhookUrl: 'https://yourapp.com/webhook',
 });
 
@@ -134,7 +205,7 @@ const payment = await client.oneTimePayments.createSession({
 **Available Placeholders:**
 
 - `{{UUID}}`: The session UUID
-- `{{TRANSACTION_TYPE}}`: The transaction type (e.g., "payment")
+- `{{TRANSACTION_TYPE}}`: The transaction type (e.g., "payment", "subscription", "payAsYouGo")
 
 ### Get Payment Session
 
@@ -339,32 +410,85 @@ enum TransactionStatusValue {
 }
 ```
 
-### Real-Time Status Updates (WebSocket)
+## Customer Management
 
-Monitor transaction status in real-time:
+### Create a Customer
 
 ```typescript
-await client.transactionStatus.connectAndHandleMessages(
-	'transaction-uuid',
-	TransactionType.ONE_TIME_PAYMENT,
-	(message) => {
-		if ('error' in message) {
-			console.error('Error:', message.error);
-		} else {
-			console.log('Status update:', message.status.status);
+const customerData: CreateCustomerDto = {
+	name: 'John',
+	lastName: 'Doe',
+	email: 'john@example.com',
+	phoneNumber: '+1234567890',
+	reference: 'CRM-12345',
+};
 
-			if (message.status.status === TransactionStatusValue.COMPLETED) {
-				console.log('Payment completed!');
-				// Handle successful payment
-			}
-		}
-	}
-);
+const customer = await client.customers.create(customerData);
+console.log('Customer created:', customer.uuid);
+```
+
+### Get Customer by UUID
+
+```typescript
+const customer = await client.customers.get('customer-uuid');
+console.log(`${customer.name} ${customer.lastName} - ${customer.email}`);
+```
+
+### Update Customer
+
+```typescript
+const updateData: UpdateCustomerDto = {
+	name: 'John',
+	lastName: 'Doe',
+	email: 'john.doe@example.com',
+	phoneNumber: '+9876543210',
+};
+
+const updatedCustomer = await client.customers.update('customer-uuid', updateData);
+```
+
+### Delete Customer
+
+```typescript
+const response = await client.customers.delete('customer-uuid');
+console.log(response.message);
+```
+
+## Product Management
+
+### Create a Product
+
+```typescript
+const productData: CreateProductDto = {
+	name: 'Premium Subscription',
+	description: 'Access to all premium features',
+	price: 29.99,
+	reference: 'PROD-PREMIUM',
+};
+
+const product = await client.products.create(productData);
+console.log('Product created: ID', product.id);
+```
+
+### Update Product
+
+```typescript
+const updateData: UpdateProductDto = {
+	name: 'Premium Plus',
+	description: 'Enhanced premium features',
+	price: 39.99,
+};
+
+const updatedProduct = await client.products.update(1, updateData);
+```
+
+### Delete Product
+
+```typescript
+const response = await client.products.delete(1);
 ```
 
 ## Webhook Handling
-
-Webhooks provide reliable notifications about payment status changes.
 
 ### Express.js Example
 
@@ -383,20 +507,13 @@ app.post('/webhook', (req, res) => {
 	console.log('Webhook received:', event.uuid);
 	console.log('Status:', event.status.status);
 
-	switch (event.status.status) {
-		case TransactionStatusValue.COMPLETED:
-			// Handle successful payment
-			console.log('Payment completed!');
-			// Update your database, fulfill order, etc.
-			break;
-
-		case TransactionStatusValue.FAILED:
-			// Handle failed payment
-			console.log('Payment failed');
-			break;
+	if (event.status.status === TransactionStatusValue.COMPLETED) {
+		console.log('Payment completed!');
+		// Handle successful payment
+	} else if (event.status.status === TransactionStatusValue.FAILED) {
+		console.log('Payment failed');
 	}
 
-	// Always respond with 200
 	res.status(200).json({ received: true });
 });
 
@@ -456,71 +573,6 @@ try {
 }
 ```
 
-### Error Classes
-
-- `QBitFlowError`: Base error class
-- `NotFoundException`: Resource not found (404)
-- `UnauthorizedException`: Invalid API key (401)
-- `ForbiddenException`: Access denied (403)
-- `ValidationException`: Invalid request (400)
-- `RateLimitException`: Rate limit exceeded (429)
-- `ServerException`: Server error (500+)
-- `NetworkException`: Network/connection error
-- `WebSocketException`: WebSocket connection error
-
-## TypeScript Support
-
-The SDK is written in TypeScript and includes complete type definitions.
-
-### Usage with TypeScript
-
-```typescript
-import { QBitFlow, CreateSessionDto, LinkResponse } from 'qbitflow-sdk';
-
-const client = new QBitFlow('api-key');
-
-const sessionData: CreateSessionDto = {
-	productId: 1,
-	customerUUID: 'uuid',
-	webhookUrl: 'https://example.com/webhook',
-};
-
-const payment: LinkResponse = await client.oneTimePayments.createSession(sessionData);
-```
-
-## Examples
-
-The `examples/` directory contains complete working examples:
-
-### Client Example
-
-See `examples/client.ts` for comprehensive examples of:
-
-- Creating payments
-- Creating subscriptions
-- Checking transaction status
-- Real-time status monitoring
-- Listing payments
-- Error handling
-
-### Server Example
-
-See `examples/server.ts` for an Express.js server demonstrating:
-
-- Webhook endpoint implementation
-- Success/cancel redirect handling
-- Transaction verification
-- Payment completion logic
-
-### Running Examples
-
-```bash
-cd examples
-npm install
-npm run client  # Run client examples
-npm run server  # Run webhook server
-```
-
 ## API Reference
 
 ### QBitFlow
@@ -542,13 +594,8 @@ new QBitFlow(config: QBitFlowConfig)
 - `apiKeys: ApiKeyRequests` - API key operations
 - `oneTimePayments: PaymentRequests` - One-time payment operations
 - `subscriptions: SubscriptionRequests` - Subscription operations
-- `payAsYouGo: PayAsYouGoRequests` - PAYG subscription operations
+- `payAsYouGo: PayAsYouGoRequests` - Pay-as-you-go operations
 - `transactionStatus: TransactionStatusRequests` - Transaction status operations
-
-#### Methods
-
-- `getApiKey(): string` - Get current API key
-- `getBaseUrl(): string` - Get current base URL
 
 ## Testing
 
@@ -565,34 +612,24 @@ npm run test:watch
 npm run test:coverage
 ```
 
-## Building
-
-Build the SDK from source:
-
-```bash
-# Install dependencies
-npm install
-
-# Build
-npm run build
-
-# The compiled code will be in the dist/ directory
-```
-
 ## License
 
-MPL-2.0 License - see LICENSE file for details
+This project is licensed under the MPL-2.0 License - see the [LICENSE](LICENSE) file for details.
 
 ## Support
 
-- 📧 Email: support@qbitflow.app
-- 🐛 Issues: [GitHub Issues](https://github.com/qbitflow/qbitflow-js-sdk/issues)
-- 📚 Documentation: [Official Docs](https://qbitflow.app/docs)
-      <!-- - 💬 Discord: [Join our community](https://discord.gg/qbitflow) -->
+- 📖 [Documentation](https://qbitflow.app/docs)
+- 📧 [Email Support](mailto:support@qbitflow.app)
+- 🐛 [Issue Tracker](https://github.com/qbitflow/qbitflow-python-sdk/issues)
+    <!-- -   💬 [Community Forum](https://community.qbitflow.app) -->
 
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for version history and updates.
+
+## Security
+
+For security issues, please email security@qbitflow.app instead of using the issue tracker.
 
 ---
 

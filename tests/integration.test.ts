@@ -152,13 +152,12 @@ describe('QBitFlow Integration Tests', () => {
 			const updatedEmail = `updated+${Math.random().toString(36).substring(7)}@example.com`;
 
 			const updateData: UpdateCustomerDto = {
-				uuid: created.uuid,
 				name: created.name,
 				lastName: created.lastName,
 				email: updatedEmail,
 				phoneNumber: '+9876543210',
 			};
-			const updated = await client.customers.update(updateData);
+			const updated = await client.customers.update(created.uuid, updateData);
 
 			expect(updated.uuid).toBe(created.uuid);
 			expect(updated.email).toBe(updatedEmail);

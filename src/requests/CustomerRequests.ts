@@ -72,8 +72,12 @@ export class CustomerRequests extends Request {
 	 * @param customerData The data to update
 	 * @returns The updated customer
 	 */
-	async update(customerData: UpdateCustomerDto): Promise<Customer> {
-		return this.putReq<Customer>(`${CustomerRequests.BASE_ROUTE}/`, customerData);
+	async update(customerUUID: string, customerData: UpdateCustomerDto): Promise<Customer> {
+		const data = {
+			...customerData,
+			uuid: customerUUID,
+		};
+		return this.putReq<Customer>(`${CustomerRequests.BASE_ROUTE}/`, data);
 	}
 
 	/**
