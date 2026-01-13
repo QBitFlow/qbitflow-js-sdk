@@ -1,5 +1,5 @@
 {
-	"name": "qbitflow-sdk-examples",
+	"name": "qbitflow-examples",
 	"version": "1.0.0",
 	"description": "Examples for QBitFlow SDK",
 	"private": true,

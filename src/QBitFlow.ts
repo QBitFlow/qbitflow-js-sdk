@@ -16,7 +16,7 @@ import { ApiKeyRequests } from './requests/ApiKeyRequests';
  *
  * @example
  * ```typescript
- * import { QBitFlow } from 'qbitflow-sdk';
+ * import { QBitFlow } from 'qbitflow';
  *
  * const client = new QBitFlow('<your-api-key>');
  *

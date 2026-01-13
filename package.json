@@ -1,5 +1,5 @@
 {
-	"name": "qbitflow-sdk",
+	"name": "qbitflow",
 	"version": "1.0.0",
 	"description": "Official JavaScript/TypeScript SDK for QBitFlow - Next Generation Crypto Payment Processing",
 	"main": "./dist/cjs/index.js",

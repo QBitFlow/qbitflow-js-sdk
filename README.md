@@ -1,6 +1,6 @@
 # QBitFlow JavaScript/TypeScript SDK
 
-[![npm version](https://i.ytimg.com/vi/LkHy0YWvpRI/mqdefault.jpg)](https://www.npmjs.com/package/qbitflow-sdk)
+[![npm version](https://i.ytimg.com/vi/LkHy0YWvpRI/mqdefault.jpg)](https://www.npmjs.com/package/qbitflow)
 [![License: MPL-2.0](https://upload.wikimedia.org/wikipedia/commons/thumb/9/95/Mozilla_Logo_2024.svg/1920px-Mozilla_Logo_2024.svg.png)](https://opensource.org/licenses/MPL-2.0)
 
 Official JavaScript/TypeScript SDK for [QBitFlow](https://qbitflow.app) - a comprehensive cryptocurrency payment processing platform that enables seamless integration of crypto payments, recurring subscriptions, and pay-as-you-go models into your applications.
@@ -82,13 +82,13 @@ Official JavaScript/TypeScript SDK for [QBitFlow](https://qbitflow.app) - a comp
 ## Installation
 
 ```bash
-npm install qbitflow-sdk
+npm install qbitflow
 ```
 
 Or using yarn:
 
 ```bash
-yarn add qbitflow-sdk
+yarn add qbitflow
 ```
 
 ## Quick Start
@@ -100,7 +100,7 @@ Sign up at [QBitFlow](https://qbitflow.app) and obtain your API key from the das
 ### 2. Initialize the Client
 
 ```typescript
-import { QBitFlow } from 'qbitflow-sdk';
+import { QBitFlow } from 'qbitflow';
 
 // Initialize the client
 const client = new QBitFlow('your-api-key');
@@ -139,7 +139,7 @@ console.log('Subscription link:', subscription.link);
 ### 5. Check Transaction Status
 
 ```typescript
-import { TransactionType, TransactionStatusValue } from 'qbitflow-sdk';
+import { TransactionType, TransactionStatusValue } from 'qbitflow';
 
 const status = await client.transactionStatus.get(
 	'transaction-uuid',
@@ -379,7 +379,7 @@ const response = await client.payAsYouGo.increaseUnitsCurrentPeriod('payg-uuid',
 Get the current status of a transaction:
 
 ```typescript
-import { TransactionType } from 'qbitflow-sdk';
+import { TransactionType } from 'qbitflow';
 
 const status = await client.transactionStatus.get(
 	'transaction-uuid',
@@ -518,7 +518,7 @@ const response = await client.products.delete(1);
 
 ```typescript
 import express from 'express';
-import { QBitFlow, SessionWebhookResponse, TransactionStatusValue } from 'qbitflow-sdk';
+import { QBitFlow, SessionWebhookResponse, TransactionStatusValue } from 'qbitflow';
 
 const app = express();
 const client = new QBitFlow('your-api-key');
@@ -576,7 +576,7 @@ import {
 	ValidationException,
 	NetworkException,
 	QBitFlowError,
-} from 'qbitflow-sdk';
+} from 'qbitflow';
 
 try {
 	const payment = await client.oneTimePayments.get('invalid-uuid');
