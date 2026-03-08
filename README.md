@@ -526,7 +526,7 @@ const qbitflowClient = new QBitFlow('your-api-key');
 app.use(express.json());
 
 app.post('/webhook', async (req, res) => {
-	// Extract the signature and timestamp headers for verification (if needed)
+	// Extract the signature and timestamp headers for verification
 	const signature = req.headers[qbitflowClient.webhooks.signatureHeader.toLowerCase()] as string;
 	const timestamp = req.headers[qbitflowClient.webhooks.timestampHeader.toLowerCase()] as string;
 
