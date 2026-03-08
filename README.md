@@ -521,11 +521,29 @@ import express from 'express';
 import { QBitFlow, SessionWebhookResponse, TransactionStatusValue } from 'qbitflow';
 
 const app = express();
-const client = new QBitFlow('your-api-key');
+const qbitflowClient = new QBitFlow('your-api-key');
 
 app.use(express.json());
 
-app.post('/webhook', (req, res) => {
+app.post('/webhook', async (req, res) => {
+	// Extract the signature and timestamp headers for verification (if needed)
+	const signature = req.headers[qbitflowClient.webhooks.signatureHeader.toLowerCase()] as string;
+	const timestamp = req.headers[qbitflowClient.webhooks.timestampHeader.toLowerCase()] as string;
+
+	if (!signature || !timestamp) {
+		console.warn('Missing signature or timestamp headers');
+		res.status(400).json({ error: 'Missing required headers' });
+		return;
+	}
+
+	// Verify the webhook signature
+	if (!(await qbitflowClient.webhooks.verify(req.body, signature, timestamp))) {
+		console.warn('Invalid webhook signature');
+		res.status(401).json({ error: 'Invalid signature' }); // Sending a >= 400 code will cause QBitFlow to retry the webhook, so only send this if you want to reject the webhook
+		return;
+	}
+
+	// Parse the payload as a SessionWebhookResponse and handle the event
 	const event = req.body as SessionWebhookResponse;
 
 	console.log('Webhook received:', event.uuid);

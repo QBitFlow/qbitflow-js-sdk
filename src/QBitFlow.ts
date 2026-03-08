@@ -10,6 +10,7 @@ import { CustomerRequests } from './requests/CustomerRequests';
 import { ProductRequests } from './requests/ProductRequests';
 import { UserRequests } from './requests/UserRequests';
 import { ApiKeyRequests } from './requests/ApiKeyRequests';
+import { WebhookRequests } from './requests/WebhookRequests';
 
 /**
  * Main QBitFlow SDK client
@@ -45,6 +46,9 @@ export class QBitFlow {
 
 	/** API key management operations */
 	public readonly apiKeys: ApiKeyRequests;
+
+	/** Webhook-related operations */
+	public readonly webhooks: WebhookRequests;
 
 	/**
 	 * One-time payment operations
@@ -119,6 +123,8 @@ export class QBitFlow {
 		this.users = new UserRequests(this.apiKey, this.baseUrl, this.timeout, this.maxRetries);
 
 		this.apiKeys = new ApiKeyRequests(this.apiKey, this.baseUrl, this.timeout, this.maxRetries);
+		this.webhooks = new WebhookRequests(this.apiKey, this.baseUrl, this.timeout, this.maxRetries);
+
 
 		this.oneTimePayments = new PaymentRequests(
 			this.apiKey,

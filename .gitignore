@@ -19,3 +19,5 @@ dist/
 .idea/
 *.swp
 *.swo
+
+test-internal/
