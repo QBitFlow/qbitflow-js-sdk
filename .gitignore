@@ -21,3 +21,5 @@ dist/
 *.swo
 
 test-internal/
+
+*.tgz
