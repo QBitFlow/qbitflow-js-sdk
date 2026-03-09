@@ -539,7 +539,7 @@ app.post('/webhook', async (req, res) => {
 	// Verify the webhook signature
 	if (!(await qbitflowClient.webhooks.verify(req.body, signature, timestamp))) {
 		console.warn('Invalid webhook signature');
-		res.status(401).json({ error: 'Invalid signature' }); // Sending a >= 400 code will cause QBitFlow to retry the webhook, so only send this if you want to reject the webhook
+		res.status(401).json({ error: 'Invalid signature' }); 
 		return;
 	}
 
