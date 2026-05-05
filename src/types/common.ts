@@ -65,6 +65,12 @@ export interface SuccessResponse {
 }
 
 /**
+ * Flexible metadata blob stored as JSONB on the server.
+ * Shape is application-defined — cast to your own type when consuming.
+ */
+export type PaymentMetadata = Record<string, unknown>;
+
+/**
  * Configuration options for the SDK
  */
 export interface QBitFlowConfig {

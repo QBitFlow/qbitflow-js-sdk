@@ -67,7 +67,8 @@ export class Request {
 		endpoint: string,
 		method: 'GET' | 'POST' | 'PUT' | 'DELETE',
 		data?: any,
-		params?: any
+		params?: any,
+		extraConfig?: Partial<AxiosRequestConfig>
 	): Promise<T> {
 		// Ensure endpoint starts with /
 		if (!endpoint.startsWith('/')) {
@@ -79,6 +80,7 @@ export class Request {
 			url: endpoint,
 			data,
 			params,
+			...extraConfig,
 		};
 
 		let lastError: Error | null = null;
@@ -199,8 +201,12 @@ export class Request {
 	 * @param params - Query parameters
 	 * @returns Response data
 	 */
-	protected async getReq<T = any>(endpoint: string, params?: any): Promise<T> {
-		return this.makeRequest<T>(endpoint, 'GET', undefined, params);
+	protected async getReq<T = any>(
+		endpoint: string,
+		params?: any,
+		extraConfig?: Partial<AxiosRequestConfig>
+	): Promise<T> {
+		return this.makeRequest<T>(endpoint, 'GET', undefined, params, extraConfig);
 	}
 
 	/**

@@ -1,8 +1,5 @@
 import { Currency } from './currency';
-
-/**
- * Payment and transaction types
- */
+import { PaymentMetadata } from './common';
 
 /**
  * One-time payment information
@@ -22,6 +19,8 @@ export interface Payment {
 	description: string;
 	/** Amount paid in USD */
 	amount: number;
+	/** Amount in the smallest units of the payment currency (e.g. satoshis for BTC) */
+	amountMinUnits: string;
 	/** Currency ID used for payment */
 	currencyId: number;
 	/** Currency details */
@@ -34,14 +33,46 @@ export interface Payment {
 	transactionHash: string;
 	/** Customer UUID */
 	customerUUID: string;
+	/** Optional arbitrary metadata attached to the payment */
+	metadata?: PaymentMetadata;
 }
 
 /**
- * Combined payment information from one-time and subscription payments
+ * Combined entry from one-time payments and subscription billing history
  */
-export interface CombinedPayment extends Payment {
-	/** Source of the payment (e.g., "payment" or "subscription_history") */
-	source: string;
-	/** Subscription UUID (if this is a subscription payment) */
+export interface CombinedPayment {
+	/** Where this entry originated */
+	source: 'payment' | 'subscription_history';
+	/** Unique identifier */
+	uuid: string;
+	/** Timestamp when the payment was created */
+	createdAt: string;
+	/** Sender address */
+	from: string;
+	/** Receiver address */
+	to: string;
+	/** Product name */
+	name: string;
+	/** Product description */
+	description: string;
+	/** Amount paid in USD */
+	amount: number;
+	/** Amount in the smallest units of the payment currency */
+	amountMinUnits: string;
+	/** Currency ID */
+	currencyId: number;
+	/** Currency details */
+	currency: Currency;
+	/** Product ID (if applicable, may be null) */
+	productId?: number | null;
+	/** Blockchain transaction hash */
+	transactionHash: string;
+	/** Customer UUID */
+	customerUUID: string;
+	/** Subscription UUID (only present for subscription_history entries) */
 	subscriptionUUID?: string;
+	/** Whether this is a test payment */
+	test: boolean;
+	/** Optional arbitrary metadata */
+	metadata?: PaymentMetadata;
 }

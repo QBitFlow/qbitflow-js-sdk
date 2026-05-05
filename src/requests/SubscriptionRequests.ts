@@ -1,17 +1,16 @@
 import { Request } from './Request';
 import { SessionRequests } from './SessionRequests';
 import {
-	CreateSessionDto,
+	CreateSubscriptionSessionDto,
 	LinkResponse,
-	Session,
-	Duration,
+	SubscriptionSession,
 	Subscription,
 	SubscriptionHistory,
 	SuccessResponse,
+	StatusLinkResponse,
 } from '../types';
 import { validateCreateSession } from '../utils';
 import { ValidationException } from '../exceptions';
-import { StatusLinkResponse } from '../types/session';
 
 /**
  * Subscription payment requests
@@ -26,48 +25,27 @@ export class SubscriptionRequests extends Request {
 	}
 
 	/**
-	 * Create a new subscription session
+	 * Create a new subscription session.
+	 * Provide either a productId or full product details (productName + description + price).
+	 *
 	 * @param options - Subscription session options
 	 * @returns Payment link response with UUID and link
 	 *
 	 * @example
 	 * ```typescript
-	 * const subscription = await client.subscriptions.createSession({
+	 * const sub = await client.subscriptions.createSession({
 	 *   productId: 1,
 	 *   frequency: { unit: 'months', value: 1 },
 	 *   trialPeriod: { unit: 'days', value: 7 },
 	 *   webhookUrl: 'https://example.com/webhook',
 	 *   customerUUID: 'customer-uuid'
 	 * });
-	 * console.log(subscription.link);
+	 * console.log(sub.link);
 	 * ```
 	 */
-	async createSession(options: {
-		productId: number;
-		frequency: Duration;
-		trialPeriod?: Duration;
-		minPeriods?: number;
-		successUrl?: string;
-		cancelUrl?: string;
-		webhookUrl?: string;
-		customerUUID?: string;
-	}): Promise<LinkResponse> {
-		const sessionData: CreateSessionDto = {
-			productId: options.productId,
-			successUrl: options.successUrl,
-			cancelUrl: options.cancelUrl,
-			webhookUrl: options.webhookUrl,
-			customerUUID: options.customerUUID,
-			options: {
-				subscriptionType: 'subscription',
-				frequency: options.frequency,
-				trialPeriod: options.trialPeriod,
-				minPeriods: options.minPeriods,
-			},
-		};
-
-		validateCreateSession(sessionData);
-		return this.sessionRequests.create(sessionData);
+	async createSession(options: CreateSubscriptionSessionDto): Promise<LinkResponse> {
+		validateCreateSession(options);
+		return this.sessionRequests.createForSubscription(options);
 	}
 
 	/**
@@ -75,8 +53,8 @@ export class SubscriptionRequests extends Request {
 	 * @param sessionUuid - Session UUID
 	 * @returns Session details
 	 */
-	async getSession(sessionUuid: string): Promise<Session> {
-		return this.sessionRequests.get(sessionUuid);
+	async getSession(sessionUuid: string): Promise<SubscriptionSession> {
+		return this.sessionRequests.get<SubscriptionSession>(sessionUuid);
 	}
 
 	/**
@@ -86,41 +64,39 @@ export class SubscriptionRequests extends Request {
 	 *
 	 * @example
 	 * ```typescript
-	 * const subscription = await client.subscriptions.get('subscription-uuid');
-	 * console.log(subscription.status, subscription.nextBillingDate);
+	 * const sub = await client.subscriptions.get('subscription-uuid');
+	 * console.log(sub.subscriptionStatus, sub.nextBillingDate);
 	 * ```
 	 */
 	async get(subscriptionUUID: string): Promise<Subscription> {
-		const endpoint = `${SubscriptionRequests.BASE_ROUTE}/${subscriptionUUID}`;
-		return this.getReq<Subscription>(endpoint);
+		return this.getReq<Subscription>(`${SubscriptionRequests.BASE_ROUTE}/${subscriptionUUID}`);
 	}
 
 	/**
 	 * Get subscription payment history
 	 * @param subscriptionUUID - Subscription UUID
-	 * @returns List of subscription payment history records
+	 * @returns List of subscription billing history records
 	 *
 	 * @example
 	 * ```typescript
 	 * const history = await client.subscriptions.getPaymentHistory('subscription-uuid');
-	 * history.forEach(record => {
-	 *   console.log(record.uuid, record.amount, record.createdAt);
-	 * });
+	 * history.forEach(r => console.log(r.uuid, r.amount, r.createdAt));
 	 * ```
 	 */
 	async getPaymentHistory(subscriptionUUID: string): Promise<SubscriptionHistory[]> {
 		if (!subscriptionUUID) {
 			throw new ValidationException('Subscription UUID is required');
 		}
-
 		return this.getReq<SubscriptionHistory[]>(
 			`${SubscriptionRequests.BASE_ROUTE}/history/${subscriptionUUID}`
 		);
 	}
 
 	/**
-	 * Force cancel a subscription immediately.
-	 * Warning: Use only when absolutely necessary
+	 * Force-cancel a subscription immediately.
+	 * The normal cancellation flow requires the subscriber to sign a message;
+	 * this bypasses that for cases such as suspicious activity or admin-initiated cancellations.
+	 *
 	 * @param subscriptionUUID - Subscription UUID
 	 * @returns Success response
 	 */
@@ -128,28 +104,24 @@ export class SubscriptionRequests extends Request {
 		if (!subscriptionUUID) {
 			throw new ValidationException('Subscription UUID is required');
 		}
-
 		return this.getReq<SuccessResponse>(
-			`${SubscriptionRequests.BASE_ROUTE}/processing/force-cancel/${subscriptionUUID}`,
-			{}
+			`${SubscriptionRequests.BASE_ROUTE}/processing/force-cancel/${subscriptionUUID}`
 		);
 	}
 
 	/**
-	 * Execute a test billing for a subscription (test mode only)
-	 * This simulates a billing cycle for testing purposes.
+	 * Manually trigger a billing cycle for a test-mode subscription.
+	 * In production, billing is executed automatically on schedule.
 	 *
 	 * @param subscriptionUUID - Subscription UUID
-	 * @returns Status response
+	 * @returns Status link response
 	 */
 	async executeTestBilling(subscriptionUUID: string): Promise<StatusLinkResponse> {
 		if (!subscriptionUUID) {
 			throw new ValidationException('Subscription UUID is required');
 		}
-
 		return this.getReq<StatusLinkResponse>(
-			`${SubscriptionRequests.BASE_ROUTE}/processing/execute-billing/${subscriptionUUID}`,
-			{}
+			`${SubscriptionRequests.BASE_ROUTE}/processing/execute-billing/${subscriptionUUID}`
 		);
 	}
 }

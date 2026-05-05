@@ -3,7 +3,7 @@
  * This file shows how to create payment sessions, subscriptions, and PAYG subscriptions
  */
 
-import { QBitFlow, TransactionType, TransactionStatusValue } from '../src';
+import { QBitFlow, TransactionStatusValue, TransactionType } from '../src';
 
 // Your webhook URL where you'll receive payment notifications
 const MY_URL = 'http://localhost:8001';
@@ -21,14 +21,13 @@ async function createOneTimePaymentWithWebhook() {
 	try {
 		const result = await client.oneTimePayments.createSession({
 			productId: 1,
-			webhookUrl: `${MY_URL}/webhook`,
+			webhookUrl: `${ MY_URL }/webhook`,
 			customerUUID: '01997c89-d0e9-7c9a-9886-fe7709919695',
 		});
 
 		console.log('Payment session created:');
 		console.log('UUID:', result.uuid);
 		console.log('Payment Link:', result.link);
-		console.log('Expires At:', result.expiresAt);
 	} catch (error) {
 		console.error('Error creating payment:', error);
 	}
@@ -46,8 +45,8 @@ async function createOneTimePaymentWithRedirects() {
 	try {
 		const result = await client.oneTimePayments.createSession({
 			productId: 1,
-			successUrl: `${MY_URL}/success?uuid={{UUID}}&transactionType={{TRANSACTION_TYPE}}`,
-			cancelUrl: `${MY_URL}/cancel`,
+			successUrl: `${ MY_URL }/success?uuid={{UUID}}&transactionType={{TRANSACTION_TYPE}}`,
+			cancelUrl: `${ MY_URL }/cancel`,
 			customerUUID: '01997c89-d0e9-7c9a-9886-fe7709919695',
 		});
 
@@ -71,7 +70,7 @@ async function createSubscriptionSession() {
 			productId: 1,
 			frequency: { unit: 'months', value: 1 }, // Bill monthly
 			trialPeriod: { unit: 'days', value: 7 }, // 7-day trial (optional)
-			webhookUrl: `${MY_URL}/webhook`,
+			webhookUrl: `${ MY_URL }/webhook`,
 			customerUUID: '01997c89-d0e9-7c9a-9886-fe7709919695',
 		});
 
@@ -87,25 +86,25 @@ async function createSubscriptionSession() {
  * Example 4: Create a pay-as-you-go subscription session
  * You can provide a webhook URL to receive updates about the transaction status
  */
-async function createPayAsYouGoSession() {
-	console.log('\n=== Creating pay-as-you-go subscription session ===');
+// async function createPayAsYouGoSession() {
+// 	console.log('\n=== Creating pay-as-you-go subscription session ===');
 
-	try {
-		const result = await client.payAsYouGo.createSession({
-			productId: 1,
-			frequency: { unit: 'months', value: 1 }, // Bill monthly
-			freeCredits: 100, // Start with 100 free credits (optional)
-			webhookUrl: `${MY_URL}/webhook`,
-			customerUUID: '01997c89-d0e9-7c9a-9886-fe7709919695',
-		});
+// 	try {
+// 		const result = await client.payAsYouGo.createSession({
+// 			productId: 1,
+// 			frequency: { unit: 'months', value: 1 }, // Bill monthly
+// 			freeCredits: 100, // Start with 100 free credits (optional)
+// 			webhookUrl: `${MY_URL}/webhook`,
+// 			customerUUID: '01997c89-d0e9-7c9a-9886-fe7709919695',
+// 		});
 
-		console.log('Pay-as-you-go session created:');
-		console.log('UUID:', result.uuid);
-		console.log('Payment Link:', result.link);
-	} catch (error) {
-		console.error('Error creating PAYG subscription:', error);
-	}
-}
+// 		console.log('Pay-as-you-go session created:');
+// 		console.log('UUID:', result.uuid);
+// 		console.log('Payment Link:', result.link);
+// 	} catch (error) {
+// 		console.error('Error creating PAYG subscription:', error);
+// 	}
+// }
 
 /**
  * Example 5: Check transaction status
@@ -180,11 +179,11 @@ async function listPayments() {
 	try {
 		const result = await client.oneTimePayments.getAll({ limit: 10 });
 
-		console.log(`Found ${result.items.length} payments`);
+		console.log(`Found ${ result.items.length } payments`);
 		console.log('Has more:', result.hasMore);
 
 		result.items.forEach((payment, index) => {
-			console.log(`\nPayment ${index + 1}:`);
+			console.log(`\nPayment ${ index + 1 }:`);
 			console.log('UUID:', payment.uuid);
 			console.log('Amount:', payment.amount, 'USD');
 			console.log('Created At:', payment.createdAt);
@@ -198,7 +197,7 @@ async function listPayments() {
 				limit: 10,
 				cursor: result.nextCursor,
 			});
-			console.log(`Next page has ${nextPage.items.length} payments`);
+			console.log(`Next page has ${ nextPage.items.length } payments`);
 		}
 	} catch (error) {
 		console.error('Error listing payments:', error);
@@ -235,7 +234,7 @@ async function main() {
 	await createOneTimePaymentWithWebhook();
 	await createOneTimePaymentWithRedirects();
 	await createSubscriptionSession();
-	await createPayAsYouGoSession();
+	// await createPayAsYouGoSession();
 
 	// Replace with actual UUIDs to test:
 	// await checkTransactionStatus('transaction-uuid-here');

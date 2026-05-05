@@ -1,7 +1,7 @@
-import { Request } from './Request';
-import { TransactionStatus, TransactionType, StatusResponseError, StatusResponse } from '../types';
 import WebSocket from 'ws';
-import { WebSocketException, NotFoundException } from '../exceptions';
+import { NotFoundException, WebSocketException } from '../exceptions';
+import { StatusResponse, StatusResponseError, TransactionStatus, TransactionType } from '../types';
+import { Request } from './Request';
 
 /**
  * Transaction status requests with WebSocket support
@@ -29,8 +29,8 @@ export class TransactionStatusRequests extends Request {
 		transactionType: TransactionType
 	): Promise<TransactionStatus> {
 		const params = {
-			transactionUUID: transactionUuid,
-			transactionStatusType: transactionType,
+			txUUID: transactionUuid,
+			txType: transactionType,
 		};
 
 		return this.getReq<TransactionStatus>(TransactionStatusRequests.BASE_ROUTE, params);
@@ -68,8 +68,8 @@ export class TransactionStatusRequests extends Request {
 			const wsBaseUrl = this.baseUrl
 				.replace('http://', 'ws://')
 				.replace('https://', 'wss://');
-			const endpoint = `${TransactionStatusRequests.BASE_ROUTE}/ws?transactionUUID=${transactionUuid}&transactionStatusType=${transactionType}`;
-			const wsUrl = `${wsBaseUrl}${endpoint}`;
+			const endpoint = `${ TransactionStatusRequests.BASE_ROUTE }/ws?txUUID=${ transactionUuid }&txType=${ transactionType }`;
+			const wsUrl = `${ wsBaseUrl }${ endpoint }`;
 
 			const ws = new WebSocket(wsUrl, {
 				headers: {
@@ -99,7 +99,7 @@ export class TransactionStatusRequests extends Request {
 							ws.close();
 							reject(
 								new NotFoundException(
-									`Transaction with UUID ${transactionUuid} not found. Perhaps the processing has not started yet.`
+									`Transaction with UUID ${ transactionUuid } not found. Perhaps the processing has not started yet.`
 								)
 							);
 							return;
@@ -122,11 +122,11 @@ export class TransactionStatusRequests extends Request {
 
 			ws.on('error', (error) => {
 				console.error('WebSocket error:', error);
-				reject(new WebSocketException(`WebSocket connection error: ${error.message}`));
+				reject(new WebSocketException(`WebSocket connection error: ${ error.message }`));
 			});
 
 			ws.on('close', (code, reason) => {
-				console.log(`WebSocket connection closed (code: ${code}, reason: ${reason})`);
+				console.log(`WebSocket connection closed (code: ${ code }, reason: ${ reason })`);
 
 				// Attempt to reconnect if it wasn't a clean close
 				if (code !== 1000) {

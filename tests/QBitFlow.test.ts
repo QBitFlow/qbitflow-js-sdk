@@ -42,15 +42,26 @@ describe('QBitFlow', () => {
 	describe('Request handlers', () => {
 		it('should initialize all request handlers', () => {
 			const client = new QBitFlow('test-api-key');
+
+			// Core handlers
 			expect(client.customers).toBeDefined();
 			expect(client.products).toBeDefined();
 			expect(client.users).toBeDefined();
 			expect(client.apiKeys).toBeDefined();
+			expect(client.webhooks).toBeDefined();
 
+			// Payment handlers
 			expect(client.oneTimePayments).toBeDefined();
 			expect(client.subscriptions).toBeDefined();
-			expect(client.payAsYouGo).toBeDefined();
 			expect(client.transactionStatus).toBeDefined();
+
+			// New handlers
+			expect(client.refunds).toBeDefined();
+			expect(client.accounting).toBeDefined();
+			expect(client.claims).toBeDefined();
+
+			// PAYG is temporarily disabled
+			// expect(client.payAsYouGo).toBeDefined();
 		});
 	});
 });

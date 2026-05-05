@@ -1,29 +1,41 @@
 import { Request } from './Request';
-import { CreateSessionDto, LinkResponse, Session } from '../types';
+import { CreatePaymentSessionDto, CreateSubscriptionSessionDto, LinkResponse, SessionCheckout } from '../types';
 
 /**
- * Session management requests
+ * Internal session management — used by PaymentRequests and SubscriptionRequests
  */
 export class SessionRequests extends Request {
 	private static readonly BASE_ROUTE = '/transaction/session-checkout';
 
 	/**
-	 * Create a new payment session
-	 * @param sessionData - Session creation data
+	 * Create a one-time payment session
+	 * @param data - Payment session data
 	 * @returns Payment link response
 	 */
-	async create(sessionData: CreateSessionDto): Promise<LinkResponse> {
-		return this.postReq<LinkResponse>(`${SessionRequests.BASE_ROUTE}/`, sessionData);
+	async createForPayment(data: CreatePaymentSessionDto): Promise<LinkResponse> {
+		return this.postReq<LinkResponse>(`${SessionRequests.BASE_ROUTE}/new/payment`, data);
+	}
+
+	/**
+	 * Create a subscription session
+	 * @param data - Subscription session data
+	 * @returns Payment link response
+	 */
+	async createForSubscription(data: CreateSubscriptionSessionDto): Promise<LinkResponse> {
+		return this.postReq<LinkResponse>(`${SessionRequests.BASE_ROUTE}/new/subscription`, data);
 	}
 
 	/**
 	 * Get session details by UUID
 	 * @param sessionUuid - Session UUID
+	 * @param closeToExpireError - Whether to return an error if the session is close to expiration (default: true)
 	 * @returns Session details
 	 */
-	async get(sessionUuid: string): Promise<Session> {
-		return this.getReq<Session>(
-			`${SessionRequests.BASE_ROUTE}/${sessionUuid}?closeToExpireError=false`
-		);
+	async get<T extends SessionCheckout = SessionCheckout>(
+		sessionUuid: string,
+		closeToExpireError?: boolean
+	): Promise<T> {
+		const params = closeToExpireError !== undefined ? { closeToExpireError } : undefined;
+		return this.getReq<T>(`${SessionRequests.BASE_ROUTE}/${sessionUuid}`, params);
 	}
 }

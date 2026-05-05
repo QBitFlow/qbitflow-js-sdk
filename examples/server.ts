@@ -38,7 +38,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
 	// Verify the webhook signature
 	if (!(await qbitflowClient.webhooks.verify(req.body, signature, timestamp))) {
 		console.warn('Invalid webhook signature');
-		res.status(401).json({ error: 'Invalid signature' }); 
+		res.status(401).json({ error: 'Invalid signature' });
 		return;
 	}
 
@@ -48,7 +48,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
 
 		console.log('Session UUID:', event.uuid);
 		console.log('Transaction Status:', event.status.status);
-		console.log('Transaction Type:', event.status.type);
+		console.log('Transaction Type:', event.txType);
 
 		// Log session details
 		console.log('\nSession Details:');
@@ -168,15 +168,15 @@ app.get('/success', async (req: Request, res: Response) => {
             <p>Thank you for your payment.</p>
             <div class="details">
               <h3>Order Details</h3>
-              <p><strong>Product:</strong> ${session.productName}</p>
-              <p><strong>Amount:</strong> $${session.price}</p>
-              <p><strong>Transaction ID:</strong> ${uuid}</p>
+              <p><strong>Product:</strong> ${ session.productName }</p>
+              <p><strong>Amount:</strong> $${ session.price }</p>
+              <p><strong>Transaction ID:</strong> ${ uuid }</p>
             </div>
           </body>
         </html>
       `);
 		} else {
-			console.log(`Transaction status is ${transactionStatus.status}, not completed yet.`);
+			console.log(`Transaction status is ${ transactionStatus.status }, not completed yet.`);
 
 			res.send(`
         <!DOCTYPE html>
@@ -194,7 +194,7 @@ app.get('/success', async (req: Request, res: Response) => {
           </head>
           <body>
             <h1>Payment Processing</h1>
-            <p>Your payment is being processed. Current status: ${transactionStatus.status}</p>
+            <p>Your payment is being processed. Current status: ${ transactionStatus.status }</p>
             <p>You will receive a confirmation email once the payment is complete.</p>
           </body>
         </html>
@@ -288,8 +288,8 @@ function handleFailedPayment(event: SessionWebhookResponse) {
 
 // Start the server
 app.listen(PORT, () => {
-	console.log(`\n🚀 Webhook server is running on http://localhost:${PORT}`);
-	console.log(`\nWebhook endpoint: http://localhost:${PORT}/webhook`);
-	console.log(`Success endpoint: http://localhost:${PORT}/success`);
-	console.log(`Cancel endpoint: http://localhost:${PORT}/cancel\n`);
+	console.log(`\n🚀 Webhook server is running on http://localhost:${ PORT }`);
+	console.log(`\nWebhook endpoint: http://localhost:${ PORT }/webhook`);
+	console.log(`Success endpoint: http://localhost:${ PORT }/success`);
+	console.log(`Cancel endpoint: http://localhost:${ PORT }/cancel\n`);
 });

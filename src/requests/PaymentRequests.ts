@@ -1,15 +1,16 @@
 import { Request } from './Request';
 import { SessionRequests } from './SessionRequests';
 import {
-	CreateSessionDto,
+	CreatePaymentSessionDto,
 	LinkResponse,
-	Session,
+	OneTimePaymentSession,
 	Payment,
 	CombinedPayment,
 	CursorData,
 	CursorDataResponse,
 	getCursorData,
 } from '../types';
+import { Customer } from '../types/customer';
 import { cursorQueryBuilder, validateCreateSession } from '../utils';
 
 /**
@@ -25,8 +26,8 @@ export class PaymentRequests extends Request {
 	}
 
 	/**
-	 * Create a new one-time payment session
-	 * You must provide either a productId or full product details.
+	 * Create a new one-time payment session.
+	 * Provide either a productId or full product details (productName + description + price).
 	 *
 	 * @param options - Payment session options
 	 * @returns Payment link response with UUID and link
@@ -36,34 +37,14 @@ export class PaymentRequests extends Request {
 	 * const payment = await client.oneTimePayments.createSession({
 	 *   productId: 1,
 	 *   webhookUrl: 'https://example.com/webhook',
-	 *   customerUUID: '01997c89-d0e9-7c9a-9886-fe7709919695'
+	 *   customerUUID: 'customer-uuid'
 	 * });
-	 * console.log(payment.link); // Send this link to customer
+	 * console.log(payment.link); // Send this link to the customer
 	 * ```
 	 */
-	async createSession(options: {
-		productId?: number;
-		productName?: string;
-		description?: string;
-		price?: number;
-		successUrl?: string;
-		cancelUrl?: string;
-		webhookUrl?: string;
-		customerUUID?: string;
-	}): Promise<LinkResponse> {
-		const sessionData: CreateSessionDto = {
-			productId: options.productId,
-			productName: options.productName,
-			description: options.description,
-			price: options.price,
-			successUrl: options.successUrl,
-			cancelUrl: options.cancelUrl,
-			webhookUrl: options.webhookUrl,
-			customerUUID: options.customerUUID,
-		};
-
-		validateCreateSession(sessionData);
-		return this.sessionRequests.create(sessionData);
+	async createSession(options: CreatePaymentSessionDto): Promise<LinkResponse> {
+		validateCreateSession(options);
+		return this.sessionRequests.createForPayment(options);
 	}
 
 	/**
@@ -77,8 +58,8 @@ export class PaymentRequests extends Request {
 	 * console.log(session.productName, session.price);
 	 * ```
 	 */
-	async getSession(sessionUUID: string): Promise<Session> {
-		return this.sessionRequests.get(sessionUUID);
+	async getSession(sessionUUID: string): Promise<OneTimePaymentSession> {
+		return this.sessionRequests.get<OneTimePaymentSession>(sessionUUID);
 	}
 
 	/**
@@ -93,52 +74,40 @@ export class PaymentRequests extends Request {
 	 * ```
 	 */
 	async get(paymentUUID: string): Promise<Payment> {
-		const endpoint = `${PaymentRequests.BASE_ROUTE}/payment/${paymentUUID}`;
-		return this.getReq<Payment>(endpoint);
+		return this.getReq<Payment>(`${PaymentRequests.BASE_ROUTE}/payment/${paymentUUID}`);
 	}
 
 	/**
-	 * Get all one-time payments with pagination
+	 * Get all one-time payments with cursor-based pagination
 	 * @param options - Pagination options
-	 * @returns Cursor-based paginated payment list
+	 * @returns Paginated payment list
 	 *
 	 * @example
 	 * ```typescript
 	 * const result = await client.oneTimePayments.getAll({ limit: 10 });
-	 * console.log(result.data); // Array of payments
-	 * if (result.hasMore) {
-	 *   const nextPage = await client.oneTimePayments.getAll({
-	 *     limit: 10,
-	 *     cursor: result.nextCursor
-	 *   });
+	 * if (result.hasMore()) {
+	 *   const next = await client.oneTimePayments.getAll({ limit: 10, cursor: result.nextCursor });
 	 * }
 	 * ```
 	 */
-	async getAll(options?: {
-		limit?: number;
-		cursor?: string | null;
-	}): Promise<CursorData<Payment>> {
+	async getAll(options?: { limit?: number; cursor?: string | null }): Promise<CursorData<Payment>> {
 		const params = cursorQueryBuilder(options?.limit, options?.cursor);
-
-		const partialCursor = await this.getReq<CursorDataResponse<Payment>>(
+		const partial = await this.getReq<CursorDataResponse<Payment>>(
 			`${PaymentRequests.BASE_ROUTE}/payments`,
 			params
 		);
-
-		return getCursorData(partialCursor);
+		return getCursorData(partial);
 	}
 
 	/**
-	 * Get all combined payments (one-time and subscription payments)
+	 * Get all payments (one-time and subscription billings) combined, with cursor-based pagination
 	 * @param options - Pagination options
-	 * @returns Cursor-based paginated combined payment list
+	 * @returns Paginated combined payment list
 	 *
 	 * @example
 	 * ```typescript
 	 * const result = await client.oneTimePayments.getAllCombined({ limit: 20 });
-	 * result.data.forEach(payment => {
-	 *   console.log(payment.source, payment.amount);
-	 * });
+	 * result.items.forEach(p => console.log(p.source, p.amount));
 	 * ```
 	 */
 	async getAllCombined(options?: {
@@ -146,12 +115,25 @@ export class PaymentRequests extends Request {
 		cursor?: string | null;
 	}): Promise<CursorData<CombinedPayment>> {
 		const params = cursorQueryBuilder(options?.limit, options?.cursor);
-
-		const partialCursor = await this.getReq<CursorData<CombinedPayment>>(
+		const partial = await this.getReq<CursorDataResponse<CombinedPayment>>(
 			`${PaymentRequests.BASE_ROUTE}/payments/combined`,
 			params
 		);
+		return getCursorData(partial);
+	}
 
-		return getCursorData(partialCursor);
+	/**
+	 * Get the customer associated with a transaction
+	 * @param transactionUUID - Transaction UUID
+	 * @returns Customer information
+	 *
+	 * @example
+	 * ```typescript
+	 * const customer = await client.oneTimePayments.getCustomerForTransaction('tx-uuid');
+	 * console.log(customer.email);
+	 * ```
+	 */
+	async getCustomerForTransaction(transactionUUID: string): Promise<Customer> {
+		return this.getReq<Customer>(`${PaymentRequests.BASE_ROUTE}/customer/${transactionUUID}`);
 	}
 }

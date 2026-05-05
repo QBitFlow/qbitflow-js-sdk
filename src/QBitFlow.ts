@@ -3,8 +3,10 @@ import { DEFAULT_BASE_URL, DEFAULT_TIMEOUT, DEFAULT_MAX_RETRIES } from './config
 import {
 	PaymentRequests,
 	SubscriptionRequests,
-	PayAsYouGoRequests,
 	TransactionStatusRequests,
+	RefundRequests,
+	AccountingRequests,
+	ClaimRequests,
 } from './requests';
 import { CustomerRequests } from './requests/CustomerRequests';
 import { ProductRequests } from './requests/ProductRequests';
@@ -21,11 +23,18 @@ import { WebhookRequests } from './requests/WebhookRequests';
  *
  * const client = new QBitFlow('<your-api-key>');
  *
- * // Create a payment
+ * // Create a one-time payment
  * const payment = await client.oneTimePayments.createSession({
  *   productId: 1,
  *   customerUUID: 'customer-uuid',
  *   webhookUrl: 'https://example.com/webhook'
+ * });
+ *
+ * // Create a subscription
+ * const sub = await client.subscriptions.createSession({
+ *   productId: 1,
+ *   frequency: { value: 1, unit: 'months' },
+ *   customerUUID: 'customer-uuid'
  * });
  * ```
  */
@@ -50,25 +59,26 @@ export class QBitFlow {
 	/** Webhook-related operations */
 	public readonly webhooks: WebhookRequests;
 
-	/**
-	 * One-time payment operations
-	 */
+	/** One-time payment operations */
 	public readonly oneTimePayments: PaymentRequests;
 
-	/**
-	 * Subscription payment operations
-	 */
+	/** Subscription payment operations */
 	public readonly subscriptions: SubscriptionRequests;
 
-	/**
-	 * Pay-as-you-go subscription operations
-	 */
-	public readonly payAsYouGo: PayAsYouGoRequests;
+	// Pay-as-you-go subscriptions are temporarily disabled — will be re-enabled in a future release
+	// public readonly payAsYouGo: PayAsYouGoRequests;
 
-	/**
-	 * Transaction status operations
-	 */
+	/** Transaction status operations */
 	public readonly transactionStatus: TransactionStatusRequests;
+
+	/** Refund operations */
+	public readonly refunds: RefundRequests;
+
+	/** Accounting export operations */
+	public readonly accounting: AccountingRequests;
+
+	/** Account claim operations */
+	public readonly claims: ClaimRequests;
 
 	/**
 	 * Create a new QBitFlow client instance
@@ -100,12 +110,10 @@ export class QBitFlow {
 			this.maxRetries = apiKeyOrConfig.maxRetries || DEFAULT_MAX_RETRIES;
 		}
 
-		// Validate API key
 		if (!this.apiKey) {
 			throw new Error('API key is required');
 		}
 
-		// Initialize request handlers
 		this.customers = new CustomerRequests(
 			this.apiKey,
 			this.baseUrl,
@@ -125,7 +133,6 @@ export class QBitFlow {
 		this.apiKeys = new ApiKeyRequests(this.apiKey, this.baseUrl, this.timeout, this.maxRetries);
 		this.webhooks = new WebhookRequests(this.apiKey, this.baseUrl, this.timeout, this.maxRetries);
 
-
 		this.oneTimePayments = new PaymentRequests(
 			this.apiKey,
 			this.baseUrl,
@@ -140,12 +147,7 @@ export class QBitFlow {
 			this.maxRetries
 		);
 
-		this.payAsYouGo = new PayAsYouGoRequests(
-			this.apiKey,
-			this.baseUrl,
-			this.timeout,
-			this.maxRetries
-		);
+		// this.payAsYouGo = new PayAsYouGoRequests(this.apiKey, this.baseUrl, this.timeout, this.maxRetries);
 
 		this.transactionStatus = new TransactionStatusRequests(
 			this.apiKey,
@@ -153,6 +155,17 @@ export class QBitFlow {
 			this.timeout,
 			this.maxRetries
 		);
+
+		this.refunds = new RefundRequests(this.apiKey, this.baseUrl, this.timeout, this.maxRetries);
+
+		this.accounting = new AccountingRequests(
+			this.apiKey,
+			this.baseUrl,
+			this.timeout,
+			this.maxRetries
+		);
+
+		this.claims = new ClaimRequests(this.apiKey, this.baseUrl, this.timeout, this.maxRetries);
 	}
 
 	/**

@@ -1,11 +1,8 @@
 import { Currency } from './currency';
+import { PaymentMetadata } from './common';
 
 /**
- * Subscription types and interfaces
- */
-
-/**
- * Subscription status values. Enumeration of possible subscription states.
+ * Subscription status values
  */
 export enum SubscriptionStatus {
 	/** Subscription is active and billing normally */
@@ -14,19 +11,19 @@ export enum SubscriptionStatus {
 	/** Subscription has been cancelled (inactive) */
 	CANCELLED = 'cancelled',
 
-	/** Last payment attempt failed. Will be retried until grace period is over, and then switch to cancelled */
+	/** Last payment attempt failed; will retry until grace period ends then switch to cancelled */
 	PAST_DUE = 'past_due',
 
-	/** Allowance amount is low, next billing may fail */
+	/** On-chain allowance is low; next billing may fail */
 	LOW_ON_FUNDS = 'low_on_funds',
 
-	/** Max amount has been reached, likely due to price fluctuations. User must increase it via the subscription management page */
+	/** Max amount reached (e.g. price fluctuation); subscriber must increase it via the management page */
 	PENDING = 'pending',
 
 	/** Currently in trial period */
 	TRIAL = 'trial',
 
-	/** Trial period has expired. Grace period to upgrade before flagged as cancelled */
+	/** Trial period has expired; grace period to upgrade before flagged as cancelled */
 	TRIAL_EXPIRED = 'trial_expired',
 }
 
@@ -42,7 +39,7 @@ export interface Subscription {
 	to: string;
 	/** Product ID */
 	productId: number;
-	/** Blockchain subscription hash */
+	/** On-chain subscription hash */
 	subscriptionHash: string;
 	/** Selected currency ID */
 	currencyId: number;
@@ -54,71 +51,68 @@ export interface Subscription {
 	customerUUID: string;
 	/** Billing frequency in seconds */
 	frequency: number;
-	/** Allowed charge amount in USD */
+	/** Approved charge amount (on-chain allowance, in USD) */
 	allowance: number;
 	/** Current status of the subscription */
-	status: SubscriptionStatus;
-	/** Whether the subscription is stopped */
+	subscriptionStatus: SubscriptionStatus;
+	/** Whether the subscription is flagged for cancellation after the current period */
 	stopped: boolean;
-	/** Timestamp of the last billing date */
+	/** Timestamp of the last billing date (null if never billed) */
 	lastBillingDate?: string;
-	/** Timestamp of the next billing date */
+	/** Timestamp of the next scheduled billing */
 	nextBillingDate: string;
-	/** Minimum cancellation date (if applicable) */
-	minimumCancellationDate?: Date;
-
-	/** Timestamp when subscription was created */
+	/** Earliest date the subscription can be cancelled (set when minPeriods > 0) */
+	minimumCancellationDate?: string;
+	/** Timestamp when the subscription was created */
 	createdAt: string;
-	/** Timestamp when subscription was last updated */
-	updatedAt: Date;
+	/** Timestamp when the subscription was last updated */
+	updatedAt: string;
 }
 
-/**
- * Pay-as-you-go subscription information
- */
+// Pay-as-you-go subscriptions are temporarily disabled.
+// Will be re-enabled in a future release.
+/*
 export interface PayAsYouGoSubscription extends Subscription {
-	/** Usage units in current billing cycle */
 	unitsCurrentPeriod: number;
-	/** Maximum spending limit per billing cycle, in USD */
 	maxSpendingPerPeriod: number;
-	/** Free credits available */
 	freeCredits: number;
 }
+*/
 
 /**
- * Represents a historical record of a subscription payment.
- *
- * This model contains all the details of a processed payment for a subscription.
- * @see {@link https://qbitflow.app/docs Subscription History API Documentation}
+ * A historical billing record for a subscription
  */
 export interface SubscriptionHistory {
-	/** Unique identifier for the subscription history record */
+	/** Unique identifier for this history record */
 	uuid: string;
-	/** Timestamp when the record was created */
-	createdAt: Date;
+	/** Timestamp when the billing occurred */
+	createdAt: string;
 	/** Subscriber's address */
 	from: string;
-	/** Recipient's address (merchant's wallet for the selected currency) */
+	/** Recipient's address */
 	to: string;
-	/** Name of the product */
+	/** Product name */
 	name: string;
-	/** Description of the product */
+	/** Product description */
 	description: string;
-	/** Amount charged for the subscription */
+	/** Amount charged in USD */
 	amount: number;
-
+	/** Amount in the smallest units of the payment currency */
+	amountMinUnits: string;
 	/** Currency ID */
 	currencyId: number;
 	/** Currency used for the payment */
 	currency: Currency;
-	/** Indicates if this was a test transaction */
+	/** Whether this was a test transaction */
 	test: boolean;
-	/** Product ID */
-	productId?: string;
-	/** UUID of the subscription */
+	/** Product ID (if applicable) */
+	productId?: number;
+	/** UUID of the parent subscription */
 	subscriptionUUID: string;
 	/** Blockchain transaction hash */
 	transactionHash: string;
 	/** Customer UUID */
 	customerUUID: string;
+	/** Optional arbitrary metadata attached to the billing */
+	metadata?: PaymentMetadata;
 }

@@ -37,3 +37,5 @@ coverage/
 test-internal/
 
 *.tgz
+
+CLAUDE.md

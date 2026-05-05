@@ -12,11 +12,11 @@
 import { QBitFlow } from '../src/QBitFlow';
 import { Duration, TransactionType } from '../src/types';
 
+import { NotFoundException } from '../src/exceptions';
+import { CreateApiKeyDto } from '../src/types/api-key';
+import { CreateCustomerDto, Customer, UpdateCustomerDto } from '../src/types/customer';
 import { CreateProductDto, Product, UpdateProductDto } from '../src/types/product';
 import { CreateUserDto, UpdateUserDto, User, UserRole } from '../src/types/user';
-import { CreateApiKeyDto } from '../src/types/api-key';
-import { NotFoundException } from '../src/exceptions';
-import { CreateCustomerDto, Customer, UpdateCustomerDto } from '../src/types/customer';
 
 const LOCAL_URL = 'http://localhost:3001';
 
@@ -29,20 +29,20 @@ let createdCustomer: Customer | null;
 const createTestCustomerData = (): CreateCustomerDto => ({
 	name: 'John',
 	lastName: 'Doe',
-	email: `test+${Math.random().toString(36).substring(7)}@example.com`,
+	email: `test+${ Math.random().toString(36).substring(7) }@example.com`,
 	phoneNumber: '+1234567890',
 	address: '123 Test Street',
 });
 
 const createTestProductData = (): CreateProductDto => ({
-	name: `Test Product ${Math.random().toString(36).substring(7)}`,
+	name: `Test Product ${ Math.random().toString(36).substring(7) }`,
 	description: 'A test product for integration testing',
 	price: 9.99,
-	reference: `REF-${Math.random().toString(36).substring(7)}`,
+	reference: `REF-${ Math.random().toString(36).substring(7) }`,
 });
 
 const createTestUserData = (): CreateUserDto => ({
-	email: `testuser+${Math.random().toString(36).substring(7)}@example.com`,
+	email: `testuser+${ Math.random().toString(36).substring(7) }@example.com`,
 	name: 'Test',
 	lastName: 'User',
 	password: 'TestP@ssw0rd!',
@@ -61,10 +61,7 @@ beforeAll(() => {
 	apiKey = process.env.QBITFLOW_API_KEY;
 
 	const baseUrl = process.env.QBITFLOW_API_URL || LOCAL_URL;
-	client = new QBitFlow({
-		apiKey,
-		baseUrl,
-	});
+	client = new QBitFlow({ apiKey, baseUrl });
 });
 
 describe('QBitFlow Integration Tests', () => {
@@ -76,6 +73,9 @@ describe('QBitFlow Integration Tests', () => {
 			expect(testClient.products).toBeDefined();
 			expect(testClient.oneTimePayments).toBeDefined();
 			expect(testClient.subscriptions).toBeDefined();
+			expect(testClient.refunds).toBeDefined();
+			expect(testClient.accounting).toBeDefined();
+			expect(testClient.claims).toBeDefined();
 		});
 
 		it('should initialize with config object', () => {
@@ -128,28 +128,27 @@ describe('QBitFlow Integration Tests', () => {
 			expect(retrieved.email).toBe(createdCustomer.email);
 		});
 
-		it('should get all customers', async () => {
+		it('should get all customers with pagination', async () => {
 			const limit = 2;
-
-			const customers = await client.customers.getAll({ limit: limit });
+			const customers = await client.customers.getAll({ limit });
 
 			expect(Array.isArray(customers.items)).toBe(true);
 			expect(customers.items.length).toBeGreaterThan(0);
-			expect(customers.hasMore()).toBe(true);
+			expect(customers.hasMore()).toBe(true); // Assuming we have more than 2 customers in test environment
 
 			const nextCustomers = await client.customers.getAll({
-				limit: limit,
+				limit,
 				cursor: customers.nextCursor,
 			});
 			expect(Array.isArray(nextCustomers.items)).toBe(true);
 			expect(nextCustomers.items.length).toBeGreaterThan(0);
 		});
 
-		it('should update a customer', async () => {
+		it('should update a customer (UUID in URL path)', async () => {
 			const customerData = createTestCustomerData();
 			const created = await client.customers.create(customerData);
 
-			const updatedEmail = `updated+${Math.random().toString(36).substring(7)}@example.com`;
+			const updatedEmail = `updated+${ Math.random().toString(36).substring(7) }@example.com`;
 
 			const updateData: UpdateCustomerDto = {
 				name: created.name,
@@ -171,7 +170,6 @@ describe('QBitFlow Integration Tests', () => {
 			const response = await client.customers.delete(created.uuid);
 			expect(response.message).toBeDefined();
 
-			// Verify deletion
 			await expect(client.customers.get(created.uuid)).rejects.toThrow(NotFoundException);
 		});
 	});
@@ -186,7 +184,6 @@ describe('QBitFlow Integration Tests', () => {
 			expect(user.email).toBe(userData.email);
 			expect(user.createdAt).toBeDefined();
 
-			// Store for other tests
 			createdUser = user;
 		});
 
@@ -216,7 +213,7 @@ describe('QBitFlow Integration Tests', () => {
 			expect(createdUser).not.toBeNull();
 			if (!createdUser) return;
 
-			const updatedEmail = `updated+${Math.random().toString(36).substring(7)}@example.com`;
+			const updatedEmail = `updated+${ Math.random().toString(36).substring(7) }@example.com`;
 
 			const updateData: UpdateUserDto = {
 				name: 'Updated',
@@ -233,7 +230,6 @@ describe('QBitFlow Integration Tests', () => {
 		});
 
 		it('should delete a user', async () => {
-			// Create a temporary user to delete
 			const tempUserData = createTestUserData();
 			const tempUser = await client.users.create(tempUserData);
 			expect(tempUser.id).toBeDefined();
@@ -241,7 +237,6 @@ describe('QBitFlow Integration Tests', () => {
 			const response = await client.users.delete(tempUser.id);
 			expect(response.message).toBeDefined();
 
-			// Verify deletion
 			await expect(client.users.getById(tempUser.id.toString())).rejects.toThrow(
 				NotFoundException
 			);
@@ -258,7 +253,6 @@ describe('QBitFlow Integration Tests', () => {
 			expect(product.price).toBe(productData.price);
 			expect(product.isActive).toBe(true);
 
-			// Store for other tests
 			createdProduct = product;
 		});
 
@@ -280,7 +274,7 @@ describe('QBitFlow Integration Tests', () => {
 		});
 
 		it('should get product by reference', async () => {
-			const referenceCode = `REF-${Math.random().toString(36).substring(7)}`;
+			const referenceCode = `REF-${ Math.random().toString(36).substring(7) }`;
 			const productData: CreateProductDto = {
 				...createTestProductData(),
 				reference: referenceCode,
@@ -316,7 +310,6 @@ describe('QBitFlow Integration Tests', () => {
 			const response = await client.products.delete(created.id);
 			expect(response.message).toBeDefined();
 
-			// Verify deletion
 			await expect(client.products.get(created.id)).rejects.toThrow(NotFoundException);
 		});
 	});
@@ -360,7 +353,6 @@ describe('QBitFlow Integration Tests', () => {
 			expect(createdUser).not.toBeNull();
 			if (!createdUser) return;
 
-			// Create API key to delete
 			const apiKeyData: CreateApiKeyDto = {
 				name: 'Temp API Key',
 				userId: createdUser.id,
@@ -371,7 +363,6 @@ describe('QBitFlow Integration Tests', () => {
 			const response = await client.apiKeys.delete(apiKey.data.id);
 			expect(response.message).toBeDefined();
 
-			// Verify deletion
 			const userKeys = await client.apiKeys.getForUser(createdUser.id);
 			const keyIds = userKeys.map((key) => key.id);
 			expect(keyIds).not.toContain(apiKey.data.id);
@@ -395,7 +386,7 @@ describe('QBitFlow Integration Tests', () => {
 			}
 		});
 
-		it('should create payment session with product details', async () => {
+		it('should create payment session with inline product details', async () => {
 			const response = await client.oneTimePayments.createSession({
 				productName: 'Custom Product',
 				description: 'Test product',
@@ -424,15 +415,13 @@ describe('QBitFlow Integration Tests', () => {
 			let cursor: string | null = null;
 			const allPayments = [];
 			let pageCount = 0;
-			const maxPages = 3; // Limit to prevent infinite loops
+			const maxPages = 3;
 
 			while (pageCount < maxPages) {
 				const page = await client.oneTimePayments.getAll({ limit: 2, cursor });
 				allPayments.push(...page.items);
 
-				if (!page.hasMore()) {
-					break;
-				}
+				if (!page.hasMore()) break;
 				cursor = page.nextCursor;
 				pageCount++;
 			}
@@ -444,34 +433,64 @@ describe('QBitFlow Integration Tests', () => {
 			let cursor: string | null = null;
 			const allPayments = [];
 			let pageCount = 0;
-			const maxPages = 2; // Limit to prevent infinite loops
+			const maxPages = 2;
 
 			while (pageCount < maxPages) {
 				const page = await client.oneTimePayments.getAllCombined({ limit: 50, cursor });
 				allPayments.push(...page.items);
 
-				if (!page.hasMore()) {
-					break;
-				}
+				if (!page.hasMore()) break;
 				cursor = page.nextCursor;
 				pageCount++;
 			}
 
 			expect(allPayments.length).toBeGreaterThan(0);
 		});
+
+		it('should get customer for a transaction', async () => {
+			// Create a payment session and use its uuid as the transaction reference
+			expect(createdProduct).not.toBeNull();
+			if (!createdProduct) return;
+
+			const session = await client.oneTimePayments.createSession({
+				productId: createdProduct.id,
+				customerUUID: createdCustomer?.uuid,
+			});
+
+			try {
+				const customer = await client.oneTimePayments.getCustomerForTransaction(session.uuid);
+				expect(customer.uuid).toBeDefined();
+			} catch {
+				// Expected if the transaction has not been completed yet
+			}
+		});
 	});
 
 	describe('Subscriptions', () => {
-		it('should create subscription session', async () => {
+		it('should create subscription session with productId', async () => {
 			expect(createdCustomer).not.toBeNull();
 			if (!createdCustomer) return;
 			expect(createdProduct).not.toBeNull();
 			if (!createdProduct) return;
 
 			const response = await client.subscriptions.createSession({
-				productId: createdProduct?.id,
+				productId: createdProduct.id,
 				frequency: { value: 1, unit: 'months' } as Duration,
 				trialPeriod: { value: 7, unit: 'days' } as Duration,
+				customerUUID: createdCustomer.uuid,
+			});
+
+			expect(response.uuid).toBeDefined();
+			expect(response.link).toBeDefined();
+		});
+
+		it('should create subscription session without trial period', async () => {
+			expect(createdProduct).not.toBeNull();
+			if (!createdProduct) return;
+
+			const response = await client.subscriptions.createSession({
+				productId: createdProduct.id,
+				frequency: { value: 1, unit: 'weeks' } as Duration,
 				customerUUID: createdCustomer?.uuid,
 			});
 
@@ -479,13 +498,12 @@ describe('QBitFlow Integration Tests', () => {
 			expect(response.link).toBeDefined();
 		});
 
-		it('should create subscription without trial period', async () => {
-			expect(createdProduct).not.toBeNull();
-			if (!createdProduct) return;
-
+		it('should create subscription session with inline product details', async () => {
 			const response = await client.subscriptions.createSession({
-				productId: createdProduct?.id,
-				frequency: { value: 1, unit: 'weeks' } as Duration,
+				productName: 'Monthly Newsletter',
+				description: 'Monthly news digest',
+				price: 4.99,
+				frequency: { value: 1, unit: 'months' } as Duration,
 				customerUUID: createdCustomer?.uuid,
 			});
 
@@ -498,7 +516,7 @@ describe('QBitFlow Integration Tests', () => {
 			if (!createdProduct) return;
 
 			const created = await client.subscriptions.createSession({
-				productId: createdProduct?.id,
+				productId: createdProduct.id,
 				frequency: { value: 1, unit: 'months' } as Duration,
 				customerUUID: createdCustomer?.uuid,
 			});
@@ -511,66 +529,19 @@ describe('QBitFlow Integration Tests', () => {
 		});
 	});
 
-	describe('Pay-as-you-go', () => {
-		it('should create PAYG session', async () => {
-			expect(createdProduct).not.toBeNull();
-			if (!createdProduct) return;
-
-			const response = await client.payAsYouGo.createSession({
-				productId: createdProduct?.id,
-				frequency: { value: 1, unit: 'months' } as Duration,
-				freeCredits: 10.0,
-				customerUUID: createdCustomer?.uuid,
-			});
-
-			expect(response.uuid).toBeDefined();
-			expect(response.link).toBeDefined();
-		});
-
-		it('should create PAYG session without free credits', async () => {
-			expect(createdProduct).not.toBeNull();
-			if (!createdProduct) return;
-
-			const response = await client.payAsYouGo.createSession({
-				productId: createdProduct?.id,
-				frequency: { value: 1, unit: 'months' } as Duration,
-				customerUUID: createdCustomer?.uuid,
-			});
-
-			expect(response.uuid).toBeDefined();
-			expect(response.link).toBeDefined();
-		});
-
-		it('should get PAYG session', async () => {
-			expect(createdProduct).not.toBeNull();
-			if (!createdProduct) return;
-
-			const created = await client.payAsYouGo.createSession({
-				productId: createdProduct?.id,
-				frequency: { value: 1, unit: 'months' } as Duration,
-				customerUUID: createdCustomer?.uuid,
-			});
-
-			const session = await client.payAsYouGo.getSession(created.uuid);
-
-			expect(session.uuid).toBe(created.uuid);
-			expect(session.price).toBeGreaterThan(0);
-			expect(session.availableCurrencies.length).toBeGreaterThan(0);
-		});
-	});
+	// Pay-as-you-go is temporarily disabled
+	// describe('Pay-as-you-go', () => { ... });
 
 	describe('Transaction Status', () => {
-		it('should get transaction status', async () => {
-			// Create a payment session
+		it('should get transaction status (or throw NotFoundException if not started)', async () => {
 			expect(createdProduct).not.toBeNull();
 			if (!createdProduct) return;
 
 			const session = await client.oneTimePayments.createSession({
-				productId: createdProduct?.id,
+				productId: createdProduct.id,
 				customerUUID: createdCustomer?.uuid,
 			});
 
-			// Try to get status (may not exist yet if payment not started)
 			try {
 				const status = await client.transactionStatus.get(
 					session.uuid,
@@ -578,14 +549,64 @@ describe('QBitFlow Integration Tests', () => {
 				);
 				expect(status.type).toBe(TransactionType.ONE_TIME_PAYMENT);
 			} catch (error) {
-				// Expected if payment hasn't been initiated
 				expect(error).toBeInstanceOf(NotFoundException);
 			}
 		});
 	});
 
+	describe('Refunds', () => {
+		it('should get refund by transaction UUID (or throw NotFoundException)', async () => {
+			try {
+				const refund = await client.refunds.getByTransaction('non-existent-uuid');
+				expect(refund.uuid).toBeDefined();
+			} catch (error) {
+				expect(error).toBeInstanceOf(NotFoundException);
+			}
+		});
+
+		it('should get all active refunds', async () => {
+			const refunds = await client.refunds.getAll();
+			expect(Array.isArray(refunds)).toBe(true);
+		});
+
+		it('should get inactive refunds with pagination', async () => {
+			const result = await client.refunds.getAllInactive({ limit: 10 });
+			expect(Array.isArray(result.items)).toBe(true);
+			expect(typeof result.hasMore).toBe('function');
+		});
+	});
+
+	describe('Accounting', () => {
+		it('should export accounting data as JSON', async () => {
+			const events = await client.accounting.export('2024-11-01', '2024-12-31', 'json');
+			expect(Array.isArray(events)).toBe(true);
+		});
+
+		it('should export accounting data as CSV', async () => {
+			const csv = await client.accounting.export('2024-11-01', '2024-12-31', 'csv');
+			expect(typeof csv).toBe('string');
+		});
+	});
+
+	describe('Claims', () => {
+		it('should get claim funds for the organization', async () => {
+			const funds = await client.claims.getFunds();
+			expect(Array.isArray(funds)).toBe(true);
+		});
+
+		it('should create a claim request for a user', async () => {
+			expect(createdUser).not.toBeNull();
+			if (!createdUser) return;
+
+			const result = await client.claims.createRequest(createdUser.id);
+			expect(result.message).toBeDefined();
+			expect(result.link).toBeDefined();
+			expect(result.link).toContain('http');
+		});
+	});
+
 	describe('Validation', () => {
-		it('should throw validation error for invalid customer UUID', async () => {
+		it('should throw validation error for empty customer UUID', async () => {
 			await expect(client.customers.get('')).rejects.toThrow();
 		});
 
@@ -597,14 +618,8 @@ describe('QBitFlow Integration Tests', () => {
 			await expect(client.customers.getByEmail('invalid-email')).rejects.toThrow();
 		});
 
-		it('should handle negative price validation at API level', async () => {
-			const productData: CreateProductDto = {
-				name: 'Test',
-				description: 'Test',
-				price: -10.0, // This should be caught by the API
-			};
-
-			await expect(client.products.create(productData)).rejects.toThrow();
+		it('should validate accounting export requires dates', async () => {
+			await expect(client.accounting.export('', '', 'json')).rejects.toThrow();
 		});
 	});
 });

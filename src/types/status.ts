@@ -48,12 +48,10 @@ export enum TransactionStatusValue {
  * Detailed status information for a transaction. Provides detailed information about the current state of a transaction.
  */
 export interface TransactionStatus {
-	/** Type of the transaction */
-	type: TransactionType;
 	/** Current status of the transaction */
 	status: TransactionStatusValue;
-	/** Transaction hash on the blockchain (if available) */
-	txHash?: string;
+	/** Transaction hash on the blockchain */
+	txHash: string;
 	/** Additional status message */
 	message?: string;
 }

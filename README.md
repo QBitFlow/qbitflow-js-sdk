@@ -3,7 +3,7 @@
 [![npm version](https://i.ytimg.com/vi/LkHy0YWvpRI/mqdefault.jpg)](https://www.npmjs.com/package/qbitflow)
 [![License: MPL-2.0](https://upload.wikimedia.org/wikipedia/commons/thumb/9/95/Mozilla_Logo_2024.svg/1920px-Mozilla_Logo_2024.svg.png)](https://opensource.org/licenses/MPL-2.0)
 
-Official JavaScript/TypeScript SDK for [QBitFlow](https://qbitflow.app) - a comprehensive cryptocurrency payment processing platform that enables seamless integration of crypto payments, recurring subscriptions, and pay-as-you-go models into your applications.
+Official JavaScript/TypeScript SDK for [QBitFlow](https://qbitflow.app) - a comprehensive cryptocurrency payment processing platform that enables seamless integration of crypto payments and recurring subscriptions into your applications.
 
 ## Features
 
@@ -17,64 +17,31 @@ Official JavaScript/TypeScript SDK for [QBitFlow](https://qbitflow.app) - a comp
 - 🔌 **Webhook Support**: Handle payment notifications easily
 - 💳 **One-Time Payments**: Accept cryptocurrency payments with ease
 - 🔄 **Recurring Subscriptions**: Automated recurring billing in cryptocurrency
-- 📊 **Pay-as-You-Go**: Usage-based billing with cryptocurrency
 - 👥 **Customer Management**: Create and manage customer profiles
-- 🛍️ **Product Management**: Organize your products and pricing
+- 🛍️ **Product Management**: Organise your products and pricing
 - 📈 **Transaction Tracking**: Real-time transaction status updates
-- 🔐 **Secure Authentication**: API key-based authentication
-- 🎯 **Type-Safe**: Full type hints for better IDE support
-- 📝 **Comprehensive Documentation**: Detailed docstrings and examples
+- 💰 **Refunds**: Query and track refund entries
+- 📊 **Accounting Export**: Export payment data as JSON or CSV
+- 🔑 **Account Claims**: Manage user fund claim requests
 
 ## Table of Contents
 
-- [Features](#features)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
-    - [1. Get Your API Key](#1-get-your-api-key)
-    - [2. Initialize the Client](#2-initialize-the-client)
-    - [3. Create a One-Time Payment](#3-create-a-one-time-payment)
-    - [4. Create a Recurring Subscription](#4-create-a-recurring-subscription)
-    - [5. Check Transaction Status](#5-check-transaction-status)
 - [Configuration](#configuration)
 - [One-Time Payments](#one-time-payments)
-    - [Create a Payment Session](#create-a-payment-session)
-    - [With Redirect URLs](#with-redirect-urls)
-    - [Get Payment Session](#get-payment-session)
-    - [Get Completed Payment](#get-completed-payment)
-    - [List All Payments](#list-all-payments)
-    - [List Combined Payments](#list-combined-payments)
 - [Subscriptions](#subscriptions)
-    - [Create a Subscription](#create-a-subscription)
-    - [Frequency Units](#frequency-units)
-    - [Get Subscription](#get-subscription)
-    - [Get all payments for subscription](#get-all-payments-for-subscription)
-    - [Execute Test Billing Cycle](#execute-test-billing-cycle)
-- [Pay-As-You-Go Subscriptions](#pay-as-you-go-subscriptions)
-    - [Create PAYG Subscription](#create-payg-subscription)
-    - [Get PAYG Subscription](#get-payg-subscription)
-    - [Get all payments for PAYG subscription](#get-all-payments-for-payg-subscription)
-    - [Execute Test Billing Cycle](#execute-test-billing-cycle-1)
-    - [Increase units current period](#increase-units-current-period)
 - [Transaction Status](#transaction-status)
-    - [Check Status](#check-status)
-    - [Transaction Types](#transaction-types)
-    - [Status Values](#status-values)
+- [Refunds](#refunds)
+- [Accounting Export](#accounting-export)
+- [Claims](#claims)
 - [Customer Management](#customer-management)
-    - [Create a Customer](#create-a-customer)
-    - [Get Customer by UUID](#get-customer-by-uuid)
-    - [Update Customer](#update-customer)
-    - [Delete Customer](#delete-customer)
 - [Product Management](#product-management)
-    - [Create a Product](#create-a-product)
-    - [Update Product](#update-product)
-    - [Delete Product](#delete-product)
+- [User Management](#user-management)
+- [API Key Management](#api-key-management)
 - [Webhook Handling](#webhook-handling)
-    - [Express.js Example](#expressjs-example)
 - [Error Handling](#error-handling)
 - [API Reference](#api-reference)
-    - [QBitFlow](#qbitflow)
-        - [Constructor](#constructor)
-        - [Properties](#properties)
 - [License](#license)
 - [Support](#support)
 - [Changelog](#changelog)
@@ -102,14 +69,12 @@ Sign up at [QBitFlow](https://qbitflow.app) and obtain your API key from the das
 ```typescript
 import { QBitFlow } from 'qbitflow';
 
-// Initialize the client
 const client = new QBitFlow('your-api-key');
 ```
 
 ### 3. Create a One-Time Payment
 
 ```typescript
-// Create a one-time payment
 const payment = await client.oneTimePayments.createSession({
 	productId: 1,
 	customerUUID: 'customer-uuid',
@@ -118,8 +83,7 @@ const payment = await client.oneTimePayments.createSession({
 	cancelUrl: 'https://yourapp.com/cancel',
 });
 
-console.log('Payment link:', payment.link);
-// Send this link to your customer
+console.log('Payment link:', payment.link); // Send this link to your customer
 ```
 
 ### 4. Create a Recurring Subscription
@@ -128,7 +92,7 @@ console.log('Payment link:', payment.link);
 const subscription = await client.subscriptions.createSession({
 	productId: 1,
 	frequency: { unit: 'months', value: 1 }, // Bill monthly
-	trialPeriod: { unit: 'days', value: 7 }, // 7-day trial (optional)
+	trialPeriod: { unit: 'days', value: 7 }, // 7-day free trial (optional)
 	webhookUrl: 'https://yourapp.com/webhook',
 	customerUUID: 'customer-uuid',
 });
@@ -155,8 +119,6 @@ if (status.status === TransactionStatusValue.COMPLETED) {
 
 ## Configuration
 
-### Configuration Options
-
 | Option       | Type   | Default                    | Description                                  |
 | ------------ | ------ | -------------------------- | -------------------------------------------- |
 | `apiKey`     | string | (required)                 | Your QBitFlow API key                        |
@@ -168,17 +130,19 @@ if (status.status === TransactionStatusValue.COMPLETED) {
 
 ### Create a Payment Session
 
-Create a payment session for a one-time purchase:
+Provide either a `productId` or inline product details (`productName` + `description` + `price`):
 
 ```typescript
 // Using an existing product
 const payment = await client.oneTimePayments.createSession({
 	productId: 1,
-	customerUUID: 'customer-uuid', // optional
+	customerUUID: 'customer-uuid',
 	webhookUrl: 'https://yourapp.com/webhook',
+	successUrl: 'https://yourapp.com/success',
+	cancelUrl: 'https://yourapp.com/cancel',
 });
 
-// Or create a custom payment
+// Or with inline product details
 const payment = await client.oneTimePayments.createSession({
 	productName: 'Custom Product',
 	description: 'Product description',
@@ -191,27 +155,7 @@ console.log(payment.uuid); // Session UUID
 console.log(payment.link); // Payment link for customer
 ```
 
-### With Redirect URLs
-
-You can provide redirect URLs for success and cancellation:
-
-```typescript
-const payment = await client.oneTimePayments.createSession({
-	productId: 1,
-	successUrl: 'https://yourapp.com/success?uuid={{UUID}}&type={{TRANSACTION_TYPE}}',
-	cancelUrl: 'https://yourapp.com/cancel',
-	customerUUID: 'customer-uuid',
-});
-```
-
-**Available Placeholders:**
-
-- `{{UUID}}`: The session UUID
-- `{{TRANSACTION_TYPE}}`: The transaction type (e.g., "payment", "subscription", "payAsYouGo")
-
 ### Get Payment Session
-
-Retrieve details of a payment session:
 
 ```typescript
 const session = await client.oneTimePayments.getSession('session-uuid');
@@ -220,8 +164,6 @@ console.log(session.productName, session.price);
 
 ### Get Completed Payment
 
-Retrieve details of a completed payment:
-
 ```typescript
 const payment = await client.oneTimePayments.get('payment-uuid');
 console.log(payment.transactionHash, payment.amount);
@@ -229,16 +171,12 @@ console.log(payment.transactionHash, payment.amount);
 
 ### List All Payments
 
-List all one-time payments with pagination:
-
 ```typescript
 const result = await client.oneTimePayments.getAll({ limit: 10 });
 
 console.log(result.items); // Array of payments
 console.log(result.hasMore()); // Whether there are more pages
-console.log(result.nextCursor); // Cursor for next page
 
-// Fetch next page
 if (result.hasMore()) {
 	const nextPage = await client.oneTimePayments.getAll({
 		limit: 10,
@@ -249,56 +187,63 @@ if (result.hasMore()) {
 
 ### List Combined Payments
 
-Get all payments (one-time and subscription payments combined):
+Get all payments (one-time and subscription billings) in a single feed:
 
 ```typescript
 const result = await client.oneTimePayments.getAllCombined({ limit: 20 });
 result.items.forEach((payment) => {
 	console.log(payment.source); // "payment" or "subscription_history"
-	console.log(payment.amount);
+	console.log(payment.amount, payment.amountMinUnits);
 });
+```
+
+### Get Customer for a Transaction
+
+```typescript
+const customer = await client.oneTimePayments.getCustomerForTransaction('transaction-uuid');
+console.log(customer.email);
 ```
 
 ## Subscriptions
 
 ### Create a Subscription
 
-Create a recurring subscription:
 
 ```typescript
 const subscription = await client.subscriptions.createSession({
 	productId: 1,
 	frequency: { unit: 'months', value: 1 }, // Bill monthly
 	trialPeriod: { unit: 'days', value: 7 }, // 7-day trial (optional)
-	minPeriods: 3, // Minimum billing periods (optional)
+	minPeriods: 3, // Minimum commitment periods (optional)
 	webhookUrl: 'https://yourapp.com/webhook',
 	customerUUID: 'customer-uuid',
 });
 
-console.log(subscription.link); // Send to customer
+console.log(subscription.link);
 ```
 
 ### Frequency Units
 
 Available units for `frequency` and `trialPeriod`:
 
-- `seconds`
-- `minutes`
-- `hours`
-- `days`
-- `weeks`
-- `months`
+`seconds` · `minutes` · `hours` · `days` · `weeks` · `months`
+
+### Get Subscription Session
+
+```typescript
+const session = await client.subscriptions.getSession('session-uuid');
+// Returns SubscriptionSession — frequency and trialPeriod are in raw seconds
+console.log(session.frequency, session.trialPeriod);
+```
 
 ### Get Subscription
 
-Retrieve subscription details:
-
 ```typescript
-const subscription = await client.subscriptions.get('subscription-uuid');
-console.log(subscription.status, subscription.nextBillingDate);
+const sub = await client.subscriptions.get('subscription-uuid');
+console.log(sub.subscriptionStatus, sub.nextBillingDate);
 ```
 
-### Get all payments for subscription
+### Get Subscription Payment History
 
 ```typescript
 const history = await client.subscriptions.getPaymentHistory('subscription-uuid');
@@ -307,76 +252,27 @@ history.forEach((record) => {
 });
 ```
 
+### Force-Cancel a Subscription
+
+Bypasses the normal subscriber-signed cancellation flow (admin use only):
+
+```typescript
+const result = await client.subscriptions.forceCancel('subscription-uuid');
+console.log(result.message);
+```
+
 ### Execute Test Billing Cycle
 
-**Test Mode Only**: Manually trigger a billing cycle for testing.
-
-**For live mode**: Billing cycles are executed automatically based on the subscription frequency.
+**Test mode only** — manually trigger a billing cycle to validate your webhook handling:
 
 ```typescript
 const result = await client.subscriptions.executeTestBilling('subscription-uuid');
-console.log('Transaction status link:', result.statusLink);
-```
-
-## Pay-As-You-Go Subscriptions
-
-PAYG subscriptions allow customers to pay based on usage with a billing cycle.
-
-### Create PAYG Subscription
-
-```typescript
-const payg = await client.payAsYouGo.createSession({
-	productId: 1,
-	frequency: { unit: 'months', value: 1 }, // Bill monthly
-	freeCredits: 100, // Initial free credits (optional)
-	webhookUrl: 'https://yourapp.com/webhook',
-	customerUUID: 'customer-uuid',
-});
-
-console.log(payg.link);
-```
-
-### Get PAYG Subscription
-
-```typescript
-const payg = await client.payAsYouGo.get('payg-uuid');
-console.log(payg.allowance, payg.unitsCurrentPeriod);
-```
-
-### Get all payments for PAYG subscription
-
-```typescript
-const history = await client.payAsYouGo.getPaymentHistory('payg-uuid');
-history.forEach((record) => {
-	console.log(record.uuid, record.amount, record.createdAt);
-});
-```
-
-### Execute Test Billing Cycle
-
-**Test Mode Only**: Manually trigger a billing cycle for testing.
-
-**For live mode**: Billing cycles are executed automatically based on the subscription frequency.
-
-```typescript
-const result = await client.payAsYouGo.executeTestBilling('subscription-uuid');
-console.log('Transaction status link:', result.statusLink);
-```
-
-### Increase units current period
-
-Increase the number of units for the current billing period:
-
-```typescript
-// For example, the product is billed per hour of usage, and the customer consumed 5 additional hours
-const response = await client.payAsYouGo.increaseUnitsCurrentPeriod('payg-uuid', 5);
+console.log('Status link:', result.statusLink);
 ```
 
 ## Transaction Status
 
 ### Check Status
-
-Get the current status of a transaction:
 
 ```typescript
 import { TransactionType } from 'qbitflow';
@@ -387,29 +283,18 @@ const status = await client.transactionStatus.get(
 );
 
 console.log(status.status); // "created", "pending", "completed", etc.
-console.log(status.txHash); // Blockchain transaction hash
+console.log(status.txHash); // On-chain transaction hash
 ```
 
 ### Transaction Types
 
 ```typescript
 enum TransactionType {
-	/** One-time payment transaction */
 	ONE_TIME_PAYMENT = 'payment',
-	/** Create subscription transaction */
 	CREATE_SUBSCRIPTION = 'createSubscription',
-	/** Cancel subscription transaction */
 	CANCEL_SUBSCRIPTION = 'cancelSubscription',
-	/** Execute subscription payment transaction */
 	EXECUTE_SUBSCRIPTION_PAYMENT = 'executeSubscription',
-	/** Create pay-as-you-go subscription transaction */
-	CREATE_PAYG_SUBSCRIPTION = 'createPAYGSubscription',
-	/** Cancel pay-as-you-go subscription transaction */
-	CANCEL_PAYG_SUBSCRIPTION = 'cancelPAYGSubscription',
-	/** Increase allowance transaction */
 	INCREASE_ALLOWANCE = 'increaseAllowance',
-	/** Update max amount transaction */
-	UPDATE_MAX_AMOUNT = 'updateMaxAmount',
 }
 ```
 
@@ -417,21 +302,113 @@ enum TransactionType {
 
 ```typescript
 enum TransactionStatusValue {
-	/** Transaction has been created but not yet processed */
 	CREATED = 'created',
-	/** Waiting for blockchain confirmation */
 	WAITING_CONFIRMATION = 'waitingConfirmation',
-	/** Transaction is pending processing */
 	PENDING = 'pending',
-	/** Transaction has been successfully completed */
 	COMPLETED = 'completed',
-	/** Transaction has failed */
 	FAILED = 'failed',
-	/** Transaction has been cancelled */
 	CANCELLED = 'cancelled',
-	/** Transaction has expired */
 	EXPIRED = 'expired',
 }
+```
+
+## Refunds
+
+### Get Refund by Transaction UUID
+
+Public endpoint — no authentication required:
+
+```typescript
+const refund = await client.refunds.getByTransaction('transaction-uuid');
+console.log(refund.status, refund.reason);
+```
+
+### List Active Refunds
+
+```typescript
+const refunds = await client.refunds.getAll();
+refunds.forEach((r) => console.log(r.uuid, r.status, r.amountMinUnits));
+```
+
+### List Inactive (Resolved) Refunds
+
+```typescript
+const result = await client.refunds.getAllInactive({ limit: 20 });
+result.items.forEach((r) => console.log(r.uuid, r.respondedAt));
+
+if (result.hasMore()) {
+	const next = await client.refunds.getAllInactive({ cursor: result.nextCursor });
+}
+```
+
+### Refund Statuses
+
+```typescript
+enum RefundStatus {
+	PENDING = 'pending',
+	APPROVED = 'approved',
+	REFUSED = 'refused',
+	FAILED = 'failed',
+}
+```
+
+## Accounting Export
+
+Export transaction data for reconciliation and bookkeeping.
+
+```typescript
+// JSON export — returns AccountingEvent[]
+const events = await client.accounting.export('2024-01-01', '2024-12-31', 'json') as AccountingEvent[];
+events.forEach((e) => {
+	console.log(e.paymentId, e.type, e.netAmountUsd);
+});
+
+// CSV export — returns a raw CSV string
+import fs from 'fs';
+const csv = await client.accounting.export('2024-01-01', '2024-12-31', 'csv') as string;
+fs.writeFileSync('transactions.csv', csv);
+```
+
+Each `AccountingEvent` includes: transaction identifiers, product info, on-chain details (chain, block, tx hash, addresses), token info, gross/net amounts, platform and organization fees, and network fees for refunds.
+
+## Claims
+
+Claims enable organizations to transfer accumulated earnings to users who have claimed their account.
+
+### Get Pending Claim Obligations
+
+```typescript
+const funds = await client.claims.getFunds();
+funds.forEach((f) => {
+	console.log(`User ${f.userId} is owed $${f.totalAmountOwed}`);
+});
+```
+
+### Create a Claim Request for a User
+
+Generate a one-time link that lets the user set up their password and wallet (admin only):
+
+```typescript
+const { link } = await client.claims.createRequest(userId);
+// Send `link` to the user via email
+console.log('Claim link:', link);
+```
+
+### Get an Existing Claim Request for a User
+
+Check whether a claim request already exists for a given user and retrieve the link:
+
+```typescript
+const { link } = await client.claims.getRequestByUser(userId);
+console.log('Existing claim link:', link);
+```
+
+### Trigger Test Claim Fund Computation
+
+**Test mode only** — manually compute ledger totals for a user without waiting for the hourly job:
+
+```typescript
+await client.claims.triggerTestClaimFunds(userId);
 ```
 
 ## Customer Management
@@ -439,36 +416,41 @@ enum TransactionStatusValue {
 ### Create a Customer
 
 ```typescript
-const customerData: CreateCustomerDto = {
+const customer = await client.customers.create({
 	name: 'John',
 	lastName: 'Doe',
 	email: 'john@example.com',
 	phoneNumber: '+1234567890',
 	reference: 'CRM-12345',
-};
-
-const customer = await client.customers.create(customerData);
+});
 console.log('Customer created:', customer.uuid);
 ```
 
-### Get Customer by UUID
+### Get Customer
 
 ```typescript
 const customer = await client.customers.get('customer-uuid');
-console.log(`${customer.name} ${customer.lastName} - ${customer.email}`);
+const byEmail = await client.customers.getByEmail('john@example.com');
+```
+
+### List Customers
+
+```typescript
+const result = await client.customers.getAll({ limit: 10 });
+if (result.hasMore()) {
+	const next = await client.customers.getAll({ limit: 10, cursor: result.nextCursor });
+}
 ```
 
 ### Update Customer
 
 ```typescript
-const updateData: UpdateCustomerDto = {
+const updated = await client.customers.update('customer-uuid', {
 	name: 'John',
 	lastName: 'Doe',
 	email: 'john.doe@example.com',
 	phoneNumber: '+9876543210',
-};
-
-const updatedCustomer = await client.customers.update('customer-uuid', updateData);
+});
 ```
 
 ### Delete Customer
@@ -483,33 +465,90 @@ console.log(response.message);
 ### Create a Product
 
 ```typescript
-const productData: CreateProductDto = {
+const product = await client.products.create({
 	name: 'Premium Subscription',
 	description: 'Access to all premium features',
 	price: 29.99,
 	reference: 'PROD-PREMIUM',
-};
-
-const product = await client.products.create(productData);
-console.log('Product created: ID', product.id);
+});
 ```
 
-### Update Product
+### Get, List, Update, Delete
 
 ```typescript
-const updateData: UpdateProductDto = {
+const product = await client.products.get(1);
+const byRef = await client.products.getByReference('PROD-PREMIUM');
+const all = await client.products.getAll();
+
+const updated = await client.products.update(1, {
 	name: 'Premium Plus',
-	description: 'Enhanced premium features',
+	description: 'Enhanced features',
 	price: 39.99,
-};
+});
 
-const updatedProduct = await client.products.update(1, updateData);
+await client.products.delete(1);
 ```
 
-### Delete Product
+## User Management
+
+### Create a User
 
 ```typescript
-const response = await client.products.delete(1);
+// Create (admin only)
+const user = await client.users.create({
+	name: 'Alice',
+	lastName: 'Smith',
+	email: 'alice@example.com',
+	role: 'user',             // 'user' or 'admin'
+	organizationFeeBps: 100,  // optional, 1% fee
+});
+```
+
+### Get, List, Update, Delete
+
+```typescript
+// Get current user (identified by API key)
+const me = await client.users.get();
+
+// Get by ID / list all (admin only)
+const byId = await client.users.getById(42);
+const all = await client.users.getAll();
+
+// Update
+const updated = await client.users.update(user.id, {
+	name: 'Alicia',
+	lastName: 'Smith',
+	email: user.email,
+});
+
+// Delete (admin only)
+await client.users.delete(user.id);
+```
+
+## API Key Management
+
+### Create an API Key
+
+```typescript
+const resp = await client.apiKeys.create({
+	name: 'Production Key',
+	userId: userId,
+	test: false,
+});
+console.log('Key (only shown once):', resp.key);
+```
+
+### List and Delete
+
+```typescript
+// List API keys for the current user
+const keys = await client.apiKeys.getAll();
+
+// List API keys for a specific user (admin only)
+const forUser = await client.apiKeys.getForUser(userId);
+
+// Delete
+await client.apiKeys.delete(keyId);
 ```
 
 ## Webhook Handling
@@ -518,7 +557,13 @@ const response = await client.products.delete(1);
 
 ```typescript
 import express from 'express';
-import { QBitFlow, SessionWebhookResponse, TransactionStatusValue } from 'qbitflow';
+import {
+	QBitFlow,
+	SessionWebhookResponse,
+	TransactionStatusValue,
+	OneTimePaymentSession,
+	SubscriptionSession,
+} from 'qbitflow';
 
 const app = express();
 const qbitflowClient = new QBitFlow('your-api-key');
@@ -526,72 +571,42 @@ const qbitflowClient = new QBitFlow('your-api-key');
 app.use(express.json());
 
 app.post('/webhook', async (req, res) => {
-	// Extract the signature and timestamp headers for verification
 	const signature = req.headers[qbitflowClient.webhooks.signatureHeader.toLowerCase()] as string;
 	const timestamp = req.headers[qbitflowClient.webhooks.timestampHeader.toLowerCase()] as string;
 
 	if (!signature || !timestamp) {
-		console.warn('Missing signature or timestamp headers');
 		res.status(400).json({ error: 'Missing required headers' });
 		return;
 	}
 
-	// Verify the webhook signature
 	if (!(await qbitflowClient.webhooks.verify(req.body, signature, timestamp))) {
-		console.warn('Invalid webhook signature');
-		res.status(401).json({ error: 'Invalid signature' }); 
+		res.status(401).json({ error: 'Invalid signature' });
 		return;
 	}
 
-	// Parse the payload as a SessionWebhookResponse and handle the event
 	const event = req.body as SessionWebhookResponse;
-
-	console.log('Webhook received:', event.uuid);
-	console.log('Status:', event.status.status);
+	// event.session is typed as SessionCheckout (OneTimePaymentSession | SubscriptionSession | PaygSubscriptionSession)
+	const session = event.session as OneTimePaymentSession | SubscriptionSession;
 
 	if (event.status.status === TransactionStatusValue.COMPLETED) {
-		console.log('Payment completed!');
-		// Handle successful payment
+		console.log('Payment completed for product:', session.productName);
 	} else if (event.status.status === TransactionStatusValue.FAILED) {
-		console.log('Payment failed');
+		// Handle failed payment
 	}
 
 	res.status(200).json({ received: true });
 });
-
-app.listen(3000, () => {
-	console.log('Webhook server running on port 3000');
-});
 ```
-
-### Webhook Payload
-
-```typescript
-interface SessionWebhookResponse {
-	/** Session UUID */
-	uuid: string;
-	/** Current transaction status */
-	status: TransactionStatus;
-	/** Complete session information */
-	session: Session;
-}
-```
-
-The webhook payload includes:
-
-- `uuid`: Session UUID
-- `status`: Current transaction status with type, status value, and optional transaction hash
-- `session`: Complete session details including product info, price, customer UUID, etc.
 
 ## Error Handling
-
-The SDK provides specific error classes for different scenarios:
 
 ```typescript
 import {
 	NotFoundException,
 	UnauthorizedException,
+	ForbiddenException,
 	ValidationException,
+	RateLimitException,
 	NetworkException,
 	QBitFlowError,
 } from 'qbitflow';
@@ -600,17 +615,19 @@ try {
 	const payment = await client.oneTimePayments.get('invalid-uuid');
 } catch (error) {
 	if (error instanceof NotFoundException) {
-		console.error('Payment not found');
+		console.error('Not found');
 	} else if (error instanceof UnauthorizedException) {
 		console.error('Invalid API key');
+	} else if (error instanceof ForbiddenException) {
+		console.error('Insufficient permissions');
 	} else if (error instanceof ValidationException) {
-		console.error('Invalid request:', error.message);
+		console.error('Validation error:', error.message);
+	} else if (error instanceof RateLimitException) {
+		console.error('Rate limit exceeded');
 	} else if (error instanceof NetworkException) {
 		console.error('Network error:', error.message);
 	} else if (error instanceof QBitFlowError) {
 		console.error('QBitFlow error:', error.message);
-	} else {
-		console.error('Unknown error:', error);
 	}
 }
 ```
@@ -630,29 +647,20 @@ new QBitFlow(config: QBitFlowConfig)
 
 #### Properties
 
-- `customers: CustomerRequests` - Customer operations
-- `products: ProductRequests` - Product operations
-- `users: UserRequests` - User operations
-- `apiKeys: ApiKeyRequests` - API key operations
-- `oneTimePayments: PaymentRequests` - One-time payment operations
-- `subscriptions: SubscriptionRequests` - Subscription operations
-- `payAsYouGo: PayAsYouGoRequests` - Pay-as-you-go operations
-- `transactionStatus: TransactionStatusRequests` - Transaction status operations
+| Property            | Type                         | Description                              |
+| ------------------- | ---------------------------- | ---------------------------------------- |
+| `customers`         | `CustomerRequests`           | Customer CRUD operations                 |
+| `products`          | `ProductRequests`            | Product CRUD operations                  |
+| `users`             | `UserRequests`               | User management                          |
+| `apiKeys`           | `ApiKeyRequests`             | API key management                       |
+| `webhooks`          | `WebhookRequests`            | Webhook signature verification           |
+| `oneTimePayments`   | `PaymentRequests`            | One-time payment sessions and history    |
+| `subscriptions`     | `SubscriptionRequests`       | Subscription sessions and management     |
+| `transactionStatus` | `TransactionStatusRequests`  | Transaction status polling and WebSocket |
+| `refunds`           | `RefundRequests`             | Refund query operations                  |
+| `accounting`        | `AccountingRequests`         | Accounting data export (JSON / CSV)      |
+| `claims`            | `ClaimRequests`              | Fund claim request management            |
 
-## Testing
-
-Run the test suite:
-
-```bash
-# Run all tests
-npm test
-
-# Run tests in watch mode
-npm run test:watch
-
-# Run tests with coverage
-npm run test:coverage
-```
 
 ## License
 
@@ -662,17 +670,13 @@ This project is licensed under the MPL-2.0 License - see the [LICENSE](LICENSE) 
 
 - 📖 [Documentation](https://qbitflow.app/docs)
 - 📧 [Email Support](mailto:support@qbitflow.app)
-- 🐛 [Issue Tracker](https://github.com/qbitflow/qbitflow-python-sdk/issues)
-    <!-- -   💬 [Community Forum](https://community.qbitflow.app) -->
+- 🐛 [Issue Tracker](https://github.com/qbitflow/qbitflow-js-sdk/issues)
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for version history and updates.
+See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## Security
 
 For security issues, please email security@qbitflow.app instead of using the issue tracker.
 
----
-
-Made with ❤️ by the QBitFlow team

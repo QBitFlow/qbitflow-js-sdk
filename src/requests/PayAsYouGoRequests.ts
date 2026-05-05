@@ -1,20 +1,33 @@
+/**
+ * Pay-as-you-go subscription requests — TEMPORARILY DISABLED
+ *
+ * This feature will be re-enabled in a future release once the new PAYG infrastructure
+ * has been deployed. The implementation is preserved here for reference.
+ */
+
 import { Request } from './Request';
 import { SessionRequests } from './SessionRequests';
 import {
-	CreateSessionDto,
 	LinkResponse,
-	Session,
+	PaygSubscriptionSession,
 	Duration,
-	PayAsYouGoSubscription,
+	Subscription,
 	SubscriptionHistory,
 	SuccessResponse,
+	StatusLinkResponse,
 } from '../types';
 import { validateCreateSession } from '../utils';
 import { ValidationException } from '../exceptions';
-import { StatusLinkResponse } from '../types/session';
+
+// Stub for the PAYG-specific subscription type (extends the base Subscription)
+interface PayAsYouGoSubscription extends Subscription {
+	unitsCurrentPeriod: number;
+	maxSpendingPerPeriod: number;
+	freeCredits: number;
+}
 
 /**
- * Pay-as-you-go subscription requests
+ * Pay-as-you-go subscription requests (currently disabled)
  */
 export class PayAsYouGoRequests extends Request {
 	private static readonly BASE_ROUTE = '/transaction/subscription';
@@ -29,18 +42,6 @@ export class PayAsYouGoRequests extends Request {
 	 * Create a new pay-as-you-go subscription session
 	 * @param options - PAYG subscription session options
 	 * @returns Payment link response with UUID and link
-	 *
-	 * @example
-	 * ```typescript
-	 * const payg = await client.payAsYouGo.createSession({
-	 *   productId: 1,
-	 *   frequency: { unit: 'months', value: 1 },
-	 *   freeCredits: 100,
-	 *   webhookUrl: 'https://example.com/webhook',
-	 *   customerUUID: 'customer-uuid'
-	 * });
-	 * console.log(payg.link);
-	 * ```
 	 */
 	async createSession(options: {
 		productId: number;
@@ -51,21 +52,11 @@ export class PayAsYouGoRequests extends Request {
 		webhookUrl?: string;
 		customerUUID?: string;
 	}): Promise<LinkResponse> {
-		const sessionData: CreateSessionDto = {
-			productId: options.productId,
-			successUrl: options.successUrl,
-			cancelUrl: options.cancelUrl,
-			webhookUrl: options.webhookUrl,
-			customerUUID: options.customerUUID,
-			options: {
-				subscriptionType: 'payAsYouGo',
-				frequency: options.frequency,
-				freeCredits: options.freeCredits,
-			},
-		};
-
-		validateCreateSession(sessionData);
-		return this.sessionRequests.create(sessionData);
+		// PAYG session creation endpoint is not yet available.
+		// This will be wired to /transaction/session-checkout/new/payg once re-enabled.
+		throw new ValidationException('Pay-as-you-go subscriptions are temporarily unavailable');
+		validateCreateSession(options); // unreachable; kept to satisfy the linter
+		return Promise.reject(); // unreachable
 	}
 
 	/**
@@ -73,52 +64,37 @@ export class PayAsYouGoRequests extends Request {
 	 * @param sessionUUID - Session UUID
 	 * @returns Session details
 	 */
-	async getSession(sessionUUID: string): Promise<Session> {
-		return this.sessionRequests.get(sessionUUID);
+	async getSession(sessionUUID: string): Promise<PaygSubscriptionSession> {
+		return this.sessionRequests.get<PaygSubscriptionSession>(sessionUUID);
 	}
 
 	/**
 	 * Get a pay-as-you-go subscription by UUID
 	 * @param paygUUID - PAYG subscription UUID
 	 * @returns PAYG subscription details
-	 *
-	 * @example
-	 * ```typescript
-	 * const payg = await client.payAsYouGo.get('payg-uuid');
-	 * console.log(payg.allowance, payg.maxAmount);
-	 * ```
 	 */
 	async get(paygUUID: string): Promise<PayAsYouGoSubscription> {
-		const endpoint = `${PayAsYouGoRequests.BASE_ROUTE}/${paygUUID}`;
-		return this.getReq<PayAsYouGoSubscription>(endpoint);
+		return this.getReq<PayAsYouGoSubscription>(
+			`${PayAsYouGoRequests.BASE_ROUTE}/${paygUUID}`
+		);
 	}
 
 	/**
 	 * Get subscription payment history
 	 * @param subscriptionUUID - Subscription UUID
 	 * @returns List of subscription payment history records
-	 *
-	 * @example
-	 * ```typescript
-	 * const history = await client.payAsYouGo.getPaymentHistory('payg-uuid');
-	 * history.forEach(record => {
-	 *   console.log(record.uuid, record.amount, record.createdAt);
-	 * });
-	 * ```
 	 */
 	async getPaymentHistory(subscriptionUUID: string): Promise<SubscriptionHistory[]> {
 		if (!subscriptionUUID) {
 			throw new ValidationException('Subscription UUID is required');
 		}
-
 		return this.getReq<SubscriptionHistory[]>(
 			`${PayAsYouGoRequests.BASE_ROUTE}/history/${subscriptionUUID}`
 		);
 	}
 
 	/**
-	 * Force cancel a subscription immediately.
-	 * Warning: Use only when absolutely necessary
+	 * Force cancel a PAYG subscription
 	 * @param subscriptionUUID - Subscription UUID
 	 * @returns Success response
 	 */
@@ -126,41 +102,30 @@ export class PayAsYouGoRequests extends Request {
 		if (!subscriptionUUID) {
 			throw new ValidationException('Subscription UUID is required');
 		}
-
 		return this.getReq<SuccessResponse>(
-			`${PayAsYouGoRequests.BASE_ROUTE}/processing/force-cancel/${subscriptionUUID}`,
-			{}
+			`${PayAsYouGoRequests.BASE_ROUTE}/processing/force-cancel/${subscriptionUUID}`
 		);
 	}
 
 	/**
-	 * Execute a test billing for a subscription (test mode only)
-	 * This simulates a billing cycle for testing purposes.
-	 *
+	 * Execute a test billing cycle (test mode only)
 	 * @param subscriptionUUID - Subscription UUID
-	 * @returns Status response
+	 * @returns Status link response
 	 */
 	async executeTestBilling(subscriptionUUID: string): Promise<StatusLinkResponse> {
 		if (!subscriptionUUID) {
 			throw new ValidationException('Subscription UUID is required');
 		}
-
 		return this.getReq<StatusLinkResponse>(
-			`${PayAsYouGoRequests.BASE_ROUTE}/processing/execute-billing/${subscriptionUUID}`,
-			{}
+			`${PayAsYouGoRequests.BASE_ROUTE}/processing/execute-billing/${subscriptionUUID}`
 		);
 	}
 
 	/**
-	 * Increase the units for the current billing period of a PAYG subscription
+	 * Increase the units for the current billing period
 	 * @param subscriptionUUID - Subscription UUID
-	 * @param unitsToAdd - Number of units to add (for example the product unit is in hours, and you want to add 5 hours of usage)
+	 * @param unitsToAdd - Number of units to add
 	 * @returns Success response
-	 *
-	 * @example
-	 * ```typescript
-	 * const response = await client.payAsYouGo.increaseUnitsCurrentPeriod('payg-uuid', 5);
-	 * ```
 	 */
 	async increaseUnitsCurrentPeriod(
 		subscriptionUUID: string,
@@ -172,13 +137,9 @@ export class PayAsYouGoRequests extends Request {
 		if (unitsToAdd <= 0) {
 			throw new ValidationException('Units to add must be greater than zero');
 		}
-
-		const endpoint = `${PayAsYouGoRequests.BASE_ROUTE}/payg/increase-units-current-period`;
-		const body = {
-			subscriptionUUID,
-			increaseByAmount: unitsToAdd,
-		};
-
-		return this.postReq<SuccessResponse>(endpoint, body);
+		return this.postReq<SuccessResponse>(
+			`${PayAsYouGoRequests.BASE_ROUTE}/payg/increase-units-current-period`,
+			{ subscriptionUUID, increaseByAmount: unitsToAdd }
+		);
 	}
 }

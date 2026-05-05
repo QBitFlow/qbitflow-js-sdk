@@ -1,116 +1,131 @@
 import { Duration } from './common';
 import { Currency } from './currency';
-import { TransactionStatus } from './status';
+import { TransactionStatus, TransactionType } from './status';
 
 /**
- * Session and payment creation types
+ * Base fields present on every session checkout, regardless of type.
+ * Mirrors TransactionData on the server.
  */
-
-/**
- * Subscription options for a session
- */
-export interface SubscriptionOptions {
-	/** Frequency in seconds */
-	frequency: number;
-	/** Type of subscription */
-	subscriptionType: 'subscription' | 'payAsYouGo';
-	/** Trial period in seconds (optional) */
-	trialPeriod?: number;
-	/** Free credits amount (optional) */
-	freeCredits?: number;
-	/** Minimum number of billing periods (optional) */
-	minPeriods?: number;
-}
-
-/**
- * Complete session information
- */
-export interface Session {
-	/** Unique identifier for the session */
+export interface OneTimePaymentSession {
+	/** Session UUID — identifies the payment on-chain */
 	uuid: string;
-	/** Product ID (if using an existing product) */
+	/** Product ID (if the session was created from an existing product) */
 	productId?: number;
-	/** Name of the product */
-	productName: string;
-	/** Description of the product */
-	description: string;
+	/** Product name */
+	productName?: string;
+	/** Product description */
+	description?: string;
 	/** Price in USD */
-	price: number;
-	/** Organization name */
-	organizationName: string;
-	/** URL to redirect on success */
+	price?: number;
+	/** URL to redirect the customer after a successful payment */
 	successUrl?: string;
-	/** URL to redirect on cancellation */
+	/** URL to redirect the customer after a cancelled or failed payment */
 	cancelUrl?: string;
-	/** Customer UUID */
+	/** Webhook URL for payment status notifications */
+	webhookUrl?: string;
+	/** Organisation ID (set by the server) */
+	organizationId: number;
+	/** Organisation name (set by the server) */
+	organizationName: string;
+	/** QBitFlow platform fee in basis points (set by the server) */
+	feeBps: number;
+	/** Additional organisation-level fee in basis points (0 if not set) */
+	organizationFeeBps?: number;
+	/** ID of the user who created the payment link */
+	userId?: number;
+	/** Whether this is a test-mode session */
+	test: boolean;
+	/** Pre-filled customer UUID (empty UUID if not provided at creation time) */
 	customerUUID: string;
-	/** Subscription options (for subscription sessions) */
-	options?: SubscriptionOptions;
-	/** Available cryptocurrencies for payment (currencies supported by the merchant) */
+	/** Currencies accepted for this payment */
 	availableCurrencies: Currency[];
 }
 
 /**
- * Subscription type for creating sessions
+ * Session checkout for a recurring subscription.
+ * Mirrors SubscriptionData on the server (extends TransactionData).
  */
-export type SubscriptionType = 'subscription' | 'payAsYouGo';
-
-/**
- * Subscription options when creating a session
- */
-export interface CreateSubscriptionOptions {
-	/** Type of subscription */
-	subscriptionType: SubscriptionType;
-	/** Billing frequency */
-	frequency: Duration;
-	/** Trial period duration (optional) */
-	trialPeriod?: Duration;
-	/** Free credits amount (optional) */
-	freeCredits?: number;
-	/** Minimum number of billing periods (optional) */
+export interface SubscriptionSession extends OneTimePaymentSession {
+	/** Billing frequency in seconds (e.g. 2592000 = 30 days) */
+	frequency: number;
+	/** Trial period in seconds (0 / omitted if no trial) */
+	trialPeriod?: number;
+	/** Minimum number of billing periods the subscriber must complete */
 	minPeriods?: number;
 }
 
 /**
- * Data required to create a new payment session
+ * Session checkout for a pay-as-you-go subscription.
+ * Mirrors CreatePaygSubscriptionData on the server.
+ * Note: frequency uses the structured Duration type (value + unit), unlike SubscriptionSession.
  */
-export interface CreateSessionDto {
-	/** Product ID (required if not providing product details) */
-	productId?: number;
-	/** Product name (required if not providing productId) */
-	productName?: string;
-	/** Product description (required if not providing productId) */
-	description?: string;
-	/** Price in USD (required if not providing productId) */
-	price?: number;
-	/** URL to redirect on successful payment */
-	successUrl?: string;
-	/** URL to redirect on payment cancellation */
-	cancelUrl?: string;
-	/** Webhook URL for payment notifications */
-	webhookUrl?: string;
-	/** Customer UUID (optional, customer will be prompted if not provided) */
-	customerUUID?: string;
-	/** Subscription options (for subscription sessions) */
-	options?: CreateSubscriptionOptions;
+export interface PaygSubscriptionSession extends OneTimePaymentSession {
+	/** Billing frequency as a structured duration */
+	frequency: Duration;
+	/** Free credits in USD available before the on-chain allowance is used */
+	freeCredits?: number;
 }
 
 /**
- * Response containing a payment link
+ * Discriminated union of all possible session checkout shapes.
+ * Use `instanceof`-style narrowing on the presence of `frequency` / `freeCredits`
+ * to determine which variant you have.
+ */
+export type SessionCheckout =
+	| OneTimePaymentSession
+	| SubscriptionSession
+	| PaygSubscriptionSession;
+
+/**
+ * Data required to create a one-time payment session.
+ * Either productId or (productName + description + price) must be provided.
+ */
+export interface CreatePaymentSessionDto {
+	/** Use an existing product by ID */
+	productId?: number;
+	/** Provide an inline product name */
+	productName?: string;
+	/** Provide an inline product description */
+	description?: string;
+	/** Price in USD (required when not using productId) */
+	price?: number;
+	/** URL to redirect the customer on successful payment */
+	successUrl?: string;
+	/** URL to redirect the customer on payment cancellation */
+	cancelUrl?: string;
+	/** Webhook URL for real-time payment status notifications */
+	webhookUrl?: string;
+	/** Pre-fill the customer; the customer will be prompted if omitted */
+	customerUUID?: string;
+}
+
+/**
+ * Data required to create a subscription session.
+ * Either productId or (productName + description + price) must be provided.
+ */
+export interface CreateSubscriptionSessionDto extends CreatePaymentSessionDto {
+	/** Billing frequency (e.g. { value: 1, unit: 'months' }) — required */
+	frequency: Duration;
+	/** Optional trial period before the first billing */
+	trialPeriod?: Duration;
+	/** Minimum number of billing periods the subscriber must complete */
+	minPeriods?: number;
+}
+
+/**
+ * Response containing the generated payment link
  */
 export interface LinkResponse {
 	/** Session UUID */
 	uuid: string;
-	/** Payment link for the customer */
+	/** Payment link to send to the customer */
 	link: string;
-	/** Unix timestamp when the link expires (optional) */
-	expiresAt?: number;
 }
 
 export interface StatusLinkResponse {
 	/** Status message */
 	message: string;
-	/** Link to check the status of the transaction (websocket) */
+	/** Link to the transaction status WebSocket */
 	statusLink: string;
 }
 
@@ -122,6 +137,10 @@ export interface SessionWebhookResponse {
 	uuid: string;
 	/** Current transaction status */
 	status: TransactionStatus;
-	/** Complete session information */
-	session: Session;
+	/** Full session data — may be a payment, subscription, or PAYG session */
+	session: SessionCheckout;
+	/** Type of the transaction */
+	txType: TransactionType;
+	/** Link to the QBitFlow management page for this transaction */
+	managementPageLink: string;
 }
