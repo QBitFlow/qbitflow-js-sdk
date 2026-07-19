@@ -375,7 +375,6 @@ describe('QBitFlow Integration Tests', () => {
 				const response = await client.oneTimePayments.createSession({
 					productId: createdProduct?.id,
 					customerUUID: createdCustomer?.uuid,
-					webhookUrl: 'https://example.com/webhook',
 				});
 
 				expect(response.uuid).toBeDefined();

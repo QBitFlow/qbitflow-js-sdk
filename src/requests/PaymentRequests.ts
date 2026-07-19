@@ -1,17 +1,17 @@
-import { Request } from './Request';
-import { SessionRequests } from './SessionRequests';
 import {
-	CreatePaymentSessionDto,
-	LinkResponse,
-	OneTimePaymentSession,
-	Payment,
 	CombinedPayment,
+	CreatePaymentSessionDto,
 	CursorData,
 	CursorDataResponse,
 	getCursorData,
+	LinkResponse,
+	OneTimePaymentSession,
+	Payment,
 } from '../types';
 import { Customer } from '../types/customer';
 import { cursorQueryBuilder, validateCreateSession } from '../utils';
+import { Request } from './Request';
+import { SessionRequests } from './SessionRequests';
 
 /**
  * One-time payment requests
@@ -36,7 +36,6 @@ export class PaymentRequests extends Request {
 	 * ```typescript
 	 * const payment = await client.oneTimePayments.createSession({
 	 *   productId: 1,
-	 *   webhookUrl: 'https://example.com/webhook',
 	 *   customerUUID: 'customer-uuid'
 	 * });
 	 * console.log(payment.link); // Send this link to the customer
@@ -74,7 +73,7 @@ export class PaymentRequests extends Request {
 	 * ```
 	 */
 	async get(paymentUUID: string): Promise<Payment> {
-		return this.getReq<Payment>(`${PaymentRequests.BASE_ROUTE}/payment/${paymentUUID}`);
+		return this.getReq<Payment>(`${ PaymentRequests.BASE_ROUTE }/payment/${ paymentUUID }`);
 	}
 
 	/**
@@ -93,7 +92,7 @@ export class PaymentRequests extends Request {
 	async getAll(options?: { limit?: number; cursor?: string | null }): Promise<CursorData<Payment>> {
 		const params = cursorQueryBuilder(options?.limit, options?.cursor);
 		const partial = await this.getReq<CursorDataResponse<Payment>>(
-			`${PaymentRequests.BASE_ROUTE}/payments`,
+			`${ PaymentRequests.BASE_ROUTE }/payments`,
 			params
 		);
 		return getCursorData(partial);
@@ -116,7 +115,7 @@ export class PaymentRequests extends Request {
 	}): Promise<CursorData<CombinedPayment>> {
 		const params = cursorQueryBuilder(options?.limit, options?.cursor);
 		const partial = await this.getReq<CursorDataResponse<CombinedPayment>>(
-			`${PaymentRequests.BASE_ROUTE}/payments/combined`,
+			`${ PaymentRequests.BASE_ROUTE }/payments/combined`,
 			params
 		);
 		return getCursorData(partial);
@@ -134,6 +133,6 @@ export class PaymentRequests extends Request {
 	 * ```
 	 */
 	async getCustomerForTransaction(transactionUUID: string): Promise<Customer> {
-		return this.getReq<Customer>(`${PaymentRequests.BASE_ROUTE}/customer/${transactionUUID}`);
+		return this.getReq<Customer>(`${ PaymentRequests.BASE_ROUTE }/customer/${ transactionUUID }`);
 	}
 }

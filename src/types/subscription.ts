@@ -1,5 +1,5 @@
-import { Currency } from './currency';
 import { PaymentMetadata } from './common';
+import { Currency } from './currency';
 
 /**
  * Subscription status values
@@ -116,3 +116,22 @@ export interface SubscriptionHistory {
 	/** Optional arbitrary metadata attached to the billing */
 	metadata?: PaymentMetadata;
 }
+
+/**
+ * Represents a subscription status transition webhook event.
+ *
+ * Contains information about a subscription status change,
+ * including previous and current status and the update timestamp.
+ */
+export interface SubscriptionStatusTransitionWebhook {
+	/** UUID of the subscription that changed status */
+	subscriptionUUID: string;
+	/** The previous subscription status */
+	previousStatus: SubscriptionStatus;
+	/** The current subscription status */
+	currentStatus: SubscriptionStatus;
+	/** Timestamp when the status transition occurred */
+	updatedAt: string;
+}
+
+

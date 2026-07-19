@@ -21,7 +21,6 @@ async function createOneTimePaymentWithWebhook() {
 	try {
 		const result = await client.oneTimePayments.createSession({
 			productId: 1,
-			webhookUrl: `${ MY_URL }/webhook`,
 			customerUUID: '01997c89-d0e9-7c9a-9886-fe7709919695',
 		});
 
@@ -70,7 +69,6 @@ async function createSubscriptionSession() {
 			productId: 1,
 			frequency: { unit: 'months', value: 1 }, // Bill monthly
 			trialPeriod: { unit: 'days', value: 7 }, // 7-day trial (optional)
-			webhookUrl: `${ MY_URL }/webhook`,
 			customerUUID: '01997c89-d0e9-7c9a-9886-fe7709919695',
 		});
 
@@ -94,7 +92,6 @@ async function createSubscriptionSession() {
 // 			productId: 1,
 // 			frequency: { unit: 'months', value: 1 }, // Bill monthly
 // 			freeCredits: 100, // Start with 100 free credits (optional)
-// 			webhookUrl: `${MY_URL}/webhook`,
 // 			customerUUID: '01997c89-d0e9-7c9a-9886-fe7709919695',
 // 		});
 
@@ -120,7 +117,6 @@ async function checkTransactionStatus(transactionUUID: string) {
 		);
 
 		console.log('Transaction Status:', status.status);
-		console.log('Transaction Type:', status.type);
 		if (status.txHash) {
 			console.log('Transaction Hash:', status.txHash);
 		}
@@ -151,7 +147,6 @@ async function listenToTransactionUpdates(transactionUUID: string) {
 					console.log('\n--- Status Update Received ---');
 					console.log('Transaction UUID:', message.transactionUUID);
 					console.log('Status:', message.status.status);
-					console.log('Type:', message.status.type);
 					if (message.status.txHash) {
 						console.log('Transaction Hash:', message.status.txHash);
 					}
