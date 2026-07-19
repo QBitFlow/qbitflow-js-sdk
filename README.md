@@ -14,7 +14,7 @@ Official JavaScript/TypeScript SDK for [QBitFlow](https://qbitflow.app) - a comp
 - 📦 **Dual Package**: Works with both CommonJS and ES modules
 - 🧪 **Well Tested**: Comprehensive test coverage
 - 📚 **Great Documentation**: Detailed docs with examples
-- 🔌 **Webhook Support**: Handle payment notifications easily
+- 🔌 **Webhook Support**: Handle payment and subscription-status notifications easily
 - 💳 **One-Time Payments**: Accept cryptocurrency payments with ease
 - 🔄 **Recurring Subscriptions**: Automated recurring billing in cryptocurrency
 - 👥 **Customer Management**: Create and manage customer profiles
@@ -40,6 +40,10 @@ Official JavaScript/TypeScript SDK for [QBitFlow](https://qbitflow.app) - a comp
 - [User Management](#user-management)
 - [API Key Management](#api-key-management)
 - [Webhook Handling](#webhook-handling)
+  - [Configuring Webhook URLs](#configuring-webhook-urls)
+  - [Transaction Webhooks](#transaction-webhooks)
+  - [Subscription Status Webhooks](#subscription-status-webhooks)
+  - [Test Webhooks](#test-webhooks)
 - [Error Handling](#error-handling)
 - [API Reference](#api-reference)
 - [License](#license)
@@ -78,13 +82,16 @@ const client = new QBitFlow('your-api-key');
 const payment = await client.oneTimePayments.createSession({
 	productId: 1,
 	customerUUID: 'customer-uuid',
-	webhookUrl: 'https://yourapp.com/webhook',
 	successUrl: 'https://yourapp.com/success',
 	cancelUrl: 'https://yourapp.com/cancel',
 });
 
 console.log('Payment link:', payment.link); // Send this link to your customer
 ```
+
+> **Webhook URLs are configured in the dashboard.** Set your **Transaction webhook**
+> (and **Subscription status webhook**) URLs under settings in the [QBitFlow dashboard](https://qbitflow.app).
+> They can no longer be set per session. See [Webhook Handling](#webhook-handling).
 
 ### 4. Create a Recurring Subscription
 
@@ -93,7 +100,6 @@ const subscription = await client.subscriptions.createSession({
 	productId: 1,
 	frequency: { unit: 'months', value: 1 }, // Bill monthly
 	trialPeriod: { unit: 'days', value: 7 }, // 7-day free trial (optional)
-	webhookUrl: 'https://yourapp.com/webhook',
 	customerUUID: 'customer-uuid',
 });
 
@@ -137,7 +143,6 @@ Provide either a `productId` or inline product details (`productName` + `descrip
 const payment = await client.oneTimePayments.createSession({
 	productId: 1,
 	customerUUID: 'customer-uuid',
-	webhookUrl: 'https://yourapp.com/webhook',
 	successUrl: 'https://yourapp.com/success',
 	cancelUrl: 'https://yourapp.com/cancel',
 });
@@ -148,7 +153,6 @@ const payment = await client.oneTimePayments.createSession({
 	description: 'Product description',
 	price: 99.99, // USD
 	customerUUID: 'customer-uuid',
-	webhookUrl: 'https://yourapp.com/webhook',
 });
 
 console.log(payment.uuid); // Session UUID
@@ -215,12 +219,18 @@ const subscription = await client.subscriptions.createSession({
 	frequency: { unit: 'months', value: 1 }, // Bill monthly
 	trialPeriod: { unit: 'days', value: 7 }, // 7-day trial (optional)
 	minPeriods: 3, // Minimum commitment periods (optional)
-	webhookUrl: 'https://yourapp.com/webhook',
 	customerUUID: 'customer-uuid',
 });
 
 console.log(subscription.link);
 ```
+
+> **Track lifecycle changes with webhooks, not polling.** Previously you had to run a
+> cron job that periodically fetched each subscription with `subscriptions.get()` to detect
+> status changes and act on them. Now you can set a **Subscription status webhook** URL in
+> the dashboard settings and QBitFlow will notify you on every status transition
+> (`active` → `past_due`, `trial` → `active`, etc.), eliminating the need for a cron job.
+> See [Subscription Status Webhooks](#subscription-status-webhooks).
 
 ### Frequency Units
 
@@ -553,7 +563,34 @@ await client.apiKeys.delete(keyId);
 
 ## Webhook Handling
 
-### Express.js Example
+### Configuring Webhook URLs
+
+Webhook endpoint URLs are configured in the [QBitFlow dashboard](https://qbitflow.app) settings,
+**not** per session. There are two independent webhooks:
+
+- **Transaction webhook** — fired when a payment or subscription-checkout session changes status
+  (payload: [`SessionWebhookResponse`](#transaction-webhooks)).
+- **Subscription status webhook** — fired when an existing subscription transitions between statuses
+  (payload: [`SubscriptionStatusTransitionWebhook`](#subscription-status-webhooks)).
+
+> **Migration note (1.2.1):** `webhookUrl` was removed from `createSession()` for both one-time
+> payments and subscriptions. Set the **Transaction webhook** URL in the dashboard instead — this
+> ensures consistent webhook handling across all transactions.
+
+All webhooks are signed with HMAC. Verify every request with `client.webhooks.verify(...)` before
+processing it, using the headers exposed by the SDK:
+
+| Getter                              | Header                     | Purpose                                 |
+| ----------------------------------- | -------------------------- | --------------------------------------- |
+| `client.webhooks.signatureHeader`   | `X-Webhook-Signature-256`  | HMAC signature to verify                |
+| `client.webhooks.timestampHeader`   | `X-Webhook-Timestamp`      | Timestamp included in the signed payload |
+| `client.webhooks.webhookIdHeader`   | `X-Webhook-ID`             | Unique webhook ID (see [Test Webhooks](#test-webhooks)) |
+
+### Transaction Webhooks
+
+Point your dashboard **Transaction webhook** URL at this endpoint. The body is a
+`SessionWebhookResponse`, whose `session` field is a `SessionCheckout`
+(`OneTimePaymentSession | SubscriptionSession | PaygSubscriptionSession`).
 
 ```typescript
 import express from 'express';
@@ -573,6 +610,7 @@ app.use(express.json());
 app.post('/webhook', async (req, res) => {
 	const signature = req.headers[qbitflowClient.webhooks.signatureHeader.toLowerCase()] as string;
 	const timestamp = req.headers[qbitflowClient.webhooks.timestampHeader.toLowerCase()] as string;
+	const webhookId = req.headers[qbitflowClient.webhooks.webhookIdHeader.toLowerCase()] as string;
 
 	if (!signature || !timestamp) {
 		res.status(400).json({ error: 'Missing required headers' });
@@ -581,6 +619,12 @@ app.post('/webhook', async (req, res) => {
 
 	if (!(await qbitflowClient.webhooks.verify(req.body, signature, timestamp))) {
 		res.status(401).json({ error: 'Invalid signature' });
+		return;
+	}
+
+	// Reachability check from the dashboard "Test webhook" action — acknowledge and stop.
+	if (webhookId === qbitflowClient.webhooks.testWebhookId) {
+		res.status(200).json({ received: true });
 		return;
 	}
 
@@ -596,6 +640,89 @@ app.post('/webhook', async (req, res) => {
 
 	res.status(200).json({ received: true });
 });
+```
+
+### Subscription Status Webhooks
+
+Point your dashboard **Subscription status webhook** URL at this endpoint to be notified whenever a
+subscription transitions between statuses. This replaces the old pattern of polling
+`subscriptions.get()` from a cron job.
+
+The body is a `SubscriptionStatusTransitionWebhook`:
+
+```typescript
+interface SubscriptionStatusTransitionWebhook {
+	subscriptionUUID: string;         // subscription that changed status
+	previousStatus: SubscriptionStatus;
+	currentStatus: SubscriptionStatus;
+	updatedAt: string;                // ISO timestamp of the transition
+}
+```
+
+```typescript
+import {
+	QBitFlow,
+	SubscriptionStatus,
+	SubscriptionStatusTransitionWebhook,
+} from 'qbitflow';
+
+app.post('/subscription-status-webhook', async (req, res) => {
+	const signature = req.headers[qbitflowClient.webhooks.signatureHeader.toLowerCase()] as string;
+	const timestamp = req.headers[qbitflowClient.webhooks.timestampHeader.toLowerCase()] as string;
+	const webhookId = req.headers[qbitflowClient.webhooks.webhookIdHeader.toLowerCase()] as string;
+
+	if (!signature || !timestamp) {
+		res.status(400).json({ error: 'Missing required headers' });
+		return;
+	}
+
+	if (!(await qbitflowClient.webhooks.verify(req.body, signature, timestamp))) {
+		res.status(401).json({ error: 'Invalid signature' });
+		return;
+	}
+
+	// Reachability check from the dashboard "Test webhook" action — acknowledge and stop.
+	if (webhookId === qbitflowClient.webhooks.testWebhookId) {
+		res.status(200).json({ received: true });
+		return;
+	}
+
+	const event = req.body as SubscriptionStatusTransitionWebhook;
+
+	switch (event.currentStatus) {
+		case SubscriptionStatus.ACTIVE:
+			// Grant / keep access
+			break;
+		case SubscriptionStatus.PAST_DUE:
+		case SubscriptionStatus.LOW_ON_FUNDS:
+			// Warn the customer that their next billing may fail
+			break;
+		case SubscriptionStatus.CANCELLED:
+			// Revoke access
+			break;
+	}
+
+	console.log(`${event.subscriptionUUID}: ${event.previousStatus} → ${event.currentStatus}`);
+
+	res.status(200).json({ received: true });
+});
+```
+
+### Test Webhooks
+
+The dashboard **Test webhook** action sends a fake payload to your configured URL to confirm the
+endpoint is reachable. That payload may not match the shape of a real webhook, so if you try to
+process it normally your handler could error.
+
+To handle it safely, check the incoming `X-Webhook-ID` header against
+`client.webhooks.testWebhookId`. When they match, return HTTP `200` immediately and skip normal
+payload processing (as shown in both examples above).
+
+```typescript
+if (webhookId === qbitflowClient.webhooks.testWebhookId) {
+	res.status(200).json({ received: true });
+	return;
+}
 ```
 
 ## Error Handling

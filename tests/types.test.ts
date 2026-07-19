@@ -7,10 +7,10 @@ import {
 	CreateSubscriptionSessionDto,
 	Duration,
 	OneTimePaymentSession,
-	SubscriptionSession,
 	PaygSubscriptionSession,
 	QBitFlowConfig,
 	RefundStatus,
+	SubscriptionSession,
 	SubscriptionStatus,
 	TransactionStatusValue,
 	TransactionType,
@@ -80,7 +80,6 @@ describe('Type Definitions', () => {
 				productId: 1,
 				successUrl: 'https://example.com/success',
 				cancelUrl: 'https://example.com/cancel',
-				webhookUrl: 'https://example.com/webhook',
 			};
 			expect(dto.successUrl).toBeDefined();
 			expect(dto.cancelUrl).toBeDefined();

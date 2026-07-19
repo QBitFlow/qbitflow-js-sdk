@@ -1,16 +1,16 @@
-import { Request } from './Request';
-import { SessionRequests } from './SessionRequests';
+import { ValidationException } from '../exceptions';
 import {
 	CreateSubscriptionSessionDto,
 	LinkResponse,
-	SubscriptionSession,
+	StatusLinkResponse,
 	Subscription,
 	SubscriptionHistory,
+	SubscriptionSession,
 	SuccessResponse,
-	StatusLinkResponse,
 } from '../types';
 import { validateCreateSession } from '../utils';
-import { ValidationException } from '../exceptions';
+import { Request } from './Request';
+import { SessionRequests } from './SessionRequests';
 
 /**
  * Subscription payment requests
@@ -37,7 +37,6 @@ export class SubscriptionRequests extends Request {
 	 *   productId: 1,
 	 *   frequency: { unit: 'months', value: 1 },
 	 *   trialPeriod: { unit: 'days', value: 7 },
-	 *   webhookUrl: 'https://example.com/webhook',
 	 *   customerUUID: 'customer-uuid'
 	 * });
 	 * console.log(sub.link);
@@ -69,7 +68,7 @@ export class SubscriptionRequests extends Request {
 	 * ```
 	 */
 	async get(subscriptionUUID: string): Promise<Subscription> {
-		return this.getReq<Subscription>(`${SubscriptionRequests.BASE_ROUTE}/${subscriptionUUID}`);
+		return this.getReq<Subscription>(`${ SubscriptionRequests.BASE_ROUTE }/${ subscriptionUUID }`);
 	}
 
 	/**
@@ -88,7 +87,7 @@ export class SubscriptionRequests extends Request {
 			throw new ValidationException('Subscription UUID is required');
 		}
 		return this.getReq<SubscriptionHistory[]>(
-			`${SubscriptionRequests.BASE_ROUTE}/history/${subscriptionUUID}`
+			`${ SubscriptionRequests.BASE_ROUTE }/history/${ subscriptionUUID }`
 		);
 	}
 
@@ -105,7 +104,7 @@ export class SubscriptionRequests extends Request {
 			throw new ValidationException('Subscription UUID is required');
 		}
 		return this.getReq<SuccessResponse>(
-			`${SubscriptionRequests.BASE_ROUTE}/processing/force-cancel/${subscriptionUUID}`
+			`${ SubscriptionRequests.BASE_ROUTE }/processing/force-cancel/${ subscriptionUUID }`
 		);
 	}
 
@@ -121,7 +120,7 @@ export class SubscriptionRequests extends Request {
 			throw new ValidationException('Subscription UUID is required');
 		}
 		return this.getReq<StatusLinkResponse>(
-			`${SubscriptionRequests.BASE_ROUTE}/processing/execute-billing/${subscriptionUUID}`
+			`${ SubscriptionRequests.BASE_ROUTE }/processing/execute-billing/${ subscriptionUUID }`
 		);
 	}
 }

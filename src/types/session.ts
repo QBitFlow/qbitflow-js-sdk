@@ -21,8 +21,6 @@ export interface OneTimePaymentSession {
 	successUrl?: string;
 	/** URL to redirect the customer after a cancelled or failed payment */
 	cancelUrl?: string;
-	/** Webhook URL for payment status notifications */
-	webhookUrl?: string;
 	/** Organisation ID (set by the server) */
 	organizationId: number;
 	/** Organisation name (set by the server) */
@@ -93,8 +91,6 @@ export interface CreatePaymentSessionDto {
 	successUrl?: string;
 	/** URL to redirect the customer on payment cancellation */
 	cancelUrl?: string;
-	/** Webhook URL for real-time payment status notifications */
-	webhookUrl?: string;
 	/** Pre-fill the customer; the customer will be prompted if omitted */
 	customerUUID?: string;
 }

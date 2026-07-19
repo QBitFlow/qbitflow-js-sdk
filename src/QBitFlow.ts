@@ -1,18 +1,18 @@
-import { QBitFlowConfig } from './types';
-import { DEFAULT_BASE_URL, DEFAULT_TIMEOUT, DEFAULT_MAX_RETRIES } from './config';
+import { DEFAULT_BASE_URL, DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT } from './config';
 import {
-	PaymentRequests,
-	SubscriptionRequests,
-	TransactionStatusRequests,
-	RefundRequests,
 	AccountingRequests,
 	ClaimRequests,
+	PaymentRequests,
+	RefundRequests,
+	SubscriptionRequests,
+	TransactionStatusRequests,
 } from './requests';
+import { ApiKeyRequests } from './requests/ApiKeyRequests';
 import { CustomerRequests } from './requests/CustomerRequests';
 import { ProductRequests } from './requests/ProductRequests';
 import { UserRequests } from './requests/UserRequests';
-import { ApiKeyRequests } from './requests/ApiKeyRequests';
 import { WebhookRequests } from './requests/WebhookRequests';
+import { QBitFlowConfig } from './types';
 
 /**
  * Main QBitFlow SDK client
@@ -27,7 +27,6 @@ import { WebhookRequests } from './requests/WebhookRequests';
  * const payment = await client.oneTimePayments.createSession({
  *   productId: 1,
  *   customerUUID: 'customer-uuid',
- *   webhookUrl: 'https://example.com/webhook'
  * });
  *
  * // Create a subscription

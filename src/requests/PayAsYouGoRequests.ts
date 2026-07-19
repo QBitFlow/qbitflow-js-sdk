@@ -5,19 +5,19 @@
  * has been deployed. The implementation is preserved here for reference.
  */
 
-import { Request } from './Request';
-import { SessionRequests } from './SessionRequests';
+import { ValidationException } from '../exceptions';
 import {
+	Duration,
 	LinkResponse,
 	PaygSubscriptionSession,
-	Duration,
+	StatusLinkResponse,
 	Subscription,
 	SubscriptionHistory,
 	SuccessResponse,
-	StatusLinkResponse,
 } from '../types';
 import { validateCreateSession } from '../utils';
-import { ValidationException } from '../exceptions';
+import { Request } from './Request';
+import { SessionRequests } from './SessionRequests';
 
 // Stub for the PAYG-specific subscription type (extends the base Subscription)
 interface PayAsYouGoSubscription extends Subscription {
@@ -49,7 +49,6 @@ export class PayAsYouGoRequests extends Request {
 		freeCredits?: number;
 		successUrl?: string;
 		cancelUrl?: string;
-		webhookUrl?: string;
 		customerUUID?: string;
 	}): Promise<LinkResponse> {
 		// PAYG session creation endpoint is not yet available.
@@ -75,7 +74,7 @@ export class PayAsYouGoRequests extends Request {
 	 */
 	async get(paygUUID: string): Promise<PayAsYouGoSubscription> {
 		return this.getReq<PayAsYouGoSubscription>(
-			`${PayAsYouGoRequests.BASE_ROUTE}/${paygUUID}`
+			`${ PayAsYouGoRequests.BASE_ROUTE }/${ paygUUID }`
 		);
 	}
 
@@ -89,7 +88,7 @@ export class PayAsYouGoRequests extends Request {
 			throw new ValidationException('Subscription UUID is required');
 		}
 		return this.getReq<SubscriptionHistory[]>(
-			`${PayAsYouGoRequests.BASE_ROUTE}/history/${subscriptionUUID}`
+			`${ PayAsYouGoRequests.BASE_ROUTE }/history/${ subscriptionUUID }`
 		);
 	}
 
@@ -103,7 +102,7 @@ export class PayAsYouGoRequests extends Request {
 			throw new ValidationException('Subscription UUID is required');
 		}
 		return this.getReq<SuccessResponse>(
-			`${PayAsYouGoRequests.BASE_ROUTE}/processing/force-cancel/${subscriptionUUID}`
+			`${ PayAsYouGoRequests.BASE_ROUTE }/processing/force-cancel/${ subscriptionUUID }`
 		);
 	}
 
@@ -117,7 +116,7 @@ export class PayAsYouGoRequests extends Request {
 			throw new ValidationException('Subscription UUID is required');
 		}
 		return this.getReq<StatusLinkResponse>(
-			`${PayAsYouGoRequests.BASE_ROUTE}/processing/execute-billing/${subscriptionUUID}`
+			`${ PayAsYouGoRequests.BASE_ROUTE }/processing/execute-billing/${ subscriptionUUID }`
 		);
 	}
 
@@ -138,7 +137,7 @@ export class PayAsYouGoRequests extends Request {
 			throw new ValidationException('Units to add must be greater than zero');
 		}
 		return this.postReq<SuccessResponse>(
-			`${PayAsYouGoRequests.BASE_ROUTE}/payg/increase-units-current-period`,
+			`${ PayAsYouGoRequests.BASE_ROUTE }/payg/increase-units-current-period`,
 			{ subscriptionUUID, increaseByAmount: unitsToAdd }
 		);
 	}
