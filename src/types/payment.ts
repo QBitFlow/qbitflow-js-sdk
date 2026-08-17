@@ -7,6 +7,11 @@ import { PaymentMetadata } from './common';
 export interface Payment {
 	/** Unique identifier for the payment */
 	uuid: string;
+	/**
+	 * Your own reference for the payment, set when the session was created.
+	 * Use `oneTimePayments.getByReference()` to look the payment up by this value.
+	 */
+	reference?: string;
 	/** Timestamp when payment was created */
 	createdAt: string;
 	/** Sender address */

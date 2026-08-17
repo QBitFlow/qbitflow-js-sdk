@@ -77,6 +77,25 @@ export class PaymentRequests extends Request {
 	}
 
 	/**
+	 * Get a completed one-time payment by the reference you assigned when creating it.
+	 * Lets you resolve a payment from your own order/invoice ID without storing QBitFlow's UUID.
+	 *
+	 * @param reference - Your own payment reference
+	 * @returns Payment details
+	 *
+	 * @example
+	 * ```typescript
+	 * const payment = await client.oneTimePayments.getByReference('order-1234');
+	 * console.log(payment.uuid, payment.amount);
+	 * ```
+	 */
+	async getByReference(reference: string): Promise<Payment> {
+		return this.getReq<Payment>(
+			`${ PaymentRequests.BASE_ROUTE }/payment/reference/${ encodeURIComponent(reference) }`
+		);
+	}
+
+	/**
 	 * Get all one-time payments with cursor-based pagination
 	 * @param options - Pagination options
 	 * @returns Paginated payment list

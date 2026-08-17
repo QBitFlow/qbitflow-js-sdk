@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.0] - 2026-08-17
+
+### Added
+
+- **Reference-based lookups** — resolve resources by the reference you assigned instead of storing QBitFlow's internal UUIDs:
+  - `oneTimePayments.getByReference(reference)` — `GET /transaction/payment/reference/:paymentReference`
+  - `subscriptions.getByReference(reference)` — `GET /transaction/subscription/reference/subscription/:subscriptionReference`
+  - `customers.getByReference(reference)` — `GET /customer/reference/:reference`
+- **Your own references on session creation** — `CreatePaymentSessionDto` and `CreateSubscriptionSessionDto` now accept:
+  - `reference` — your own transaction reference (e.g. order/invoice ID), echoed back on the resulting object and in webhooks
+  - `productReference` — select a product by your own reference (alternative to `productId`)
+  - `customerReference` — select an existing customer by your own reference (alternative to `customerUUID`); a new customer is created during checkout if none matches
+
+### Changed
+
+- **`Payment.reference`** — added; the reference you set when creating the session
+- **`Subscription.reference`** — added; the reference you set when creating the session
+- **`OneTimePaymentSession`** (and its subtypes) — added `reference`, `productReference`, and `customerReference`, so session responses and transaction webhook payloads expose the references you provided
+- **`SubscriptionStatusTransitionWebhook.subscriptionReference`** — added; the subscription's reference is now included on status-transition webhooks
+
 ## [1.2.1] - 2026-07-18
 
 - removed `webhookUrl` from `CreatePaymentSessionDto` and `CreateSubscriptionSessionDto`. Webhook URLs are now set at the settings level in the QBitFlow dashboard, and cannot be overridden per session. This change simplifies session creation and ensures consistent webhook handling across all transactions.
