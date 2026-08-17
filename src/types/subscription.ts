@@ -33,6 +33,11 @@ export enum SubscriptionStatus {
 export interface Subscription {
 	/** Unique identifier for the subscription */
 	uuid: string;
+	/**
+	 * Your own reference for the subscription, set when the session was created.
+	 * Use `subscriptions.getByReference()` to look the subscription up by this value.
+	 */
+	reference?: string;
 	/** Subscriber's address */
 	from: string;
 	/** Recipient's address (merchant's wallet for the selected currency) */
@@ -126,6 +131,11 @@ export interface SubscriptionHistory {
 export interface SubscriptionStatusTransitionWebhook {
 	/** UUID of the subscription that changed status */
 	subscriptionUUID: string;
+	/**
+	 * Your own reference for the subscription, set when the session was created
+	 * (omitted if none was provided).
+	 */
+	subscriptionReference?: string;
 	/** The previous subscription status */
 	previousStatus: SubscriptionStatus;
 	/** The current subscription status */

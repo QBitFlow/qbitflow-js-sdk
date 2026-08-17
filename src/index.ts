@@ -16,4 +16,4 @@ export * from './types';
 export * from './exceptions';
 
 // Export version
-export const VERSION = '1.2.1';
+export const VERSION = '1.3.0';

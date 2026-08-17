@@ -36,6 +36,22 @@ export class CustomerRequests extends Request {
 	}
 
 	/**
+	 * Get customer by the reference you assigned when creating it.
+	 * Lets you resolve a customer from your own identifier without storing QBitFlow's UUID.
+	 *
+	 * @param reference The customer reference
+	 * @returns The customer
+	 */
+	async getByReference(reference: string): Promise<Customer> {
+		if (!reference) {
+			throw new ValidationException('Customer reference is required');
+		}
+		return this.getReq<Customer>(
+			`${CustomerRequests.BASE_ROUTE}/reference/${encodeURIComponent(reference)}`
+		);
+	}
+
+	/**
 	 * Get customer by email
 	 * @param email The customer email
 	 * @returns The customer

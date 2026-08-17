@@ -9,8 +9,16 @@ import { TransactionStatus, TransactionType } from './status';
 export interface OneTimePaymentSession {
 	/** Session UUID — identifies the payment on-chain */
 	uuid: string;
+	/**
+	 * Your own reference for the transaction (e.g. an internal order or invoice ID),
+	 * set when the session was created. Lets you link the transaction back to your system
+	 * without storing QBitFlow's UUID.
+	 */
+	reference?: string;
 	/** Product ID (if the session was created from an existing product) */
 	productId?: number;
+	/** Your own product reference (if the session was created from a product by reference) */
+	productReference?: string;
 	/** Product name */
 	productName?: string;
 	/** Product description */
@@ -35,6 +43,8 @@ export interface OneTimePaymentSession {
 	test: boolean;
 	/** Pre-filled customer UUID (empty UUID if not provided at creation time) */
 	customerUUID: string;
+	/** Your own customer reference (if the customer was pre-filled by reference) */
+	customerReference?: string;
 	/** Currencies accepted for this payment */
 	availableCurrencies: Currency[];
 }
@@ -79,8 +89,16 @@ export type SessionCheckout =
  * Either productId or (productName + description + price) must be provided.
  */
 export interface CreatePaymentSessionDto {
+	/**
+	 * Your own reference for the transaction (e.g. an internal order or invoice ID).
+	 * Stored on the resulting payment so you can look it up later with
+	 * `oneTimePayments.getByReference()` without persisting QBitFlow's UUID.
+	 */
+	reference?: string;
 	/** Use an existing product by ID */
 	productId?: number;
+	/** Use an existing product by your own reference (alternative to productId) */
+	productReference?: string;
 	/** Provide an inline product name */
 	productName?: string;
 	/** Provide an inline product description */
@@ -91,8 +109,13 @@ export interface CreatePaymentSessionDto {
 	successUrl?: string;
 	/** URL to redirect the customer on payment cancellation */
 	cancelUrl?: string;
-	/** Pre-fill the customer; the customer will be prompted if omitted */
+	/** Pre-fill the customer by UUID; the customer will be prompted if omitted */
 	customerUUID?: string;
+	/**
+	 * Pre-fill the customer by your own reference (alternative to customerUUID).
+	 * If no customer matches, a new customer entry is created during checkout.
+	 */
+	customerReference?: string;
 }
 
 /**

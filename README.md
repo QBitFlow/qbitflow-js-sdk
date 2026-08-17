@@ -159,6 +159,24 @@ console.log(payment.uuid); // Session UUID
 console.log(payment.link); // Payment link for customer
 ```
 
+#### Using your own references
+
+Instead of storing QBitFlow's internal UUIDs, you can pass your own identifiers when creating
+a session. Set `reference` to your order/invoice ID, and use `productReference` /
+`customerReference` to select an existing product or customer by your own reference:
+
+```typescript
+const payment = await client.oneTimePayments.createSession({
+	reference: 'order-1234', // your own transaction reference
+	productReference: 'PROD-PREMIUM', // use a product by your reference (instead of productId)
+	customerReference: 'user-42', // use a customer by your reference (instead of customerUUID)
+});
+```
+
+The `reference` is echoed back on the resulting `Payment` and in webhook payloads, and you can
+look the payment up later with [`getByReference()`](#get-payment-by-reference). If no customer
+matches `customerReference`, one is created during checkout.
+
 ### Get Payment Session
 
 ```typescript
@@ -171,6 +189,16 @@ console.log(session.productName, session.price);
 ```typescript
 const payment = await client.oneTimePayments.get('payment-uuid');
 console.log(payment.transactionHash, payment.amount);
+```
+
+### Get Payment by Reference
+
+Look a payment up by the `reference` you assigned when creating the session — no need to store
+QBitFlow's UUID:
+
+```typescript
+const payment = await client.oneTimePayments.getByReference('order-1234');
+console.log(payment.uuid, payment.amount);
 ```
 
 ### List All Payments
@@ -225,6 +253,18 @@ const subscription = await client.subscriptions.createSession({
 console.log(subscription.link);
 ```
 
+Like one-time payments, subscription sessions accept your own `reference`, `productReference`,
+and `customerReference` instead of QBitFlow's internal IDs:
+
+```typescript
+const subscription = await client.subscriptions.createSession({
+	reference: 'sub-1234', // your own subscription reference
+	productReference: 'PLAN-PRO', // select a product by your reference
+	customerReference: 'user-42', // select a customer by your reference
+	frequency: { unit: 'months', value: 1 },
+});
+```
+
 > **Track lifecycle changes with webhooks, not polling.** Previously you had to run a
 > cron job that periodically fetched each subscription with `subscriptions.get()` to detect
 > status changes and act on them. Now you can set a **Subscription status webhook** URL in
@@ -251,6 +291,15 @@ console.log(session.frequency, session.trialPeriod);
 ```typescript
 const sub = await client.subscriptions.get('subscription-uuid');
 console.log(sub.subscriptionStatus, sub.nextBillingDate);
+```
+
+### Get Subscription by Reference
+
+Look a subscription up by the `reference` you assigned when creating the session:
+
+```typescript
+const sub = await client.subscriptions.getByReference('sub-1234');
+console.log(sub.uuid, sub.subscriptionStatus);
 ```
 
 ### Get Subscription Payment History
@@ -441,6 +490,7 @@ console.log('Customer created:', customer.uuid);
 ```typescript
 const customer = await client.customers.get('customer-uuid');
 const byEmail = await client.customers.getByEmail('john@example.com');
+const byReference = await client.customers.getByReference('CRM-12345');
 ```
 
 ### List Customers
@@ -633,7 +683,9 @@ app.post('/webhook', async (req, res) => {
 	const session = event.session as OneTimePaymentSession | SubscriptionSession;
 
 	if (event.status.status === TransactionStatusValue.COMPLETED) {
-		console.log('Payment completed for product:', session.productName);
+		// `session.reference` echoes back the reference you set when creating the session,
+		// so you can match the transaction to your own order/invoice without storing our UUID.
+		console.log('Payment completed for product:', session.productName, 'ref:', session.reference);
 	} else if (event.status.status === TransactionStatusValue.FAILED) {
 		// Handle failed payment
 	}
@@ -653,6 +705,7 @@ The body is a `SubscriptionStatusTransitionWebhook`:
 ```typescript
 interface SubscriptionStatusTransitionWebhook {
 	subscriptionUUID: string;         // subscription that changed status
+	subscriptionReference?: string;   // your own reference, if one was set at creation
 	previousStatus: SubscriptionStatus;
 	currentStatus: SubscriptionStatus;
 	updatedAt: string;                // ISO timestamp of the transition

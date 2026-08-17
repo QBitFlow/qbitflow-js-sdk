@@ -79,6 +79,21 @@ export class PayAsYouGoRequests extends Request {
 	}
 
 	/**
+	 * Get a pay-as-you-go subscription by the reference you assigned when creating it.
+	 *
+	 * @param reference - Your own subscription reference
+	 * @returns PAYG subscription details
+	 */
+	async getByReference(reference: string): Promise<PayAsYouGoSubscription> {
+		if (!reference) {
+			throw new ValidationException('Subscription reference is required');
+		}
+		return this.getReq<PayAsYouGoSubscription>(
+			`${ PayAsYouGoRequests.BASE_ROUTE }/reference/payAsYouGo/${ encodeURIComponent(reference) }`
+		);
+	}
+
+	/**
 	 * Get subscription payment history
 	 * @param subscriptionUUID - Subscription UUID
 	 * @returns List of subscription payment history records

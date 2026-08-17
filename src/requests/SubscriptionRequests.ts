@@ -72,6 +72,28 @@ export class SubscriptionRequests extends Request {
 	}
 
 	/**
+	 * Get a subscription by the reference you assigned when creating it.
+	 * Lets you resolve a subscription from your own order/invoice ID without storing QBitFlow's UUID.
+	 *
+	 * @param reference - Your own subscription reference
+	 * @returns Subscription details
+	 *
+	 * @example
+	 * ```typescript
+	 * const sub = await client.subscriptions.getByReference('sub-1234');
+	 * console.log(sub.uuid, sub.subscriptionStatus);
+	 * ```
+	 */
+	async getByReference(reference: string): Promise<Subscription> {
+		if (!reference) {
+			throw new ValidationException('Subscription reference is required');
+		}
+		return this.getReq<Subscription>(
+			`${ SubscriptionRequests.BASE_ROUTE }/reference/subscription/${ encodeURIComponent(reference) }`
+		);
+	}
+
+	/**
 	 * Get subscription payment history
 	 * @param subscriptionUUID - Subscription UUID
 	 * @returns List of subscription billing history records
