@@ -1,19 +1,19 @@
-import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
-import {
-	NotFoundException,
-	UnauthorizedException,
-	ForbiddenException,
-	ValidationException,
-	RateLimitException,
-	ServerException,
-	NetworkException,
-} from '../exceptions';
+import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 import {
 	DEFAULT_BASE_URL,
-	DEFAULT_TIMEOUT,
 	DEFAULT_MAX_RETRIES,
 	DEFAULT_RETRY_DELAY,
+	DEFAULT_TIMEOUT,
 } from '../config';
+import {
+	ForbiddenException,
+	NetworkException,
+	NotFoundException,
+	RateLimitException,
+	ServerException,
+	UnauthorizedException,
+	ValidationException,
+} from '../exceptions';
 import { sleep } from '../utils';
 
 /**
@@ -37,7 +37,8 @@ export class Request {
 		apiKey: string,
 		baseUrl: string = DEFAULT_BASE_URL,
 		timeout: number = DEFAULT_TIMEOUT,
-		maxRetries: number = DEFAULT_MAX_RETRIES
+		maxRetries: number = DEFAULT_MAX_RETRIES,
+		headers?: Record<string, string>
 	) {
 		this.apiKey = apiKey;
 		this.baseUrl = baseUrl;
@@ -51,7 +52,32 @@ export class Request {
 			headers: {
 				'X-API-Key': this.apiKey,
 				'Content-Type': 'application/json',
+				...headers,
 			},
+		});
+	}
+
+	/**
+	 * Act on behalf of a specific user within the same organization. You must use an admin-level API key to use this feature.
+	 * @param userID - ID of the user to act for
+	 * @returns A new Request instance with the X-Act-For-User header set
+	 * 
+	 * @example
+	 * ```typescript
+	 * // Acting for user with ID 123 - return all products available to that user
+	 * const userProducts = await client.products.onBehalfOf(123).getAll();
+	 * ```
+	 */
+	public onBehalfOf(userID: number): this {
+		const RequestConstructor = this.constructor as new (
+			apiKey: string,
+			baseUrl?: string,
+			timeout?: number,
+			maxRetries?: number,
+			headers?: Record<string, string>
+		) => this;
+		return new RequestConstructor(this.apiKey, this.baseUrl, this.timeout, this.maxRetries, {
+			'On-Behalf-Of': userID.toString(),
 		});
 	}
 
@@ -130,7 +156,7 @@ export class Request {
 
 		// If we exhausted all retries
 		throw new NetworkException(
-			`Request failed after ${this.maxRetries} retries: ${lastError?.message}`
+			`Request failed after ${ this.maxRetries } retries: ${ lastError?.message }`
 		);
 	}
 

@@ -29,6 +29,7 @@ Official JavaScript/TypeScript SDK for [QBitFlow](https://qbitflow.app) - a comp
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
+- [Acting on Behalf of a User](#acting-on-behalf-of-a-user)
 - [One-Time Payments](#one-time-payments)
 - [Subscriptions](#subscriptions)
 - [Transaction Status](#transaction-status)
@@ -131,6 +132,27 @@ if (status.status === TransactionStatusValue.COMPLETED) {
 | `baseUrl`    | string | `https://api.qbitflow.app` | API base URL                                 |
 | `timeout`    | number | `30000`                    | Request timeout in milliseconds              |
 | `maxRetries` | number | `3`                        | Number of retry attempts for failed requests |
+
+## Acting on Behalf of a User
+
+If you hold an **organization (admin) API key**, you can perform any request as one of the users in your organization, without needing that user's own API key. This is useful for admin-level tooling, dashboards, and back-office automation where your server acts for a specific user (e.g. listing _their_ products, creating a payment session _for them_, or reading _their_ subscriptions).
+
+Every service exposes an `onBehalfOf(userID)` method. It returns a scoped copy of that service which adds an `On-Behalf-Of` header to each request; the original client is left untouched, so you can freely mix org-level and per-user calls.
+
+```typescript
+const userId = 123;
+
+// List the products belonging to user 123
+const products = await client.products.onBehalfOf(userId).getAll();
+
+// Read that user's payments
+const userPayments = await client.oneTimePayments.onBehalfOf(userId).getAll();
+
+// The base client is unaffected — this call still runs at the organization level
+const allOrgProducts = await client.products.getAll();
+```
+
+> **Note:** `onBehalfOf` requires an admin-level API key. Using it with a regular user key results in a `403` (`ForbiddenException`).
 
 ## One-Time Payments
 
@@ -573,6 +595,9 @@ const me = await client.users.get();
 // Get by ID / list all (admin only)
 const byId = await client.users.getById(42);
 const all = await client.users.getAll();
+
+// Get by email (admin only for other users in the organization)
+const byEmail = await client.users.getByEmail('alice@example.com');
 
 // Update
 const updated = await client.users.update(user.id, {
