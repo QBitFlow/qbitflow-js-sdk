@@ -9,7 +9,6 @@ import { Request } from './Request';
 export class ClaimRequests extends Request {
 	private static readonly BASE_ROUTE = '/user/claim';
 
-
 	/**
 	 * Get an existing claim request for a user by their ID.
 	 * Returns the claim link if one has already been created for that user.

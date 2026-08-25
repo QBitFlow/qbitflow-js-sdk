@@ -8,17 +8,13 @@ import { Request } from './Request';
 export class ProductRequests extends Request {
 	private static readonly BASE_ROUTE = '/product';
 
-	constructor(apiKey: string, baseUrl?: string, timeout?: number, maxRetries?: number) {
-		super(apiKey, baseUrl, timeout, maxRetries);
-	}
-
 	/**
 	 * Create a new product
 	 * @param productData The product data
 	 * @returns The created product
 	 */
 	async create(productData: CreateProductDto): Promise<Product> {
-		return this.postReq<Product>(`${ProductRequests.BASE_ROUTE}/`, productData);
+		return this.postReq<Product>(`${ ProductRequests.BASE_ROUTE }/`, productData);
 	}
 
 	/**
@@ -27,7 +23,7 @@ export class ProductRequests extends Request {
 	 * @returns The product
 	 */
 	async get(productId: number): Promise<Product> {
-		return this.getReq<Product>(`${ProductRequests.BASE_ROUTE}/id/${productId}`);
+		return this.getReq<Product>(`${ ProductRequests.BASE_ROUTE }/id/${ productId }`);
 	}
 
 	/**
@@ -35,7 +31,7 @@ export class ProductRequests extends Request {
 	 * @returns List of products
 	 */
 	async getAll(): Promise<Product[]> {
-		return this.getReq<Product[]>(`${ProductRequests.BASE_ROUTE}/`);
+		return this.getReq<Product[]>(`${ ProductRequests.BASE_ROUTE }/`);
 	}
 
 	/**
@@ -44,7 +40,7 @@ export class ProductRequests extends Request {
 	 * @returns The product
 	 */
 	async getByReference(reference: string): Promise<Product> {
-		return this.getReq<Product>(`${ProductRequests.BASE_ROUTE}/reference/${reference}`);
+		return this.getReq<Product>(`${ ProductRequests.BASE_ROUTE }/reference/${ reference }`);
 	}
 
 	/**
@@ -54,7 +50,7 @@ export class ProductRequests extends Request {
 	 * @returns The updated product
 	 */
 	async update(productId: number, productData: UpdateProductDto): Promise<Product> {
-		return this.putReq<Product>(`${ProductRequests.BASE_ROUTE}/${productId}`, productData);
+		return this.putReq<Product>(`${ ProductRequests.BASE_ROUTE }/${ productId }`, productData);
 	}
 
 	/**
@@ -62,6 +58,6 @@ export class ProductRequests extends Request {
 	 * @param productId The product ID
 	 */
 	async delete(productId: number): Promise<SuccessResponse> {
-		return this.deleteReq<SuccessResponse>(`${ProductRequests.BASE_ROUTE}/${productId}`);
+		return this.deleteReq<SuccessResponse>(`${ ProductRequests.BASE_ROUTE }/${ productId }`);
 	}
 }

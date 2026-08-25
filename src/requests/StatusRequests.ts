@@ -4,10 +4,6 @@ import { Request } from './Request';
 export class StatusRequests extends Request {
 	private static readonly BASE_ROUTE = '/transaction/status';
 
-	constructor(apiKey: string, baseUrl?: string, timeout?: number, maxRetries?: number) {
-		super(apiKey, baseUrl, timeout, maxRetries);
-	}
-
 	/**
 	 * Get the status of a transaction
 	 * @param transactionUUID - The transaction UUID

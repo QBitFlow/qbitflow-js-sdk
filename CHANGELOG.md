@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.1] - 2026-08-25
+
+### Added
+
+- **Act for user**: `Requests.onBehalfOf(userID: string)` temporarily act as a different user for the duration of a request. This is useful for admin-level operations that need to be performed on behalf of another user. 
+- **`customers.getByEmail(email)`** — retrieve a customer by their email address 
+
 ## [1.3.0] - 2026-08-17
 
 ### Added

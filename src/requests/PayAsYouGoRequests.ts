@@ -33,9 +33,9 @@ export class PayAsYouGoRequests extends Request {
 	private static readonly BASE_ROUTE = '/transaction/subscription';
 	private readonly sessionRequests: SessionRequests;
 
-	constructor(apiKey: string, baseUrl?: string, timeout?: number, maxRetries?: number) {
-		super(apiKey, baseUrl, timeout, maxRetries);
-		this.sessionRequests = new SessionRequests(apiKey, baseUrl, timeout, maxRetries);
+	constructor(apiKey: string, baseUrl?: string, timeout?: number, maxRetries?: number, headers?: Record<string, string>) {
+		super(apiKey, baseUrl, timeout, maxRetries, headers);
+		this.sessionRequests = new SessionRequests(apiKey, baseUrl, timeout, maxRetries, headers);
 	}
 
 	/**

@@ -10,17 +10,13 @@ import { Request } from './Request';
 export class CustomerRequests extends Request {
 	private static readonly BASE_ROUTE = '/customer';
 
-	constructor(apiKey: string, baseUrl?: string, timeout?: number, maxRetries?: number) {
-		super(apiKey, baseUrl, timeout, maxRetries);
-	}
-
 	/**
 	 * Create a new customer
 	 * @param customerData The customer data
 	 * @returns The created customer
 	 */
 	async create(customerData: CreateCustomerDto): Promise<Customer> {
-		return this.postReq<Customer>(`${CustomerRequests.BASE_ROUTE}/`, customerData);
+		return this.postReq<Customer>(`${ CustomerRequests.BASE_ROUTE }/`, customerData);
 	}
 
 	/**
@@ -32,7 +28,7 @@ export class CustomerRequests extends Request {
 		if (!customerUUID) {
 			throw new ValidationException('Customer UUID is required');
 		}
-		return this.getReq<Customer>(`${CustomerRequests.BASE_ROUTE}/uuid/${customerUUID}`);
+		return this.getReq<Customer>(`${ CustomerRequests.BASE_ROUTE }/uuid/${ customerUUID }`);
 	}
 
 	/**
@@ -47,7 +43,7 @@ export class CustomerRequests extends Request {
 			throw new ValidationException('Customer reference is required');
 		}
 		return this.getReq<Customer>(
-			`${CustomerRequests.BASE_ROUTE}/reference/${encodeURIComponent(reference)}`
+			`${ CustomerRequests.BASE_ROUTE }/reference/${ encodeURIComponent(reference) }`
 		);
 	}
 
@@ -61,7 +57,7 @@ export class CustomerRequests extends Request {
 			throw new ValidationException('Valid email is required');
 		}
 		return this.getReq<Customer>(
-			`${CustomerRequests.BASE_ROUTE}/email/${encodeURIComponent(email)}`
+			`${ CustomerRequests.BASE_ROUTE }/email/${ encodeURIComponent(email) }`
 		);
 	}
 
@@ -76,7 +72,7 @@ export class CustomerRequests extends Request {
 		const params = cursorQueryBuilder(options?.limit, options?.cursor);
 
 		const partialCursor = await this.getReq<CursorDataResponse<Customer>>(
-			`${CustomerRequests.BASE_ROUTE}/all`,
+			`${ CustomerRequests.BASE_ROUTE }/all`,
 			params
 		);
 
@@ -89,7 +85,7 @@ export class CustomerRequests extends Request {
 	 * @returns The updated customer
 	 */
 	async update(customerUUID: string, customerData: UpdateCustomerDto): Promise<Customer> {
-		return this.putReq<Customer>(`${CustomerRequests.BASE_ROUTE}/${customerUUID}`, customerData);
+		return this.putReq<Customer>(`${ CustomerRequests.BASE_ROUTE }/${ customerUUID }`, customerData);
 	}
 
 	/**
@@ -98,7 +94,7 @@ export class CustomerRequests extends Request {
 	 */
 	async delete(customerUUID: string): Promise<SuccessResponse> {
 		return this.deleteReq<SuccessResponse>(
-			`${CustomerRequests.BASE_ROUTE}/uuid/${customerUUID}`
+			`${ CustomerRequests.BASE_ROUTE }/uuid/${ customerUUID }`
 		);
 	}
 }
