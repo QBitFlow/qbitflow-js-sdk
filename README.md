@@ -127,12 +127,12 @@ if (status.status === TransactionStatusValue.COMPLETED) {
 
 ## Configuration
 
-| Option       | Type   | Default                    | Description                                  |
-| ------------ | ------ | -------------------------- | -------------------------------------------- |
-| `apiKey`     | string | (required)                 | Your QBitFlow API key                        |
-| `baseUrl`    | string | `https://api.qbitflow.app` | API base URL                                 |
-| `timeout`    | number | `30000`                    | Request timeout in milliseconds              |
-| `maxRetries` | number | `3`                        | Number of retry attempts for failed requests |
+| Option       | Type   | Default                       | Description                                  |
+| ------------ | ------ | ----------------------------- | -------------------------------------------- |
+| `apiKey`     | string | (required)                    | Your QBitFlow API key                        |
+| `baseUrl`    | string | `https://api.qbitflow.app/v1` | API base URL                                 |
+| `timeout`    | number | `30000`                       | Request timeout in milliseconds              |
+| `maxRetries` | number | `3`                           | Number of retry attempts for failed requests |
 
 ## Acting on Behalf of a User
 
