@@ -1,0 +1,196 @@
+import { DEFAULT_BASE_URL, DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT } from './config';
+import {
+	AccountingRequests,
+	ClaimRequests,
+	CurrencyRequests,
+	PaymentRequests,
+	RefundRequests,
+	SubscriptionRequests,
+	TransactionStatusRequests,
+} from './requests';
+import { ApiKeyRequests } from './requests/ApiKeyRequests';
+import { CustomerRequests } from './requests/CustomerRequests';
+import { ProductRequests } from './requests/ProductRequests';
+import { UserRequests } from './requests/UserRequests';
+import { WebhookRequests } from './requests/WebhookRequests';
+import { QBitFlowConfig } from './types';
+
+/**
+ * Main QBitFlow SDK client
+ *
+ * @example
+ * ```typescript
+ * import { QBitFlow } from 'qbitflow';
+ *
+ * const client = new QBitFlow('<your-api-key>');
+ *
+ * // Create a one-time payment
+ * const payment = await client.oneTimePayments.createSession({
+ *   productId: 1,
+ *   customerUUID: 'customer-uuid',
+ * });
+ *
+ * // Create a subscription
+ * const sub = await client.subscriptions.createSession({
+ *   productId: 1,
+ *   frequency: { value: 1, unit: 'months' },
+ *   customerUUID: 'customer-uuid'
+ * });
+ * ```
+ */
+export class QBitFlow {
+	private readonly apiKey: string;
+	private readonly baseUrl: string;
+	private readonly timeout: number;
+	private readonly maxRetries: number;
+
+	/** Customer-related operations */
+	public readonly customers: CustomerRequests;
+
+	/** Product-related operations */
+	public readonly products: ProductRequests;
+
+	/** User-related operations */
+	public readonly users: UserRequests;
+
+	/** API key management operations */
+	public readonly apiKeys: ApiKeyRequests;
+
+	/** Webhook-related operations */
+	public readonly webhooks: WebhookRequests;
+
+	/** One-time payment operations */
+	public readonly oneTimePayments: PaymentRequests;
+
+	/** Subscription payment operations */
+	public readonly subscriptions: SubscriptionRequests;
+
+	// Pay-as-you-go subscriptions are temporarily disabled — will be re-enabled in a future release
+	// public readonly payAsYouGo: PayAsYouGoRequests;
+
+	/** Transaction status operations */
+	public readonly transactionStatus: TransactionStatusRequests;
+
+	/** Refund operations */
+	public readonly refunds: RefundRequests;
+
+	/** Accounting export operations */
+	public readonly accounting: AccountingRequests;
+
+	/** Account claim operations */
+	public readonly claims: ClaimRequests;
+
+	/** Supported-currency lookups (public endpoints) */
+	public readonly currencies: CurrencyRequests;
+
+	/**
+	 * Create a new QBitFlow client instance
+	 * @param apiKeyOrConfig - API key string or configuration object
+	 *
+	 * @example
+	 * ```typescript
+	 * // Simple initialization
+	 * const client = new QBitFlow('your-api-key');
+	 *
+	 * // With custom configuration
+	 * const client = new QBitFlow({
+	 *   apiKey: 'your-api-key',
+	 *   timeout: 30000,
+	 *   maxRetries: 3
+	 * });
+	 * ```
+	 */
+	constructor(apiKeyOrConfig: string | QBitFlowConfig) {
+		if (typeof apiKeyOrConfig === 'string') {
+			this.apiKey = apiKeyOrConfig;
+			this.baseUrl = DEFAULT_BASE_URL;
+			this.timeout = DEFAULT_TIMEOUT;
+			this.maxRetries = DEFAULT_MAX_RETRIES;
+		} else {
+			this.apiKey = apiKeyOrConfig.apiKey;
+			this.baseUrl = apiKeyOrConfig.baseUrl || DEFAULT_BASE_URL;
+			this.timeout = apiKeyOrConfig.timeout || DEFAULT_TIMEOUT;
+			this.maxRetries = apiKeyOrConfig.maxRetries || DEFAULT_MAX_RETRIES;
+		}
+
+		if (!this.apiKey) {
+			throw new Error('API key is required');
+		}
+
+		this.customers = new CustomerRequests(
+			this.apiKey,
+			this.baseUrl,
+			this.timeout,
+			this.maxRetries
+		);
+
+		this.products = new ProductRequests(
+			this.apiKey,
+			this.baseUrl,
+			this.timeout,
+			this.maxRetries
+		);
+
+		this.users = new UserRequests(this.apiKey, this.baseUrl, this.timeout, this.maxRetries);
+
+		this.apiKeys = new ApiKeyRequests(this.apiKey, this.baseUrl, this.timeout, this.maxRetries);
+		this.webhooks = new WebhookRequests(this.apiKey, this.baseUrl, this.timeout, this.maxRetries);
+
+		this.oneTimePayments = new PaymentRequests(
+			this.apiKey,
+			this.baseUrl,
+			this.timeout,
+			this.maxRetries
+		);
+
+		this.subscriptions = new SubscriptionRequests(
+			this.apiKey,
+			this.baseUrl,
+			this.timeout,
+			this.maxRetries
+		);
+
+		// this.payAsYouGo = new PayAsYouGoRequests(this.apiKey, this.baseUrl, this.timeout, this.maxRetries);
+
+		this.transactionStatus = new TransactionStatusRequests(
+			this.apiKey,
+			this.baseUrl,
+			this.timeout,
+			this.maxRetries
+		);
+
+		this.refunds = new RefundRequests(this.apiKey, this.baseUrl, this.timeout, this.maxRetries);
+
+		this.accounting = new AccountingRequests(
+			this.apiKey,
+			this.baseUrl,
+			this.timeout,
+			this.maxRetries
+		);
+
+		this.claims = new ClaimRequests(this.apiKey, this.baseUrl, this.timeout, this.maxRetries);
+
+		this.currencies = new CurrencyRequests(
+			this.apiKey,
+			this.baseUrl,
+			this.timeout,
+			this.maxRetries
+		);
+	}
+
+	/**
+	 * Get the current API key
+	 * @returns Current API key
+	 */
+	getApiKey(): string {
+		return this.apiKey;
+	}
+
+	/**
+	 * Get the current base URL
+	 * @returns Current base URL
+	 */
+	getBaseUrl(): string {
+		return this.baseUrl;
+	}
+}
