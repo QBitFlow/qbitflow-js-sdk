@@ -1,19 +1,26 @@
 {
 	"name": "qbitflow-examples",
-	"version": "1.0.0",
-	"description": "Examples for QBitFlow SDK",
+	"version": "3.0.0",
+	"description": "Examples for the QBitFlow JavaScript/TypeScript SDK 3.0.0",
 	"private": true,
+	"type": "module",
+	"engines": {
+		"node": ">=20.0.0"
+	},
 	"scripts": {
-		"client": "ts-node client.ts",
-		"server": "ts-node server.ts"
+		"checkout": "tsx checkout.ts",
+		"subscriptions": "tsx subscriptions.ts",
+		"marketplace": "tsx marketplace.ts",
+		"webhook-handler": "tsx webhook-handler.ts",
+		"errors-and-retries": "tsx errors-and-retries.ts",
+		"typecheck": "tsc --noEmit --strict --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 --types node checkout.ts subscriptions.ts marketplace.ts webhook-handler.ts errors-and-retries.ts"
 	},
 	"dependencies": {
-		"express": "^5.1.0"
+		"qbitflow": "file:.."
 	},
 	"devDependencies": {
-		"@types/express": "^5.0.0",
 		"@types/node": "^24.9.2",
-		"ts-node": "^10.9.2",
-		"typescript": "^5.3.3"
+		"tsx": "^4.20.0",
+		"typescript": "^5.9.3"
 	}
 }

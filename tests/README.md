@@ -1,62 +1,83 @@
-# QBitFlow SDK Tests
+# QBitFlow SDK tests
 
-This directory contains the test suite for the QBitFlow JavaScript/TypeScript SDK.
+The test suites of the QBitFlow JavaScript/TypeScript SDK 3.0.0 (jest + ts-jest). They import the
+TypeScript sources directly (`../src/…`); `tests/` is type-checked with the sources
+(`tsconfig.test.json`).
 
-## Running Tests
+## Running the tests
 
 ```bash
-# Type-check src + tests, then run every offline suite (the live suite skips without a key)
-npm test
-
-# Only jest, no type-check
-npm run test:unit
-
-# Live integration suite: reads QBITFLOW_API_KEY and QBITFLOW_BASE_URL from the environment
-# (load the workspace's .local.env — never print it)
-set -a; source ../.local.env; set +a
-npm run test:live
-
-# Packed-tarball smoke test (ESM import, CJS require, TypeScript nodenext) — needs `npm run build`
-npm run smoke
+npm test               # tsc over src + tests, then every offline suite (the live suite skips)
+npm run test:unit      # jest only, no type-check
+npm run test:coverage  # jest with a coverage report (coverage/)
+npm run smoke          # packs the tarball and imports it from ESM, CJS and TypeScript (after `npm run build`)
 ```
 
-## Test Structure
+One suite or one test: `npx jest tests/<file>.test.ts -t '<name>'`.
 
-Offline suites (no server, run on every `npm test`):
+## Offline suites
 
-- **QBitFlow.test.ts** – client construction and defaults
-- **exceptions.test.ts** – exception hierarchy, `statusCode`, `fields`, `retryAfter`
-- **errorParsing.test.ts** – error envelopes (`error`, `errors[]`, `message`, plain text) → messages/fields
-- **decode.test.ts** – the response decoder (absent/null → zero value, nullable fields always
-  present, wrong JSON type → `ServerException` with the field path), every schema, and the
-  `parseSessionWebhook` / `parseSubscriptionWebhook` helpers
-- **requestBehaviour.test.ts** – request construction and bodies, path escaping, headers,
-  per-service and client-level `onBehalfOf`, response decoding (null lists, currency objects,
-  empty / non-JSON 2xx), session-kind checks, status → exception mapping
-  (400/422/401/403/404/409/429/other 4xx/3xx/5xx), CSV error parsing, `webhooks.verify()`
-  false-only-on-400 with raw-body inputs
-- **retryPolicy.test.ts** – GET-only retries with exponential back-off, POST/PUT/DELETE and the
-  action GETs (force-cancel, execute-billing, claim-funds test trigger) never retried,
-  `maxRetries: 0`, configuration errors never retried, redirects never followed
-- **utils.test.ts** – client-side validation rules (alphanumspace, producttext, email, URLs,
-  customer UUIDs, prices, durations and uint32 bounds, accounting dates) and request bodies
-- **types.test.ts** – enum completeness and compile-time pinning of every response field's type
-- **webhookVerify.test.ts** – local HMAC verification, including both sets of Go-generated
-  golden vectors, raw-byte inputs and Go-compatible timestamp parsing
-- **esmSpecifiers.test.ts** – every relative import carries a `.js` extension (ESM build guard),
-  the `exports` map, and `VERSION` = `package.json` = top CHANGELOG entry
+Every `*.test.ts` except `integration.test.ts` runs without a QBitFlow server: requests go to a
+local throwaway HTTP server (`tests/helpers/`) that records what it receives and answers with
+scripted responses, so the real `fetch` path (headers, timeouts, redirects, dropped connections) is
+exercised. The clients built on it record their back-off sleeps instead of waiting. The suites
+(`client`, `transport`, `retry`, `errors`, `pagination`, `validate`, `webhook`, `events`, `models`,
+`services`, `esmSpecifiers`, and `vectors` below) cover, for the behaviour contract the four
+QBitFlow SDKs share:
 
-Live suite:
+- **the client**: key and option checks, defaults, `onBehalfOf` (client and request level),
+  `me()`;
+- **request building for every method**: verb, path and path escaping, query, body, and the
+  headers (`X-API-Key`, `User-Agent`, `On-Behalf-Of`, `X-Request-Id`, `Idempotency-Key` on the 7
+  creates only, stable across a retried 503);
+- **the retry matrix**: which methods are retried, on what, the back-off, `Retry-After` and its
+  60-second cap, `maxRetries: 0`, cancellation with an `AbortSignal`;
+- **error mapping**: each status and code to its class, `fieldErrors` from `details.errors`,
+  `requestId`, `rawBody`, the message format, `isRetryable`, `instanceof` across builds;
+- **decoding**: absent or `null` values to zero values, a wrong JSON type to a `ServerError`,
+  unknown enum values kept, the 202 of `subscriptions.cancel`, empty and non-JSON bodies;
+- **client-side validation**: every rule, with the wire names of the failing fields;
+- **pagination**: `Page<T>` and the async iterators (lazy, filters kept, stop conditions);
+- **webhooks**: `verify` (the documented vector, secret rotation, tolerance, the header edge
+  cases), `constructEvent`, `parseEvent` on the 15 documented event examples (`tests/fixtures/`),
+  the type guards, and `verifyRemote`;
+- **packaging**: relative imports carry their `.js` extension (ESM build), the `exports` map, and
+  `VERSION` = `package.json` = the top CHANGELOG entry.
 
-- **integration.test.ts** – end-to-end calls against a real QBitFlow server. It never defaults to
-  a URL: with `QBITFLOW_API_KEY` and `QBITFLOW_BASE_URL` set it runs against that server; with
-  the key but no base URL it **fails** with a message naming the missing variable; with neither
-  it is skipped, so the offline `npm test` stays green. Unexpected errors fail the test.
+## Cross-SDK vectors
 
-## Writing New Tests
+`vectors.test.ts` replays the conformance vectors shared by the Go, JavaScript, Python and PHP SDKs
+(generated with the Go reference SDK): `../.claude/cross-sdk-checks/v3/vectors/*.json` in the SDKs'
+workspace (`signature`, `events`, `validation`, `decoding`, `requests`). Every expected outcome must
+be reproduced, except the JavaScript deviations listed at the top of the file (a path segment made
+only of dots, which `fetch` cannot send, is refused with a `ValidationError`). The suite is skipped
+when the workspace's vectors are not there, e.g. when the package is tested on its own.
 
-1. Test both success and error cases.
-2. Prefer the throwaway HTTP server pattern (see `requestBehaviour.test.ts`) over mocking axios,
-   so the real request path is exercised.
-3. Anything that needs the API goes in `integration.test.ts` under `describeLive`.
-4. `tests/` is type-checked (`npm run typecheck`), so response-shape assertions are compile-time.
+## Live suite
+
+`integration.test.ts` runs end-to-end calls against a real QBitFlow server (`npm run test:live`).
+It never defaults to a URL:
+
+| Environment | Result |
+|---|---|
+| `QBITFLOW_API_KEY` and `QBITFLOW_BASE_URL` set | runs against that server |
+| `QBITFLOW_API_KEY` set, `QBITFLOW_BASE_URL` not | **fails**, naming the missing variable |
+| neither | skipped, so the offline `npm test` stays green |
+
+```bash
+QBITFLOW_API_KEY=sk_… QBITFLOW_BASE_URL=https://… npm run test:live
+# or, from the SDKs' workspace (never print the file):
+set -a; source ../.local.env; set +a; npm run test:live
+```
+
+The read-only checks only read. The write checks (they create a product, a customer, a checkout
+session and a webhook endpoint, then delete or expire each of them) also need `QBITFLOW_LIVE_WRITES=1` **and** a test-mode
+key (checked with `me()`); `QBITFLOW_ALLOW_LIVE_MODE_WRITES=1` allows a live-mode key, for a
+disposable server only.
+
+## Writing new tests
+
+1. Test the success and the error paths, and assert what was sent as well as what was returned.
+2. Use the local server helpers rather than mocking `fetch`, so the real request path is exercised.
+3. A behaviour every SDK shares belongs in the cross-SDK vectors too.
+4. Anything that needs the API goes in `integration.test.ts`, read-only unless it is a write check.

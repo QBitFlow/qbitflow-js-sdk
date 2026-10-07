@@ -64,21 +64,26 @@ try {
 	// 3a. Node ESM consumer.
 	writeFileSync(
 		join(consumer, 'esm.mjs'),
-		"import { QBitFlow, VERSION, UserRole, ConflictException, parseSessionWebhook } from 'qbitflow';\n" +
+		"import { QBitFlow, VERSION, SubscriptionStatus, ConflictError, NotFoundError, webhooks } from 'qbitflow';\n" +
 			"const c = new QBitFlow('sk_smoke');\n" +
-			"if (typeof c.products.getAll !== 'function' || !VERSION || UserRole.USER !== 'user' || !ConflictException) process.exit(2);\n" +
-			"if (typeof c.onBehalfOf(5).products.getAll !== 'function') process.exit(3);\n" +
-			"if (parseSessionWebhook('{\"uuid\":\"pay@1\"}').managementPageLink !== '') process.exit(4);\n" +
+			"if (typeof c.products.list !== 'function' || VERSION !== '3.0.0' || SubscriptionStatus.PastDue !== 'pastDue' || !ConflictError) process.exit(2);\n" +
+			"if (typeof c.onBehalfOf('019eca82-5680-7b00-8000-0000000000b1').checkoutSessions.createPayment !== 'function') process.exit(3);\n" +
+			"const e = webhooks.parseEvent('{\"id\":\"evt_1\",\"type\":\"webhook.test\",\"version\":\"v2\",\"createdAt\":\"2026-10-01T12:00:00Z\",\"data\":{}}');\n" +
+			"if (e.data.endpointUuid !== '') process.exit(4);\n" +
+			"const { createRequire } = await import('node:module');\n" +
+			"const cjs = createRequire(import.meta.url)('qbitflow');\n" +
+			"if (!(new cjs.NotFoundError({ message: 'x', status: 404 }) instanceof NotFoundError)) process.exit(5);\n" +
 			"console.log('  ESM import OK', VERSION);\n"
 	);
-	run('ESM import from a "type": "module" project', process.execPath, ['esm.mjs']);
+	run('ESM import from a "type": "module" project (errors instanceof across CJS/ESM)', process.execPath, ['esm.mjs']);
 
 	// 3b. CommonJS consumer.
 	writeFileSync(
 		join(consumer, 'cjs.cjs'),
-		"const { QBitFlow, VERSION } = require('qbitflow');\n" +
-			"const c = new QBitFlow('sk_smoke');\n" +
-			"if (typeof c.products.getAll !== 'function' || !VERSION) process.exit(2);\n" +
+		"const { QBitFlow, VERSION, webhooks, ValidationError } = require('qbitflow');\n" +
+			"const c = new QBitFlow({ apiKey: 'sk_smoke', maxRetries: 0 });\n" +
+			"if (typeof c.webhooks.endpoints.create !== 'function' || !VERSION || typeof webhooks.verify !== 'function') process.exit(2);\n" +
+			"try { new QBitFlow('pk_nope'); process.exit(3); } catch (e) { if (!(e instanceof ValidationError)) process.exit(4); }\n" +
 			"console.log('  CJS require OK', VERSION);\n"
 	);
 	run('CommonJS require', process.execPath, ['cjs.cjs']);
@@ -86,12 +91,14 @@ try {
 	// 3c. TypeScript consumer under the strictest resolution mode.
 	writeFileSync(
 		join(consumer, 'types.mts'),
-		"import { QBitFlow, UserRole, type CreateUserDto, type Payment, isSubscriptionSession } from 'qbitflow';\n" +
+		"import { QBitFlow, webhooks, SubscriptionStatus, type CreatePaymentSessionParams, type Payment, type Event } from 'qbitflow';\n" +
 			"const c = new QBitFlow({ apiKey: 'sk_smoke', maxRetries: 0 });\n" +
-			"const dto: CreateUserDto = { name: 'A', lastName: 'B', email: 'a@b.co', role: UserRole.USER };\n" +
-			"const p = {} as Payment; const sym: string = p.currency.symbol; const ref: string | null = p.reference;\n" +
-			'const scoped: QBitFlow = c.onBehalfOf(7);\n' +
-			'void c; void dto; void sym; void ref; void scoped; void isSubscriptionSession;\n'
+			"const params: CreatePaymentSessionParams = { productName: 'T-shirt', price: 25, successUrl: 'https://x.io/ok?id={{UUID}}' };\n" +
+			"const p = {} as Payment; const sym: string | undefined = p.currency?.symbol; const ref: string | undefined = p.reference;\n" +
+			"const scoped: QBitFlow = c.onBehalfOf('019eca82-5680-7b00-8000-0000000000b1');\n" +
+			"const status: string = SubscriptionStatus.Active;\n" +
+			"function handle(e: Event): string { switch (e.type) { case 'payment.completed': return e.data.uuid; case 'subscription.billingFailed': return e.data.amountUsd; default: return webhooks.isUnknownEvent(e) ? 'unknown' : e.type; } }\n" +
+			'void params; void sym; void ref; void scoped; void status; void handle;\n'
 	);
 	writeFileSync(join(consumer, 'default-import.mts'), "import qb from 'qbitflow';\nvoid qb;\n");
 	const tsc = join(root, 'node_modules', '.bin', 'tsc');

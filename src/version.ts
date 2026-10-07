@@ -1,7 +1,8 @@
 /**
- * The SDK version, as published to npm.
- *
- * Kept in its own module so the request layer can stamp it into the `User-Agent` header
- * without importing the package entry point (which would create an import cycle).
+ * The SDK version, as published to npm. Sent in the `User-Agent` header
+ * (`qbitflow-js/<version>`).
  */
-export const VERSION = '2.5.0';
+export const VERSION = '3.0.0';
+
+/** @internal The `User-Agent` of every request. */
+export const USER_AGENT = `qbitflow-js/${VERSION}`;

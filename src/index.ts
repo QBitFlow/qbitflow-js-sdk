@@ -1,40 +1,73 @@
 /**
- * QBitFlow JavaScript/TypeScript SDK
- * Official SDK for the QBitFlow - Next Generation Crypto Payment Processing
+ * QBitFlow JavaScript/TypeScript SDK 3.0.0, for QBitFlow API v2.
+ *
+ * ```ts
+ * import { QBitFlow, webhooks, NotFoundError } from 'qbitflow';
+ * ```
  *
  * @packageDocumentation
  */
 
-// Export main client
-export { QBitFlow } from './QBitFlow.js';
+export {
+	QBitFlow,
+	type ClientConfig,
+	type ClientOptions,
+	DEFAULT_BASE_URL,
+	DEFAULT_MAX_RETRIES,
+	DEFAULT_TIMEOUT,
+} from './client.js';
+export type { FetchInit, FetchLike, FetchResponse, RequestOptions } from './transport.js';
 
-// Export all types
-export * from './types/index.js';
+export {
+	ApiError,
+	AuthenticationError,
+	BadRequestError,
+	ConflictError,
+	type FieldError,
+	GoneError,
+	IdempotencyError,
+	isRetryable,
+	NetworkError,
+	NotFoundError,
+	PermissionDeniedError,
+	QBitFlowError,
+	RateLimitError,
+	ServerError,
+	ValidationError,
+	WebhookSignatureError,
+	WebhookSignatureReason,
+} from './errors.js';
 
-// Export exceptions
-export * from './exceptions/index.js';
+export * from './enums.js';
 
-// Local webhook signature verification (no API round-trip required)
-export * from './webhooks/verify.js';
+export type * from './models/common.js';
+export type * from './models/payments.js';
+export type * from './models/checkout.js';
+export type * from './models/subscriptions.js';
+export type * from './models/refunds.js';
+export type * from './models/customers.js';
+export type * from './models/products.js';
+export type * from './models/members.js';
+export type * from './models/wallets.js';
+export type * from './models/accounting.js';
+export type * from './models/events.js';
+export type * from './models/webhooks.js';
 
-// Typed decoding of webhook bodies
-export { parseSessionWebhook, parseSubscriptionWebhook } from './webhooks/parse.js';
+export * as webhooks from './webhooks.js';
+export type { RawBody, SignatureHeader, VerifyOptions } from './webhooks.js';
 
-// Service types (reachable as `client.customers`, `client.products` …)
+export type { ProductsService } from './services/products.js';
+export type { CustomersService } from './services/customers.js';
+export type { CheckoutSessionsService } from './services/checkout.js';
+export type { FailuresService, PaymentsService } from './services/payments.js';
+export type { SubscriptionsService } from './services/subscriptions.js';
+export type { RefundsService } from './services/refunds.js';
+export type { InvitationsService, MembersService } from './services/members.js';
+export type { AccountingService, CurrenciesService, WalletsService } from './services/misc.js';
 export type {
-	AccountingRequests,
-	ApiKeyRequests,
-	ClaimRequests,
-	CurrencyRequests,
-	CustomerRequests,
-	PaymentRequests,
-	ProductRequests,
-	RefundRequests,
-	SubscriptionRequests,
-	TransactionStatusRequests,
-	UserRequests,
-	WebhookRequests,
-} from './requests/index.js';
+	WebhookEndpointsService,
+	WebhookEventsService,
+	WebhooksService,
+} from './services/webhooks.js';
 
-// Export version
 export { VERSION } from './version.js';
