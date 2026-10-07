@@ -3,10 +3,7 @@
   "bugs": {
     "url": "https://github.com/qbitflow/qbitflow-js-sdk/issues"
   },
-  "dependencies": {
-    "axios": "^1.13.1"
-  },
-  "description": "Official JavaScript/TypeScript SDK for QBitFlow - Next Generation Crypto Payment Processing",
+  "description": "Official JavaScript/TypeScript SDK for QBitFlow API v2 - crypto payments, subscriptions and marketplaces",
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/node": "^24.9.2",
@@ -21,7 +18,7 @@
     "typescript-eslint": "^8.70.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "exports": {
     ".": {
@@ -39,11 +36,12 @@
   "files": [
     "dist",
     "README.md",
-    "CHANGELOG.md",
     "TRADEMARKS.md",
     "COMPLIANCE.md",
     "SECURITY.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md",
+    "MIGRATION-v3.md"
   ],
   "homepage": "https://github.com/qbitflow/qbitflow-js-sdk#readme",
   "keywords": [
@@ -77,8 +75,8 @@
     "build:cjs": "tsc --project tsconfig.cjs.json",
     "build:esm": "tsc --project tsconfig.esm.json && echo '{\"type\":\"module\"}' > dist/esm/package.json",
     "clean": "rm -rf dist",
-    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
-    "lint": "eslint src && prettier --check \"src/**/*.ts\"",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"examples/**/*.ts\"",
+    "lint": "eslint src && prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"examples/**/*.ts\"",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "test": "npm run typecheck && jest",
     "test:unit": "jest",
@@ -89,5 +87,5 @@
     "prepublishOnly": "npm run build && npm run lint && npm test && npm run smoke"
   },
   "types": "./dist/cjs/index.d.ts",
-  "version": "2.5.0"
+  "version": "3.0.0"
 }

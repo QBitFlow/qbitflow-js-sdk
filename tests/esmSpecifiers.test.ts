@@ -12,7 +12,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { VERSION } from '../src/version';
+import { USER_AGENT, VERSION } from '../src/version';
 
 const SRC = join(__dirname, '..', 'src');
 
@@ -42,7 +42,12 @@ describe('ESM specifiers', () => {
 			files: string[];
 			types: string;
 			version: string;
+			dependencies?: Record<string, string>;
+			engines: Record<string, string>;
 		};
+		// No runtime dependencies: the SDK runs on the global fetch (Node >= 20).
+		expect(pkg.dependencies ?? {}).toEqual({});
+		expect(pkg.engines.node).toBe('>=20.0.0');
 		const root = pkg.exports['.'] as Record<string, Record<string, string>>;
 		expect(root.import).toEqual({
 			types: './dist/esm/index.d.ts',
@@ -58,6 +63,7 @@ describe('ESM specifiers', () => {
 		expect(pkg.exports['./package.json']).toBe('./package.json');
 		expect(pkg.types).toBe('./dist/cjs/index.d.ts');
 		expect(pkg.files).toContain('CHANGELOG.md');
+		expect(pkg.files).toContain('MIGRATION-v3.md');
 		expect(pkg.files).not.toContain('QUICKSTART.md');
 	});
 
@@ -66,6 +72,7 @@ describe('ESM specifiers', () => {
 			version: string;
 		};
 		expect(VERSION).toBe(pkg.version);
+		expect(USER_AGENT).toBe(`qbitflow-js/${pkg.version}`);
 		const changelog = readFileSync(join(__dirname, '..', 'CHANGELOG.md'), 'utf8');
 		const top = /^## \[(\d+\.\d+\.\d+)\]/m.exec(changelog);
 		expect(top?.[1]).toBe(pkg.version);

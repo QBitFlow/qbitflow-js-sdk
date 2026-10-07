@@ -1,1211 +1,1029 @@
 # QBitFlow JavaScript/TypeScript SDK
 
 [![npm version](https://img.shields.io/npm/v/qbitflow.svg)](https://www.npmjs.com/package/qbitflow)
-[![License: MPL-2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Node](https://img.shields.io/badge/node-%3E%3D18-blue.svg)](#installation)
+[![Node](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)](#installation)
+[![License: MPL-2.0](https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
 
-Official JavaScript/TypeScript SDK for [QBitFlow](https://qbitflow.app) - a comprehensive cryptocurrency payment processing platform that enables seamless integration of crypto payments and recurring subscriptions into your applications.
+The official JavaScript/TypeScript SDK for [QBitFlow](https://qbitflow.app), non-custodial crypto
+payments: hosted checkouts, one-time payments, subscriptions, refunds, marketplaces with
+commissions and held funds, accounting exports and signed webhooks. Customers pay from their own
+wallets, on Ethereum, Base and Solana, straight to yours.
 
-## Features
+- **API v2**, every integrator route: 13 services, 60 routes, one `QBitFlow` client.
+- **No runtime dependencies**: Node.js 20+, the global `fetch` (or one you inject), CommonJS and
+  ES modules, TypeScript types included.
+- **Typed errors** matched with `instanceof`, each carrying the API's code, request id and field
+  errors.
+- **Safe retries**: reads and creates are retried on network errors, 5xx and 429, and every create
+  sends an `Idempotency-Key`, so a retry never charges or creates twice.
+- **Async iterators**: `for await (const p of client.payments.iterate())` walks every page lazily.
+- **Webhooks** verified locally (`QBitFlow-Signature`, secret rotation included) and parsed into a
+  typed event union.
 
-- 🔐 **Type-Safe**: Full TypeScript support with comprehensive type definitions
-- 🚀 **Easy to Use**: Simple, intuitive API design
-- 🔄 **Automatic Retries**: Built-in retry logic for failed requests
-- 📦 **Dual Package**: Works with both CommonJS and ES modules
-- 🧪 **Well Tested**: Comprehensive test coverage
-- 📚 **Great Documentation**: Detailed docs with examples
-- 🔌 **Webhook Support**: Handle payment and subscription-status notifications easily
-- 💳 **One-Time Payments**: Accept cryptocurrency payments with ease
-- 🔄 **Recurring Subscriptions**: Automated recurring billing in cryptocurrency
-- 👥 **Customer Management**: Create and manage customer profiles
-- 🛍️ **Product Management**: Organise your products and pricing
-- 📈 **Transaction Tracking**: Webhook notifications and on-demand transaction status
-- 💰 **Refunds**: Query and track refund entries
-- 📊 **Accounting Export**: Export payment data as JSON or CSV
-- 🔑 **Account Claims**: Manage user fund claim requests
+> Coming from 2.x? Read [MIGRATION-v3.md](MIGRATION-v3.md): 3.0.0 targets API v2 and changes the
+> services, the ids, the errors and the webhooks.
 
-## Table of Contents
+## Contents
 
 - [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Configuration](#configuration)
-- [Response Types](#response-types)
-- [Acting on Behalf of a User](#acting-on-behalf-of-a-user)
-- [One-Time Payments](#one-time-payments)
+- [Quick start](#quick-start)
+- [Authentication and acting for a member](#authentication-and-acting-for-a-member)
+- [Checkout sessions](#checkout-sessions)
+- [Products and customers](#products-and-customers)
+- [Payments and failures](#payments-and-failures)
 - [Subscriptions](#subscriptions)
-- [Transaction Status](#transaction-status)
 - [Refunds](#refunds)
-- [Accounting Export](#accounting-export)
-- [Claims](#claims)
-- [Customer Management](#customer-management)
-- [Product Management](#product-management)
-- [User Management](#user-management)
-- [API Key Management](#api-key-management)
+- [Marketplaces](#marketplaces)
+- [Wallets](#wallets)
+- [Accounting export](#accounting-export)
+- [Webhooks](#webhooks)
 - [Currencies](#currencies)
-- [Webhook Handling](#webhook-handling)
-  - [Configuring Webhook URLs](#configuring-webhook-urls)
-  - [Transaction Webhooks](#transaction-webhooks)
-  - [Subscription Status Webhooks](#subscription-status-webhooks)
-  - [Test Webhooks](#test-webhooks)
-- [Error Handling](#error-handling)
-- [API Reference](#api-reference)
-- [License](#license)
-- [Support](#support)
-- [Changelog](#changelog)
+- [Pagination and iterators](#pagination-and-iterators)
+- [Errors](#errors)
+- [Retries and idempotency](#retries-and-idempotency)
+- [Configuration](#configuration)
+- [Migrating from 2.x](#migrating-from-2x)
+- [Examples](#examples) · [Testing](#testing) · [License](#license) · [Support](#support) · [Security](#security)
 
 ## Installation
-
-Requires **Node.js 18 or later**. The package ships CommonJS and ES-module builds plus type
-declarations, and is verified before every release by importing the packed tarball from a
-CommonJS project, a `"type": "module"` project and a TypeScript `moduleResolution: nodenext`
-project.
 
 ```bash
 npm install qbitflow
 ```
 
-Or using yarn:
-
-```bash
-yarn add qbitflow
+```ts
+import { QBitFlow, webhooks, NotFoundError } from 'qbitflow'; // ES modules and TypeScript
 ```
 
-## Quick Start
+```js
+const { QBitFlow, webhooks, NotFoundError } = require('qbitflow'); // CommonJS
+```
 
-### 1. Get Your API Key
+**Requires Node.js 20 or later.** The SDK has no runtime dependencies: it calls the API with the
+global `fetch` and verifies webhooks with `node:crypto`. It is server-side code: never ship an API
+key to a browser.
 
-Sign up at [QBitFlow](https://qbitflow.app) and obtain your API key from the dashboard.
+## Quick start
 
-### 2. Initialize the Client
-
-```typescript
+```ts
 import { QBitFlow } from 'qbitflow';
 
-const client = new QBitFlow(process.env.QBITFLOW_API_KEY!);
-```
+// One client per API key, shared by the whole program.
+// A blank key, or one not starting with sk_, throws a ValidationError (nothing is sent).
+const client = new QBitFlow(process.env.QBITFLOW_API_KEY ?? '');
 
-### 3. Create a One-Time Payment
+// The recommended start-up check: what is this key, and which mode is it in?
+const me = await client.me(); // an AuthenticationError for an unknown or revoked key
+if (me.space) {
+	console.log(`${me.space.organizationName}, role ${me.role}, test mode ${me.space.test}`);
+}
 
-```typescript
-const payment = await client.oneTimePayments.createSession({
-	productId: 1,
-	successUrl: 'https://yourapp.com/success',
-	cancelUrl: 'https://yourapp.com/cancel',
+// A hosted checkout for a one-time payment of 4.99 USD.
+const session = await client.checkoutSessions.createPayment({
+	productName: 'Premium access',
+	price: 4.99,
+	reference: 'order-1042',
+	successUrl: 'https://shop.example.com/thanks?session={{UUID}}',
+	cancelUrl: 'https://shop.example.com/cart',
 });
-
-console.log('Payment link:', payment.link); // Send this link to your customer
+console.log('Send the customer to', session.link);
 ```
 
-> **Webhook URLs are configured in the dashboard.** Set your **Transaction webhook**
-> (and **Subscription status webhook**) URLs under settings in the [QBitFlow dashboard](https://qbitflow.app).
-> They can no longer be set per session. See [Webhook Handling](#webhook-handling).
+Then fulfil the order when the [`payment.completed` webhook](#webhooks) arrives for
+`session.uuid`, never on the customer's redirect to your success page.
 
-### 4. Create a Recurring Subscription
+### Conventions
 
-```typescript
-const subscription = await client.subscriptions.createSession({
-	productId: 1,
-	frequency: { unit: 'months', value: 1 }, // Bill monthly
-	trialPeriod: { unit: 'days', value: 7 }, // 7-day free trial (optional)
+- **Every method** returns a `Promise`, takes its params as one object, and accepts
+  [request options](#configuration) as its last argument (`onBehalfOf`, `idempotencyKey`,
+  `requestId`, `signal`).
+- **Ids are strings.** Resources are named by UUIDs; transactions by prefixed ids (`pay@…` a
+  payment, `sub@…` a subscription, `sub-hist@…` a bill, `refund@…` a refund) that you pass back
+  verbatim. Only currencies keep numeric ids.
+- **Optional response fields** are typed `field?: T` (absent: `undefined`); a field typed
+  `T | null` is always present. A required field the API leaves out decodes to its zero value
+  (`''`, `0`, `false`, `[]`), never to an error; a value of the wrong JSON type is a `ServerError`.
+- **Amounts:** USD amounts are numbers (`amount`, `amountUsd`); exact amounts in a token's smallest
+  unit, and a few USD prices, are decimal **strings** (`amountMinUnits`, `priceUsd`, `allowance`),
+  never parsed or rounded. Fee rates are percents: `feePercent: 1.5` is 1.5 %.
+- **Enums** are string-literal unions with a `const` object listing the known values
+  (`SubscriptionStatus.PastDue === 'pastDue'`). A value this SDK does not know yet is kept as is:
+  give every `switch` a `default` branch.
+- **Times** are ISO 8601 strings, exactly as the API sent them (its offset, e.g. `+02:00`, and its
+  microseconds included): use `Date.parse(value)` to compare. Date filters (`createdAfter`,
+  `createdBefore`) take a `Date` or an RFC 3339 string.
+- **Path segments** you pass (references, emails, ids) are percent-encoded. A value that is
+  exactly `.` or `..` is refused with a `ValidationError`: `fetch` would normalise it away.
+
+## Authentication and acting for a member
+
+Every request sends your API key in `X-API-Key`. Keys are created in the QBitFlow dashboard; each
+belongs to one **space** (your organization's, or one of its members') and one **mode** (test or
+live). The constructor only checks the key's shape (non-blank, starting with `sk_`) and sends
+nothing: call `me()` to check it online.
+
+```ts
+const me = await client.me();
+if (!me.space?.test) {
+	throw new Error('this job must run with a test-mode key');
+}
+console.log('acting as', me.role, 'in', me.space.organizationName); // admin: an organization key
+```
+
+Keep the key in a secret store or an environment variable, never in code. Keys issued before API v2
+(`sk_<digits>_…`) still work; rotate them in the dashboard to the `sk_<uuid>_…` format.
+
+### `On-Behalf-Of`: acting in a member's space
+
+A marketplace's **organization key** can act in any of its members' spaces: create their products
+and checkouts, read their payments. Name the member by their **user UUID** (`Member.userUuid`,
+also in the `member.joined` webhook). A non-member, an owner or admin of the team, or a member of
+the other mode answers 404.
+
+```ts
+const memberUuid = '0192f1c2-7b3a-7c4d-9e5f-6a7b8c9d0e1f'; // Member.userUuid
+
+// A client acting in the member's space. It shares the configuration of client.
+const seller = client.onBehalfOf(memberUuid);
+const products = await seller.products.list();
+console.log(products.length, 'products in the seller space');
+
+// One request only: the request option wins over the client's.
+const page = await client.payments.list({}, { onBehalfOf: memberUuid });
+console.log(page.items.length, 'payments of the seller');
+
+// '' forces the organization's own space for one request of the seller's client.
+const own = await seller.products.list({}, { onBehalfOf: '' });
+console.log(own.length, 'products of the organization');
+```
+
+`onBehalfOf` is also a client option: `new QBitFlow(key, { onBehalfOf: memberUuid })`. A value
+that is not a UUID (or the nil UUID) throws a `ValidationError` at once, from `client.onBehalfOf()`
+and from the constructor; as a request option it fails that call before anything is sent.
+
+## Checkout sessions
+
+A checkout session is a hosted payment page. Create it, send your customer to its `link`, and act
+on the webhook. The session's id (`pay@…` or `sub@…`) is also the id of the payment or the
+subscription it creates once the customer's transaction is confirmed.
+
+Name the product with **exactly one** of `productUuid`, `productReference`, or an inline product
+(`productName` + `price`, `description` optional):
+
+```ts
+const session = await client.checkoutSessions.createPayment({
+	productUuid: '0192f1c2-1111-7c4d-9e5f-6a7b8c9d0e1f', // or productReference: 'tshirt-blue-m'
+	reference: 'order-1043', // your order id: unique per space
+	customerReference: 'crm-42', // kept on the payment
+	successUrl: 'https://shop.example.com/orders/1043?session={{UUID}}&type={{TRANSACTION_TYPE}}',
+	cancelUrl: 'https://shop.example.com/cart',
+	expiresInMinutes: 30, // 10 to 1440; left out = the default
 });
-
-console.log('Subscription link:', subscription.link);
+console.log('pay at', session.link, '- session', session.uuid, 'expires', session.expiresAt);
 ```
 
-### 5. Check Transaction Status
+A subscription checkout takes the same fields plus its terms, each optional over a subscription
+product's:
 
-```typescript
-import { TransactionType, TransactionStatusValue } from 'qbitflow';
+```ts
+const session = await client.checkoutSessions.createSubscription({
+	productName: 'Pro plan',
+	price: 4.99, // USD per period
+	frequency: { value: 1, unit: DurationUnit.Months },
+	trialPeriod: { value: 14, unit: 'days' },
+	minPeriods: 3, // the customer commits to 3 periods
+	successUrl: 'https://app.example.com/billing?subscription={{UUID}}',
+});
+console.log('subscribe at', session.link);
+```
 
-const status = await client.transactionStatus.get(payment.uuid, TransactionType.ONE_TIME_PAYMENT);
+- **Redirect placeholders.** In `successUrl` and `cancelUrl`, QBitFlow replaces `{{UUID}}` with the
+  session's id and `{{TRANSACTION_TYPE}}` with `payment` or `createSubscription`. In live mode both
+  URLs must be `https`. A redirect proves nothing (anyone can open the URL): fulfil on the
+  webhook, or on `getStatus`.
+- **Errors to expect:** a `ConflictError` `merchant_not_ready` (`details.reason`) when the space's
+  wallets accept no currency; `unique_violation` when another payment or open session holds the
+  `reference`; a `ValidationError` above 5 USD in test mode (`details.max`); a `NotFoundError` for
+  an unknown product or customer.
 
-if (status.status === TransactionStatusValue.COMPLETED) {
-	console.log('Payment completed! Transaction hash:', status.txHash);
-} else if (status.status === TransactionStatusValue.FAILED) {
-	console.log('Payment failed:', status.message);
+### Status
+
+```ts
+const status = await client.checkoutSessions.getStatus(session.uuid);
+switch (status.status) {
+	case CheckoutSessionStatusValue.Completed:
+		console.log('paid, tx', status.txHash);
+		break;
+	case CheckoutSessionStatusValue.Expired:
+		console.log('expired unpaid:', status.message);
+		break;
+	case CheckoutSessionStatusValue.WaitingConfirmation:
+		console.log('sent, waiting for the network');
+		break;
+	default: // created, or a status this SDK does not know
+		if (status.lastAttempt) {
+			console.log('last attempt failed:', status.lastAttempt.code); // the customer may try again
+		}
 }
 ```
 
-## Configuration
+| `status` | Meaning | Final |
+|---|---|---|
+| `created` | Waiting for the customer. With `lastAttempt` set, their last attempt failed (`lastAttempt.code` says why) | no |
+| `waitingConfirmation` | A transaction was sent; waiting for the network. It may last: the transaction can still land | no |
+| `completed` | Confirmed and recorded: the `Payment` or `Subscription` exists, with the session's id | yes |
+| `expired` | Expired unpaid (`checkout.expired` was sent). Read some days later, an expired session is a 404 | yes |
 
-| Option       | Type   | Default                       | Description                                                                 |
-| ------------ | ------ | ----------------------------- | --------------------------------------------------------------------------- |
-| `apiKey`     | string | (required)                    | Your QBitFlow API key (a blank key is rejected)                             |
-| `baseUrl`    | string | `https://api.qbitflow.app/v1` | Absolute `http(s)://` API base URL (a trailing slash is removed; point it at a local server for testing) |
-| `timeout`    | number | `30000`                       | Request timeout in milliseconds                                             |
-| `maxRetries` | number | `3`                           | Retry budget for idempotent requests (see below); `0` disables retries        |
+**Never cancel an order on `lastAttempt`:** a failed attempt is not final, and the customer can pay
+from the same checkout until it expires. Release what the order holds on `checkout.expired`.
 
-### Retry policy
+### Expire
 
-Only **GET** requests are retried, and only when the failure is a **network error** (no
-response) or a **5xx**. POST, PUT and DELETE are sent exactly once, so a checkout session or
-a customer is never created twice because a proxy timed out after the server had already
-processed the request. The GET routes that perform an action — `subscriptions.forceCancel()`,
-`subscriptions.executeTestBilling()` and `claims.triggerTestClaimFunds()` — are never retried
-either. `4xx`, `429`, `3xx` and requests that cannot be sent at all (a configuration error such
-as an invalid URL) are never retried. Back-off is exponential: 1 s, 2 s, 4 s.
+End a session early (an order cancelled on your side). It answers its status, and
+`checkout.expired` follows. Once the customer paid or is paying it is a `ConflictError`
+`tx_already_sent`.
 
-Redirects are **not followed**: a `3xx` surfaces as a `ServerException` (it means the base URL
-is misconfigured), so your API key is never forwarded to whatever host a redirect names.
-
-Every request carries `X-API-Key` and `User-Agent: qbitflow-js/<version>`.
-
-## Response Types
-
-Every response is decoded against the server's type before it reaches you, so each object
-matches its TypeScript type at runtime, not just at compile time:
-
-- A field without `| null` is **always present**. When the API leaves an optional value out,
-  you get its zero value — `0`, `''`, `false`, `[]`, a zero-valued nested object — exactly as
-  the Go server would read it. For example `payment.productId` is `0` for a payment that was
-  not for a stored product, `session.reference` is `''` when you set none, and a list the API
-  sends as `null` arrives as `[]`.
-- A field typed `T | null` (a pointer on the server) is **always present** as its value or
-  `null`: `payment.reference`, `payment.customerUUID`, `subscription.minimumCancellationDate`,
-  `refund.respondedAt`, `user.claimedAt`, `apiKey.expiresAt`, `currency.mainCurrency` …
-- Timestamps are RFC3339 strings. A non-nullable timestamp the API did not set is Go's zero
-  time, `0001-01-01T00:00:00Z` (e.g. `subscription.lastBillingDate` before the first billing).
-- A field of the **wrong JSON type** is a response-shape failure: a `ServerException` whose
-  message names the field path (`items[2].currency.id`) and whose `statusCode` is the HTTP
-  status. Unknown extra fields are kept; enum values the SDK does not know stay raw strings.
-- Payments, combined payments, subscriptions and subscription billings carry the full
-  `currency` object (`payment.currency.symbol`); `currencyId` is there too.
-
-## Acting on Behalf of a User
-
-If you hold an **organization (admin) API key**, you can perform any request as one of the users in your organization, without needing that user's own API key. This is useful for admin-level tooling, dashboards, and back-office automation where your server acts for a specific user (e.g. listing _their_ products, creating a payment session _for them_, or reading _their_ subscriptions).
-
-`client.onBehalfOf(userId)` returns a client whose **every** service adds an `On-Behalf-Of`
-header to each request, sharing this client's transport and configuration. Every service also
-has its own `onBehalfOf(userId)`, which scopes just that service. The original client is left
-untouched either way, so you can freely mix org-level and per-user calls.
-
-```typescript
-const userId = 123;
-
-// A client acting as user 123 for everything
-const asUser = client.onBehalfOf(userId);
-const products = await asUser.products.getAll();
-const userPayments = await asUser.oneTimePayments.getAll();
-
-// Or scope a single service
-const theirCustomers = await client.customers.onBehalfOf(userId).getAll();
-
-// The base client is unaffected — this call still runs at the organization level
-const allOrgProducts = await client.products.getAll();
+```ts
+const expired = await client.checkoutSessions.expire(session.uuid);
+console.log(expired.status); // expired
 ```
 
-> **Note:** `onBehalfOf` requires an organization-level admin/owner API key. The API refuses a
-> user that is not in your organization with `404`.
-> `onBehalfOf(0)` acts at the organization level (the header is omitted); a negative,
-> non-integer or unsafe (> 2^53 − 1) id throws a `ValidationException`.
+## Products and customers
 
-## One-Time Payments
+Products are optional (a checkout can name an inline product) and give you a reusable catalog
+with payment links. A subscription product carries its terms.
 
-### Create a Payment Session
-
-Provide either a `productId` / `productReference` or inline product details (`productName` +
-`description` + `price`, where the price must be greater than 0):
-
-```typescript
-// Using an existing product, pre-filling an existing customer by UUID
-const payment = await client.oneTimePayments.createSession({
-	productId: 1,
-	customerUUID: '01997c89-d0e9-7c9a-9886-fe7709919695', // a bare UUID; omit to collect at checkout
-	successUrl: 'https://yourapp.com/success',
-	cancelUrl: 'https://yourapp.com/cancel',
+```ts
+let product = await client.products.create({
+	name: 'Pro plan',
+	description: 'Everything, billed monthly',
+	price: 4.99,
+	reference: 'pro-monthly', // unique per space; generated when left out
+	subscription: { frequency: { value: 1, unit: DurationUnit.Months } },
 });
 
-// Or with inline product details
-const payment = await client.oneTimePayments.createSession({
-	productName: 'Custom Product',
-	description: 'Product description',
-	price: 99.99, // USD, greater than 0
+// Only the fields given change. A new price applies to new checkouts and subscribers only.
+product = await client.products.update(product.uuid, {
+	price: 5.99,
+	isActive: false, // hidden from products.list
 });
 
-console.log(payment.uuid); // Session UUID
-console.log(payment.link); // Payment link for customer
+const all = await client.products.list({ includeHidden: true, subscription: true });
+console.log(product.paymentLink, all.length);
 ```
 
-#### Using your own references
+`products.get`, `getByReference` and `delete` complete the set. Deleting a product does not stop
+its subscriptions: cancel them with `subscriptions.cancel` if the product is gone for good.
 
-Instead of storing QBitFlow's internal UUIDs, you can pass your own identifiers when creating
-a session. Set `reference` to your order/invoice ID, and use `productReference` /
-`customerReference` to select an existing product or customer by your own reference:
-
-```typescript
-const payment = await client.oneTimePayments.createSession({
-	reference: 'order-1234', // your own transaction reference
-	productReference: 'PROD-PREMIUM', // use a product by your reference (instead of productId)
-	customerReference: 'user-42', // use a customer by your reference (instead of customerUUID)
+```ts
+let customer = await client.customers.create({
+	name: 'Ada',
+	lastName: 'Lovelace',
+	email: 'ada@example.com',
+	reference: 'crm-42',
 });
+
+// '' clears phoneNumber or address; a field left out is unchanged.
+customer = await client.customers.update(customer.uuid, { phoneNumber: '' });
+
+const byEmail = await client.customers.getByEmail('ada@example.com');
+console.log(customer.uuid === byEmail.uuid);
 ```
 
-The `reference` is echoed back on the resulting `Payment` and in webhook payloads, and you can
-look the payment up later with [`getByReference()`](#get-payment-by-reference). If no customer
-matches `customerReference`, one is created during checkout. Empty optional strings count as
-"not provided" and are left out of the request.
+`customers.get`, `getByReference`, `list` / `iterate` (by `email` or `verified`) and `delete`
+complete the set. A checkout given `customerUuid` or `customerReference` asks the customer
+nothing (`customerReference` is kept on the payment, and links your customer with that reference
+if there is one); without either, the checkout asks what your `checkout.customerDetails` setting
+says (the full details by default).
 
-### Get Payment Session
+## Payments and failures
 
-```typescript
-const session = await client.oneTimePayments.getSession(payment.uuid);
-console.log(session.productName, session.price);
+A `Payment` exists once its transaction is confirmed, with its checkout session's `pay@…` id.
 
-// By default the API answers with an error when the session is close to expiry. Pass
-// `false` to always get the session data:
-const anyway = await client.oneTimePayments.getSession(payment.uuid, false);
-```
-
-`oneTimePayments.getSession()` only returns one-time payment sessions: a subscription session
-throws a `ValidationException` telling you to use `subscriptions.getSession()` (and the other
-way round).
-
-### Get Completed Payment
-
-```typescript
-const payment = await client.oneTimePayments.get('pay@01997c89-d0e9-7c9a-9886-fe7709919695');
-console.log(payment.transactionHash, payment.amount);
-console.log(payment.currency.symbol, payment.currency.decimals); // the full currency object
-
-// Structured, typed metadata (fee breakdown, on-chain details, per-party amounts) is always
-// present on a payment:
-console.log(payment.metadata.feeBps);
-console.log(payment.metadata.txMetadata.blockData.number);
-console.log(payment.metadata.txAmounts.usd.merchant);
-console.log(payment.metadata.organizationFee?.feeBps ?? 0); // null when there is none
-
-// Nullable values are always present, as a value or null:
-console.log(payment.reference ?? '(no reference)', payment.customerUUID ?? '(no customer)');
-```
-
-`CombinedPayment.metadata` is `PaymentMetadata | null`, `RefundEntry.metadata` is
-`TxMetadata | null`. Min-unit amounts are decimal strings.
-
-### Get Payment by Reference
-
-Look a payment up by the `reference` you assigned when creating the session — no need to store
-QBitFlow's UUID:
-
-```typescript
-const payment = await client.oneTimePayments.getByReference('order-1234');
-console.log(payment.uuid, payment.amount);
-```
-
-> References are escaped correctly in the URL, but the API currently cannot route a reference
-> containing `/` (it answers `404`) — avoid `/` in the references you assign. The same applies
-> to product, customer and subscription references.
-
-### List All Payments
-
-```typescript
-const result = await client.oneTimePayments.getAll({ limit: 10 });
-
-console.log(result.items); // Array of payments
-console.log(result.hasMore()); // Whether there are more pages
-
-if (result.hasMore()) {
-	const nextPage = await client.oneTimePayments.getAll({
-		limit: 10,
-		cursor: result.nextCursor,
-	});
+```ts
+const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+const page = await client.payments.list({
+	createdAfter: since,
+	includeMembers: true, // organization key: the members' payments too
+	limit: 50,
+});
+for (const p of page.items) {
+	const merchant = p.metadata.txAmounts.usd.merchant;
+	console.log(`${p.uuid} "${p.reference ?? ''}": ${p.amount} USD (${p.explorerUrl}), merchant got ${merchant} USD`);
 }
+
+const payment = await client.payments.get('pay@0192f1c2-2222-7c4d-9e5f-6a7b8c9d0e1f');
+const byRef = await client.payments.getByReference('order-1042');
+console.log(payment.txHash, byRef.uuid, payment.refundable === true);
 ```
 
-### List Combined Payments
+- **Filters** (`PaymentListParams`): `customerUuid`, `productUuid`, `createdAfter` / `createdBefore`
+  (both excluded), `refunded`, and, with an organization key acting for itself, `includeMembers`
+  (every member's rows, each naming its `userUuid`) or `userUuid` (one member's). The last two
+  exclude each other.
+- **Reading a member's row** from the organization's space: `payments.get(id, { includeMembers:
+  true })`, or `onBehalfOf` the member.
+- **The combined feed** of one-time payments and subscription bills, newest first:
+  `payments.listCombined` / `iterateCombined`, with the same filters plus `source`
+  (`CombinedPaymentSource.Payment`, `CombinedPaymentSource.SubscriptionHistory`) and
+  `subscriptionUuid`.
+- **Failures** are the failed attempts to pay a checkout or a bill. They never moved money and
+  are not final: the customer can try again.
 
-Get all payments (one-time and subscription billings) in a single feed:
-
-```typescript
-const result = await client.oneTimePayments.getAllCombined({ limit: 20 });
-result.items.forEach((payment) => {
-	console.log(payment.source); // "payment" or "subscription_history"
-	console.log(payment.amount, payment.amountMinUnits);
-});
-```
-
-### Get Customer for a Transaction
-
-```typescript
-const customer = await client.oneTimePayments.getCustomerForTransaction(payment.uuid);
-console.log(customer.email);
+```ts
+for await (const f of client.failures.iterate({ category: FailureCategory.InsufficientBalance })) {
+	console.log(`${f.txUuid} attempt ${f.attempt}: ${f.code} (${f.attemptedUsd} USD)`);
+}
 ```
 
 ## Subscriptions
 
-### Create a Subscription
+A subscription exists once its customer signed its checkout: paid the first period, or started
+the free trial. It keeps the checkout's `sub@…` id for life.
 
+| `status` | Meaning |
+|---|---|
+| `trial` | In its free trial |
+| `trialExpired` | The trial ended without the customer confirming it (`actionRequired` `confirmTrial`); cancelled 7 days later unless confirmed |
+| `active` | Billed on its due dates |
+| `pastDue` | A bill failed; retried for up to 7 days (`dunning` on reads), then cancelled |
+| `paused` | Paused by its customer: not billed until resumed |
+| `stopped` | Cancelled during its period: never billed again, `cancelled` at `nextBillingDate` |
+| `cancelled` | Over (`cancellationReason` says why). Final |
 
-```typescript
-const subscription = await client.subscriptions.createSession({
-	productId: 1,
-	frequency: { unit: 'months', value: 1 }, // Bill monthly — required, value 1..4294967295
-	trialPeriod: { unit: 'days', value: 7 }, // 7-day trial (optional; 0 = no trial)
-	minPeriods: 3, // Minimum commitment periods (optional; 0 = none)
-});
+**Access rule: grant access while `now < currentPeriodEnd`, whatever the status.** A `stopped` or
+`paused` subscription has paid for its period; a `pastDue` one's period has ended.
 
-console.log(subscription.link);
+```ts
+function hasAccess(sub: Subscription, now: Date = new Date()): boolean {
+	return sub.currentPeriodEnd !== undefined && now.getTime() < Date.parse(sub.currentPeriodEnd);
+}
 ```
 
-Like one-time payments, subscription sessions accept your own `reference`, `productReference`,
-and `customerReference` instead of QBitFlow's internal IDs:
+`actionRequired` says what the customer must do (`topUpAllowance`, `raiseMaximum`,
+`confirmTrial`; absent: nothing): point them to the `managementPageLink` the subscription
+webhooks carry.
 
-```typescript
-const subscription = await client.subscriptions.createSession({
-	reference: 'sub-1234', // your own subscription reference
-	productReference: 'PLAN-PRO', // select a product by your reference
-	customerReference: 'user-42', // select a customer by your reference
-	frequency: { unit: 'months', value: 1 },
-});
+```ts
+const page = await client.subscriptions.list({ status: SubscriptionStatus.PastDue });
+for (const s of page.items) {
+	if (s.dunning) console.log(s.uuid, s.dunning.remainingAttempts, 'attempts left');
+}
+
+const sub = await client.subscriptions.get('sub@0192f1c2-3333-7c4d-9e5f-6a7b8c9d0e1f'); // cancelled ones too
+console.log(sub.status, sub.priceUsd, 'USD per period');
+
+// Every bill, newest first: the iterator fetches the pages lazily.
+for await (const bill of client.subscriptions.iterateBills(sub.uuid)) {
+	if (bill.periodEnd) console.log(`${bill.uuid}: ${bill.amount} USD, paid until ${bill.periodEnd}`);
+}
 ```
 
-> **Track lifecycle changes with webhooks, not polling.** Previously you had to run a
-> cron job that periodically fetched each subscription with `subscriptions.get()` to detect
-> status changes and act on them. Now you can set a **Subscription status webhook** URL in
-> the dashboard settings and QBitFlow will notify you on every status transition
-> (`active` → `past_due`, `trial` → `active`, etc.), eliminating the need for a cron job.
-> See [Subscription Status Webhooks](#subscription-status-webhooks).
+- `subscriptions.getByReference` reads one by your checkout's `reference`; `getBill` one bill
+  (`sub-hist@…`).
+- `subscriptions.getPublicHistory` returns the 10 latest bills as the customer's page shows them.
+  It is a public route: the fields only the merchant sees (`metadata`, `customerUuid`,
+  `customerReference`, `userUuid`, `paidMinUnits`, `refund`, …) are empty there. Use `listBills`
+  for full bills.
+- Before its checkout completes, `subscriptions.get` is a 404: read the checkout session instead.
 
-### Frequency Units
+### Cancel
 
-Available units for `frequency` and `trialPeriod`:
+`cancel` cancels without the customer signing. By default it is immediate (`cancelled`, reason
+`merchant`); `{ immediate: false }` stops it now and cancels it at the end of the period paid for.
 
-`seconds` · `minutes` · `hours` · `days` · `weeks` · `months` · `years`
-
-### Get Subscription Session
-
-```typescript
-const session = await client.subscriptions.getSession(subscription.uuid);
-// Returns SubscriptionSession — frequency and trialPeriod are in raw seconds (trialPeriod 0 = none)
-console.log(session.frequency, session.trialPeriod);
-
-// Pass `false` to skip the API's close-to-expiry error (default: true)
-const anyway = await client.subscriptions.getSession(subscription.uuid, false);
+```ts
+const { subscription, pending } = await client.subscriptions.cancel(sub.uuid, { immediate: false });
+// A ConflictError subscription_already_stopped_or_inactive, or a 404 once cancelled.
+if (pending) {
+	// HTTP 202: the on-chain cancellation is still confirming and the status is not updated yet.
+	// It goes on regardless; subscription.statusChanged tells the end.
+	console.log('cancellation confirming');
+} else {
+	console.log('now', subscription.status); // stopped
+}
 ```
 
-### Get Subscription
+`cancel` answers 200 when done and 202 (`pending: true`) while confirming on-chain. It is never
+retried automatically.
 
-```typescript
-const sub = await client.subscriptions.get('sub@01997c89-d0e9-7c9a-9886-fe7709919695');
-console.log(sub.subscriptionStatus, sub.nextBillingDate, sub.currency.symbol);
-// lastBillingDate is Go's zero time (0001-01-01T00:00:00Z) until the first billing;
-// minimumCancellationDate is null unless minPeriods was set.
+### Test billing
+
+In test mode a subscription is billed only when you ask, with live's statuses and webhooks:
+
+```ts
+// A ConflictError payment_not_due before nextBillingDate; a 400 for a live subscription.
+const state = await client.subscriptions.executeTestBilling(sub.uuid);
+console.log(state.stage, state.outcome, state.failureCode);
 ```
 
-### Get Subscription by Reference
+Walk the timeline once in test mode: a 5-minute frequency, pay from a test wallet, trigger the
+bill, then empty the wallet and trigger it again to see `subscription.billingFailed` and
+`pastDue`.
 
-Look a subscription up by the `reference` you assigned when creating the session:
+## Refunds
 
-```typescript
-const sub = await client.subscriptions.getByReference('sub-1234');
-console.log(sub.uuid, sub.subscriptionStatus);
+```ts
+// Refunds waiting for an answer. From the organization's space the members' are included by
+// default: includeMembers false leaves them out.
+const pending = await client.refunds.list({ includeMembers: false });
+for (const r of pending) {
+	console.log(r.uuid, r.txUuid, r.initiatedBy, r.reason, r.amountUsd);
+}
+
+// Answered refunds (approved or rejected), page by page.
+for await (const r of client.refunds.iterateInactive()) {
+	console.log(r.uuid, r.status, r.explorerUrl);
+}
 ```
 
-### Get Subscription Payment History
+`refunds.initiate` starts a refund of a payment (`pay@…`) or a bill (`sub-hist@…`) of the space.
+**It creates a pending refund: no money moves until you sign the transfer in the dashboard**,
+from the wallet that was paid. `refund.completed` tells you when it is sent.
 
-```typescript
-const history = await client.subscriptions.getPaymentHistory(sub.uuid); // [] for an unknown id
-history.forEach((record) => {
-	console.log(record.uuid, record.amount, record.currency.symbol, record.createdAt);
-});
-```
-
-### Force-Cancel a Subscription
-
-Bypasses the normal subscriber-signed cancellation flow (admin use only):
-
-```typescript
-const result = await client.subscriptions.forceCancel(sub.uuid);
-console.log(result.message);
-```
-
-### Execute Test Billing Cycle
-
-**Test mode only** — manually trigger a billing cycle to validate your webhook handling.
-The API enforces the schedule: a subscription that is not yet due answers `409`, which the
-SDK throws as `ConflictException`.
-
-```typescript
-import { ConflictException } from 'qbitflow';
-
+```ts
 try {
-	const result = await client.subscriptions.executeTestBilling(sub.uuid);
-	console.log(result.message);
-} catch (error) {
-	if (error instanceof ConflictException) {
-		console.log('Not due for billing yet');
+	const refund = await client.refunds.initiate({
+		txUuid: 'pay@0192f1c2-2222-7c4d-9e5f-6a7b8c9d0e1f',
+		refundPercent: 50, // of everything the customer paid, network fee included; left out = 100
+		reason: 'Damaged in transit',
+		merchantMessage: 'Sorry about that: half of your payment is on its way back.',
+	});
+	console.log(refund.uuid, refund.status); // pending
+} catch (err) {
+	if (err instanceof ConflictError && err.code === 'refund_already_exists') {
+		console.log('already refunded:', err.details.refundUuid); // one refund per transaction
 	} else {
-		throw error;
+		throw err;
 	}
 }
 ```
 
-## Transaction Status
+A refund is `pending`, `approved` or `rejected`; `initiatedBy` is `customer` (a request you answer
+in the dashboard) or `merchant`. A held seller's payment already released to them can no longer be
+refunded (`409 held_funds_released`).
 
-### Check Status
+## Marketplaces
 
-```typescript
-import { TransactionType } from 'qbitflow';
+A marketplace is an organization whose sellers are its **members**. You invite them, sell for
+them with your organization key and `onBehalfOf`, take a commission on their payments, and may
+hold their funds until you trust them. QBitFlow stays non-custodial: money goes from the customer's
+wallet to the seller's (and your commission to yours) in one transaction.
 
-const status = await client.transactionStatus.get(payment.uuid, TransactionType.ONE_TIME_PAYMENT);
+**1. Invite the seller.** The SDK always invites members (`role: user`); the team is invited from
+the dashboard.
 
-console.log(status.status); // "created", "pending", "completed", etc.
-console.log(status.txHash); // On-chain transaction hash ('' until broadcast)
-console.log(status.settlementDetails?.txAmounts.usd.merchant); // null until settled
+```ts
+const created = await client.invitations.create({
+	email: 'seller@example.com',
+	trustLayer: true, // hold their payments until members.trust
+	organizationFeePercent: 5, // your commission: 0 to 50 %, at most 2 decimals
+	redirectUrl: 'https://market.example.com/welcome',
+});
+// A ConflictError already_joined for a member; a RateLimitError beyond 50 invitations an hour.
+console.log(created.invitation.uuid, created.link); // the link is also emailed
 ```
 
-### Transaction Types
+**2. Wait for `member.joined`.** The seller exists once they accepted: store the event's
+`userUuid` and match `invitationUuid` to your invitation. Never trust the redirect's
+`?invitationUuid=` (anyone can open it).
 
-```typescript
-enum TransactionType {
-	ONE_TIME_PAYMENT = 'payment',
-	TRANSFER = 'transfer',
-	TOKEN_TRANSFER = 'tokenTransfer',
-	CREATE_SUBSCRIPTION = 'createSubscription',
-	CANCEL_SUBSCRIPTION = 'cancelSubscription',
-	EXECUTE_SUBSCRIPTION_PAYMENT = 'executeSubscription',
-	CREATE_PAYG_SUBSCRIPTION = 'createPAYGSubscription',
-	CANCEL_PAYG_SUBSCRIPTION = 'cancelPAYGSubscription',
-	INCREASE_ALLOWANCE = 'increaseAllowance',
-	UPDATE_MAX_AMOUNT = 'updateMaxAmount',
-	REFUND = 'refund',
-	FAUCET = 'faucet',
-	CLAIM_FUNDS = 'claimFunds',
+```ts
+if (event.type === 'member.joined') {
+	console.log('invitation', event.data.invitationUuid, 'accepted by', event.data.userUuid);
 }
 ```
 
-### Following a transaction
+**3. Sell for them.** The seller adds their receiving wallet in their QBitFlow dashboard (only
+they can, not needed while you hold their funds). Then act in their space:
 
-To know when a transaction completes, use **webhooks** (recommended — QBitFlow notifies your
-server when a checkout completes and on every subscription status change; see
-[Webhook Handling](#webhook-handling)) or **poll `transactionStatus.get()`**. A transaction
-that has not been processed yet answers `404` (`NotFoundException`).
+```ts
+const currencies = await client.wallets.listSupportedCurrencies({ userUuid: memberUuid });
+if (currencies.length === 0) {
+	throw new Error('the seller cannot be paid yet: their checkouts would answer 409 merchant_not_ready');
+}
 
-### Unknown enum values
+const seller = client.onBehalfOf(memberUuid);
+const session = await seller.checkoutSessions.createPayment({
+	productName: 'Handmade mug',
+	price: 4.5,
+	successUrl: 'https://market.example.com/orders/{{UUID}}',
+}); // a PermissionDeniedError policy_disabled when your policies don't let members do this
+console.log(session.link);
+```
 
-Enum-typed response fields (`subscriptionStatus`, `status`, `role`, `txType`, `source`, …) are
-typed `<Enum> | (string & {})`: the enum members still autocomplete, and a value this SDK does
-not know yet is passed through as its raw string — never coerced to a default — so compare
-against the enum members and treat anything else as "unknown" (for a subscription: not
-active). Where a method takes an enum (`transactionStatus.get()`, `CreateUserDto.role`), the
-string value (`'payment'`, `'user'`) is accepted too.
+**4. Hear of every sale.** An organization webhook endpoint receives every seller's events by
+default; the event's `userUuid` names the seller. Use it as `onBehalfOf` for follow-up reads.
 
-### Status Values
+**5. Commission and held funds.** Each payment records your fee in `metadata.organizationFee` and
+`metadata.txAmounts`. While you hold a seller's funds (`trustLayer` true, `Member.trustedAt`
+`null`), their payments go to your wallet and the net is owed to them:
 
-```typescript
-enum TransactionStatusValue {
-	CREATED = 'created',
-	WAITING_CONFIRMATION = 'waitingConfirmation',
-	PENDING = 'pending',
-	COMPLETED = 'completed',
-	FAILED = 'failed',
-	CANCELLED = 'cancelled',
-	EXPIRED = 'expired',
+```ts
+const held = await client.members.getHeldFunds(memberUuid);
+console.log(`owed to the seller: ${held.totalAmount} USD over ${held.ledgers.length} lines`);
+
+// Their new payments go to their own wallets from now on. What is held stays held until you
+// release it from the dashboard (heldFunds.released tells you).
+const member = await client.members.trust(memberUuid);
+console.log('trusted since', member.trustedAt);
+
+// Change the commission (a checkout already created keeps its fee).
+await client.members.update(memberUuid, { organizationFeePercent: 7.5 });
+```
+
+- `members.list` / `iterate` / `get`, `members.listHeldFunds` (every member owed), and
+  `seller.members.getOwnHeldFunds()` (the seller's side) complete the reads.
+- `members.remove` ends a seller's membership in the key's mode: their keys stop working and their
+  checkouts close. It is a `409 held_funds_pending` while you hold their live funds: release them
+  first.
+- `invitations.list` / `iterate` (by `status`) and `invitations.revoke` manage the invitations.
+- Today a seller whose account already belongs to another organization cannot accept (no
+  `member.joined` comes), and test-mode sellers are real accounts that accept from a real inbox.
+
+## Wallets
+
+Wallets are added and removed in the dashboard, by their owner only. The SDK reads them.
+
+```ts
+const wallets = await client.wallets.list({ withBalances: true });
+for (const w of wallets) {
+	console.log(w.currency.symbol, w.publicKey);
+	for (const tw of w.tokenWallets) {
+		if (tw.balance) console.log(`  ${tw.token.symbol}: ${tw.balance.balance} (${tw.balance.balanceUsd} USD)`);
+	}
 }
 ```
 
-## Refunds
+`wallets.listForMember(userUuid)` reads a member's wallets (organization key), and
+`wallets.listSupportedCurrencies` the currencies a space's checkouts accept: none means its
+checkouts answer `409 merchant_not_ready`.
 
-### Get Refund by Transaction UUID
+## Accounting export
 
-Public endpoint — no authentication required:
+Every payment, bill, refund and fee between two dates (`YYYY-MM-DD`, both included), as JSON rows
+or as CSV text:
 
-```typescript
-const refund = await client.refunds.getByTransaction('pay@01997c89-d0e9-7c9a-9886-fe7709919695');
-console.log(refund.status, refund.reason);
-console.log(refund.merchantMessage || '(no answer yet)', refund.respondedAt ?? '(pending)');
+```ts
+import { writeFile } from 'node:fs/promises';
+
+const events = await client.accounting.exportJson('2026-09-01', '2026-09-30');
+for (const e of events) {
+	console.log(e.type, e.paymentUuid, e.txTimeUtc, e.tokenSymbol, e.grossAmount, e.netAmount);
+}
+
+const csv = await client.accounting.exportCsv('2026-09-01', '2026-09-30');
+await writeFile('qbitflow-2026-09.csv', csv, { mode: 0o600 });
 ```
 
-### List Active Refunds
+The SDK checks the dates and `from <= to` before sending. **The API allows at most 95 days per
+export** and answers 400 beyond: split longer ranges. Rows are typed `payment`,
+`subscriptionHistory`, `refund`, `organizationFee` or `referralFee`; amounts in a token's smallest
+unit are decimal strings, and the empty fields of a row are left out.
 
-```typescript
-const refunds = await client.refunds.getAll();
-refunds.forEach((r) => console.log(r.uuid, r.status, r.amountMinUnits));
+## Webhooks
+
+QBitFlow posts an **event** to your endpoints when something happens: a payment confirmed, a
+subscription billed, a member joined.
+
+### 1. Create an endpoint and store its secret
+
+```ts
+const created = await client.webhooks.endpoints.create({
+	url: 'https://shop.example.com/webhooks/qbitflow',
+	events: [
+		// left out: every type, including the ones added later
+		EventType.PaymentCompleted,
+		EventType.CheckoutExpired,
+		EventType.SubscriptionStatusChanged,
+	],
+	description: 'Order fulfilment',
+});
+// The whsec_… secret is shown only this once: put it in your secret store now.
+console.log(created.uuid, created.secret);
 ```
 
-### List Inactive (Resolved) Refunds
+Up to 10 endpoints per space and mode; live endpoints need `https` and a public host. An
+organization endpoint also receives its members' events unless created with
+`includeMembers: false`. `endpoints.list`, `get`, `update` (`{ enabled: false }` pauses it,
+`{ enabled: true }` enables it again) and `delete` manage them. An endpoint's secret is shown and
+rotated in the dashboard only.
 
-```typescript
-const result = await client.refunds.getAllInactive({ limit: 20 });
-result.items.forEach((r) => console.log(r.uuid, r.respondedAt));
+### 2. Verify and handle the deliveries
 
-if (result.hasMore()) {
-	const next = await client.refunds.getAllInactive({ cursor: result.nextCursor });
+Verify the `QBitFlow-Signature` header over the **raw body** (the bytes as received: never
+`JSON.parse` and re-serialize them), then switch on the event's type. `webhooks` is usable
+without a client: a receiver needs only the endpoint's secret.
+
+```ts
+import { createServer } from 'node:http';
+import { webhooks, type Event } from 'qbitflow';
+
+const secret = process.env.QBITFLOW_WEBHOOK_SECRET ?? '';
+const processed = new Set<string>(); // stands for your database: deliveries are at least once
+
+function handle(event: Event): void {
+	switch (event.type) {
+		case 'payment.completed': // event.data is a PaymentCompleted
+			console.log(`fulfil order "${event.data.reference ?? ''}" (${event.data.uuid}): ${event.data.amount} USD`);
+			break;
+		case 'checkout.expired':
+			if (!webhooks.isSubscriptionSession(event.data)) console.log('release order', event.data.reference);
+			break;
+		case 'subscription.statusChanged': {
+			const end = event.data.currentPeriodEnd;
+			const access = end !== undefined && Date.now() < Date.parse(end);
+			console.log(`${event.data.uuid}: ${event.data.previousStatus} -> ${event.data.status}, access: ${access}`);
+			break;
+		}
+		default:
+		// A type you don't handle, or one added after this SDK: acknowledge it.
+	}
+}
+
+createServer(async (req, res) => {
+	if (req.method !== 'POST' || req.url !== '/webhooks/qbitflow') {
+		res.writeHead(404).end();
+		return;
+	}
+	const chunks: Buffer[] = [];
+	for await (const chunk of req) chunks.push(chunk as Buffer);
+	const rawBody = Buffer.concat(chunks);
+
+	let event: Event;
+	try {
+		// Checks the signature and the timestamp, then parses the body.
+		event = webhooks.constructEvent(rawBody, req.headers['qbitflow-signature'], secret);
+	} catch {
+		// A WebhookSignatureError (err.reason says why), or a ValidationError: not a v2 event.
+		res.writeHead(400).end();
+		return;
+	}
+	if (!processed.has(event.id)) {
+		processed.add(event.id); // a retry of an event already handled is acknowledged only
+		handle(event);
+	}
+	res.writeHead(200).end(); // to every type, the ignored ones too
+}).listen(8080);
+```
+
+With **Express**, mount `express.raw()` on the webhook route only, so `req.body` is the raw
+`Buffer` (a JSON body parser would re-serialize it and break the signature):
+
+```ts
+import express from 'express';
+import { webhooks, WebhookSignatureError } from 'qbitflow';
+
+const app = express();
+const secret = process.env.QBITFLOW_WEBHOOK_SECRET ?? '';
+
+app.post('/webhooks/qbitflow', express.raw({ type: 'application/json' }), (req, res) => {
+	try {
+		const event = webhooks.constructEvent(req.body, req.headers['qbitflow-signature'], secret);
+		if (event.type === 'member.joined') console.log('new seller', event.data.userUuid);
+		res.sendStatus(200);
+	} catch (err) {
+		if (err instanceof WebhookSignatureError) console.warn('rejected:', err.reason);
+		res.sendStatus(400);
+	}
+});
+```
+
+`webhooks.verify(rawBody, signatureHeader, secret, options?)` only verifies (it returns nothing, or
+throws a `WebhookSignatureError`), and `webhooks.parseEvent(rawBody)` only parses: use it on a body
+already verified. `rawBody` is a `string`, a `Buffer` or a `Uint8Array`; the header may be a
+string, Node's `string[]` or `undefined` (a `missingHeader` failure).
+
+```ts
+try {
+	const event = webhooks.constructEvent(rawBody, signatureHeader, secret, { tolerance: 600 });
+	console.log(event.id, event.type, event.userUuid);
+} catch (err) {
+	if (err instanceof WebhookSignatureError) {
+		console.log('rejected:', err.reason); // e.g. noMatchingSignature, timestampOutsideTolerance
+	} else if (err instanceof ValidationError) {
+		console.log('not a v2 event:', err.message);
+	} else {
+		throw err;
+	}
 }
 ```
 
-### Refund Statuses
+- **At least once.** The same event can arrive more than once: **deduplicate on `event.id`** (also
+  in the `QBitFlow-Event-Id` header, `webhooks.EVENT_ID_HEADER`) and make the handler idempotent.
+  `QBitFlow-Event-Type` (`webhooks.EVENT_TYPE_HEADER`) carries the type, for routing before parsing.
+- **Answer 2xx fast**, within 30 seconds, **including to the types you ignore**: anything else is
+  retried (for 3 days in live mode), and an endpoint failing for 3 days is disabled. Store the
+  event, answer, then process it in the background.
+- **Secret rotation** needs nothing on your side: for 24 hours after a rotation the header carries
+  two `v1=` signatures, the new secret's and the previous one's, and either secret verifies. Switch
+  your secret within the day.
+- **Timestamps** more than 5 minutes from your clock are refused (replays): `{ tolerance }` (in
+  seconds) changes it, `{ now }` (a `Date`, or a function returning one) sets the clock in tests.
+- **Members' events** carry the member in `event.userUuid`: read their resources with
+  `client.onBehalfOf(event.userUuid)`.
+- **No fixed source IPs**: verify the signature, never allow-list addresses.
+- **v2 only.** An endpoint migrated from API v1 receives v1 bodies, which `parseEvent` refuses
+  (a `ValidationError`): move it to v2 in the dashboard, or with
+  `client.webhooks.endpoints.update(uuid, { payloadVersion: WebhookPayloadVersion.V2 })`.
+- Not holding the secret? `await client.webhooks.verifyRemote(endpointUuid, rawBody, header)` has
+  the API check it (a `WebhookSignatureError` with reason `invalidSignature` when it does not
+  match), then `webhooks.parseEvent` parses the body.
 
-```typescript
-enum RefundStatus {
-	PENDING = 'pending',
-	APPROVED = 'approved',
-	REFUSED = 'refused',
-	FAILED = 'failed',
+`Event` is a discriminated union on `type`: a `switch` or an `if` on `event.type` narrows
+`event.data` to its model, as in the handler above. A type this SDK does not know yet arrives as an
+`UnknownEvent` (its `data` is `unknown`) and lands in the `default` branch:
+`webhooks.isUnknownEvent(event)` tells it, and `String(event.type)` reads its type (typed `never`
+so that it does not get in the way of the narrowing). `webhooks.isEventType(event, type)` narrows
+like a comparison, and `webhooks.eventData(event, type)` returns the typed data (a
+`ValidationError` for another type).
+
+| `event.type` | `event.data` |
+|---|---|
+| `payment.completed` | the `Payment` + `managementPageLink` |
+| `subscription.created` | the `Subscription` (`active` or `trial`) + `managementPageLink` |
+| `subscription.billed` | the `Bill` (paid until `periodEnd`) + `subscriptionReference`, `subscriptionStatus` |
+| `subscription.statusChanged` | the `Subscription` + `previousStatus` |
+| `subscription.actionRequiredChanged` | the `Subscription` + `previousActionRequired` |
+| `subscription.billingFailed` | the `Subscription` + `reason`, `billUuid`, `amountUsd` (a string), `attempt`, `remainingAttempts`, `nextAttemptAt` |
+| `subscription.upcomingBill` | the `Subscription` + `billingDate`, `amountUsd` (a number), `trialEnding`, `balanceSufficient`, `allowanceSufficient` |
+| `refund.requested` / `.completed` / `.denied` | the `Refund` |
+| `member.joined` | the `Member` + `invitationUuid` |
+| `member.removed` | the `Member` |
+| `heldFunds.released` | the transfer paid to the member + the `ledgers` it settled |
+| `checkout.expired` | the session: `PaymentSessionData`, or `SubscriptionSessionData` (`webhooks.isSubscriptionSession`) |
+| `webhook.test` | `endpointUuid`, `message` (the dashboard's test) |
+| any other | `unknown` (the raw JSON value) |
+
+Webhook data never carries what only API reads return (`customer`, `refund`/`refundable`,
+`dunning`, `approval`, `productName`).
+
+### The event log
+
+Every event of the space, newest first, with each one's deliveries:
+
+```ts
+for await (const event of client.webhooks.events.iterate({ type: EventType.PaymentCompleted })) {
+	const detail = await client.webhooks.events.get(event.id);
+	for (const d of detail.deliveries) {
+		console.log(event.id, d.url, d.delivered, d.attempts.length);
+	}
+	break; // the first one is enough here: breaking stops the fetching
 }
-```
-
-## Accounting Export
-
-Export transaction data for reconciliation and bookkeeping.
-
-```typescript
-import fs from 'fs';
-
-// JSON export — typed as AccountingEvent[]
-const events = await client.accounting.export('2026-08-01', '2026-08-31', 'json');
-events.forEach((e) => {
-	console.log(e.paymentId, e.type, e.netAmountUsd);
-});
-
-// CSV export — typed as string (the header row is always included)
-const csv = await client.accounting.export('2026-08-01', '2026-08-31', 'csv');
-fs.writeFileSync('transactions.csv', csv);
-```
-
-Dates are `YYYY-MM-DD` calendar dates and `from` must not be after `to`; how wide a window the
-API accepts is decided by the API (an error answer is parsed the same way for both formats).
-Each `AccountingEvent` includes: transaction identifiers, product info, on-chain details (chain,
-block, tx hash, addresses), token info, gross/net amounts, platform and organization fees, and
-network fees for refunds. `type` is `payment`, the subscription-billing value
-(`subscriptionHistory`; the API docs also spell it `subHistory`), `refund`, `organizationFee` or
-`referralFee`.
-
-## Claims
-
-Claims enable organizations to transfer accumulated earnings to users who have claimed their account.
-
-### Get Pending Claim Obligations
-
-```typescript
-const funds = await client.claims.getFunds();
-funds.forEach((f) => {
-	console.log(`User ${f.userId} is owed $${f.totalAmountOwed}`);
-});
-```
-
-### Create a Claim Request for a User
-
-Generate a one-time link that lets the user set up their password and wallet (admin only):
-
-```typescript
-const { link } = await client.claims.createRequest(userId);
-// Send `link` to the user via email
-console.log('Claim link:', link);
-```
-
-### Get an Existing Claim Request for a User
-
-Check whether a claim request already exists for a given user and retrieve the link:
-
-```typescript
-const { link } = await client.claims.getRequestByUser(userId);
-console.log('Existing claim link:', link);
-```
-
-### Trigger Test Claim Fund Computation
-
-**Test mode only** — manually compute ledger totals for a user without waiting for the hourly job:
-
-```typescript
-await client.claims.triggerTestClaimFunds(userId);
-```
-
-## Customer Management
-
-### Create a Customer
-
-```typescript
-const customer = await client.customers.create({
-	name: 'John',
-	lastName: 'Doe',
-	email: 'john@example.com',
-	phoneNumber: '+1234567890',
-	reference: 'CRM-12345',
-});
-console.log('Customer created:', customer.uuid);
-```
-
-### Get Customer
-
-```typescript
-const customer = await client.customers.get('01997c89-d0e9-7c9a-9886-fe7709919695');
-const byEmail = await client.customers.getByEmail('john@example.com');
-const byReference = await client.customers.getByReference('CRM-12345');
-console.log(customer.phoneNumber || '(no phone)', customer.userId); // '' / 0 when not set
-```
-
-### List Customers
-
-```typescript
-const result = await client.customers.getAll({ limit: 10 });
-if (result.hasMore()) {
-	const next = await client.customers.getAll({ limit: 10, cursor: result.nextCursor });
-}
-```
-
-### Update Customer
-
-```typescript
-// Updates are partial: send only what changes, everything else is left untouched.
-// An empty string counts as "not provided".
-const updated = await client.customers.update(customer.uuid, {
-	name: 'John',
-});
-
-// Or several fields at once
-await client.customers.update(customer.uuid, {
-	name: 'John',
-	lastName: 'Doe',
-	email: 'john.doe@example.com',
-	phoneNumber: '+9876543210',
-});
-
-// Note: `reference` is immutable and cannot be updated.
-```
-
-### Delete Customer
-
-```typescript
-const response = await client.customers.delete(customer.uuid);
-console.log(response.message);
-```
-
-## Product Management
-
-### Create a Product
-
-```typescript
-const product = await client.products.create({
-	name: 'Premium Subscription',
-	description: 'Access to all premium features',
-	price: 29.99,
-	reference: 'PROD-PREMIUM',
-});
-```
-
-### Get, List, Update, Delete
-
-```typescript
-const product = await client.products.get(1);
-const byRef = await client.products.getByReference('PROD-PREMIUM');
-const all = await client.products.getAll();
-
-// Partial update: omitted fields keep their current value
-const updated = await client.products.update(1, { price: 39.99 });
-
-await client.products.update(1, {
-	name: 'Premium Plus',
-	description: 'Enhanced features',
-	price: 39.99,
-});
-
-await client.products.delete(1);
-```
-
-## User Management
-
-### Create a User
-
-```typescript
-import { UserRole } from 'qbitflow';
-
-// Create (admin only)
-const user = await client.users.create({
-	name: 'Alice',
-	lastName: 'Smith',
-	email: 'alice@example.com',
-	role: UserRole.USER,      // UserRole.USER / UserRole.ADMIN, or 'user' / 'admin' (HANDLE / OWNER are read-only)
-	organizationFeeBps: 100,  // optional, an integer 0–5000 (1% fee)
-});
-```
-
-### Get, List, Update, Delete
-
-```typescript
-// Get current user (identified by API key)
-const me = await client.users.get();
-
-// Get by ID / list all (admin only)
-const byId = await client.users.getById(42);
-const all = await client.users.getAll();
-
-// Get by email (admin only for other users in the organization)
-const byEmail = await client.users.getByEmail('alice@example.com');
-
-// Update — partial: omitted fields keep their current value
-const updated = await client.users.update(user.id, { name: 'Alicia' });
-
-// organizationFeeBps requires admin authority (an admin/owner key, or an
-// organization-level key via onBehalfOf). A non-admin caller sending it gets a 403.
-await client.users.update(user.id, { organizationFeeBps: 250 }); // 2.5%
-
-// Note: passwords cannot be changed through this SDK. It is a JWT-only, self-service
-// operation on the API, so the field is intentionally absent from UpdateUserDto.
-
-// Delete (admin only)
-await client.users.delete(user.id);
-```
-
-## API Key Management
-
-> **Note:** Creating and deleting API keys is a JWT-only operation on the API — it cannot be
-> performed with an API key, which is the only credential this SDK uses. Manage keys from the
-> [QBitFlow dashboard](https://qbitflow.app). The SDK exposes read access only.
-
-```typescript
-// List API keys for the current user
-const keys = await client.apiKeys.getAll();
-
-// List API keys for a specific user (admin only)
-const forUser = await client.apiKeys.getForUser(userId);
 ```
 
 ## Currencies
 
-Public lookups that resolve the currency IDs returned in `SessionCheckout.availableCurrencies`.
-(Payments and subscriptions already carry their full `currency` object.) No authentication is
-required for these endpoints.
+```ts
+const currencies = await client.currencies.listAvailable({ test: true });
+const byId = new Map(currencies.map((c) => [c.id, c])); // e.g. 6-decimal USDC
 
-```typescript
-// All supported currencies (native currencies and tokens)
-const available = await client.currencies.getAllAvailable();
-
-// Only main (native / blockchain) currencies, excluding tokens
-const main = await client.currencies.getAllMain();
-
-// Resolve the currency IDs on a checkout session
-const session = await client.oneTimePayments.getSession(payment.uuid);
-const byId = new Map(available.map((c) => [c.id, c]));
-const accepted = session.availableCurrencies.map((id) => byId.get(id));
-```
-
-## Webhook Handling
-
-### Verifying a webhook signature
-
-Every webhook QBitFlow sends carries three headers:
-
-| Header | Meaning |
-|---|---|
-| `X-Webhook-Signature-256` | HMAC signature, formatted `sha256=<hex>` |
-| `X-Webhook-Timestamp` | Send time, in unix seconds |
-| `X-Webhook-Id` | Transaction id, e.g. `pay@<uuid>` |
-
-There are two ways to check a webhook is genuine, and you can use either:
-
-| | Needs the secret | Network call | Use when |
-|---|---|---|---|
-| **Local** | yes | none | Default. Faster, and keeps working if the API is unreachable. |
-| **Remote** | no | one per webhook | You would rather not hold the secret at all. |
-
-Local verification performs the same three checks the server does: the timestamp is within
-a replay window (5 minutes by default), the HMAC matches, and the comparison is
-constant-time so a timing side channel cannot be used to guess the signature.
-
-**Why the signature covers a canonical rendering, not the raw bytes.** JSON object key
-order is not significant, and proxies, frameworks and logging layers routinely re-serialize
-a body and reorder keys. Signing raw bytes would reject a payload that is in fact
-untouched. So both sides sign `<timestamp>.<canonical-json>`, where canonical means keys
-sorted at every level and no insignificant whitespace. You do not have to do anything for
-this — pass the body you received and the SDK handles it.
-
-Get your webhook secret from the QBitFlow dashboard. Treat it like a password: keep it in
-your environment or secret manager, never in source control.
-
-```typescript
-import express from 'express';
-import { verifyWebhookSignature, extractWebhookHeaders, parseSessionWebhook } from 'qbitflow';
-
-const app = express();
-
-// Use the raw body: re-serializing before verification is fine (the signature is computed
-// over a canonical form), but the raw body is what you will want to parse anyway.
-app.post('/webhooks', express.raw({ type: 'application/json' }), (req, res) => {
-    const { signature, timestamp, isTest } = extractWebhookHeaders(req.headers);
-
-    try {
-        verifyWebhookSignature(process.env.QBITFLOW_WEBHOOK_SECRET!, timestamp, signature, req.body);
-    } catch {
-        return res.status(400).send('invalid webhook');
-    }
-
-    // Verified. The dashboard's connectivity check is signed like any other delivery, so it
-    // has just exercised your real setup — acknowledge it and stop, there is no transaction.
-    if (isTest) return res.sendStatus(200);
-
-    const event = parseSessionWebhook(req.body); // typed, every field present
-    res.sendStatus(200);
-});
-```
-
-`verifyWebhookSignature`, `client.webhooks.verify` and the `parse*Webhook` helpers all accept the
-body as a `string`, a `Buffer`, a `Uint8Array`, an `ArrayBuffer`, or the already-parsed JSON.
-
-`extractWebhookHeaders` takes anything header-shaped, so it works across frameworks: a Node
-`IncomingHttpHeaders` (Express, Fastify, raw `http`), a Fetch `Headers` instance (Next.js
-route handlers, Hono, Deno, Bun), or a plain object. Lookup is case-insensitive.
-
-```typescript
-// Next.js route handler
-export async function POST(request: Request) {
-    const body = await request.text();
-    const { signature, timestamp } = extractWebhookHeaders(request.headers);
-
-    try {
-        verifyWebhookSignature(process.env.QBITFLOW_WEBHOOK_SECRET!, timestamp, signature, body);
-    } catch {
-        return new Response('invalid webhook', { status: 400 });
-    }
-
-    return new Response(null, { status: 200 });
+if (currencies.length > 0) {
+	const c = await client.currencies.get(currencies[0].id); // resolve one id
+	console.log(c.symbol, c.decimals, byId.size);
 }
 ```
 
-To widen or narrow the replay window (it must match the server's setting):
+`listAvailable` lists every currency checkouts can take, `listMain` the chains' native coins, and
+`get` one by id, to resolve the `currencyId`, `availableCurrencyIds` and `acceptedCurrencyIds`
+fields. These routes are public and **limited to 60 requests a minute per IP: cache the list** at
+start-up instead of reading it per request. Payments, bills and subscriptions already carry their
+`currency`.
 
-```typescript
-verifyWebhookSignature(secret, timestamp, signature, body, { maxTimestampAgeSeconds: 600 });
-```
+## Pagination and iterators
 
-To verify through the API instead, with no secret in your process:
+Paginated lists return a `Page<T>`: `items`, `nextCursor` (`null` on the last page, else the value
+to pass back as the params' `cursor`, verbatim) and `hasMore` (`nextCursor !== null`).
 
-```typescript
-// `false` only when the API rejects the signature (400); an outage throws — answer 5xx so
-// QBitFlow retries the delivery.
-const ok = await client.webhooks.verify(req.body, signature, timestamp);
-```
-
-### Configuring Webhook URLs
-
-Webhook endpoint URLs are configured in the [QBitFlow dashboard](https://qbitflow.app) settings,
-**not** per session. There are two independent webhooks:
-
-- **Transaction webhook** — fired when a payment or subscription-checkout session changes status
-  (payload: [`SessionWebhookResponse`](#transaction-webhooks)).
-- **Subscription status webhook** — fired when an existing subscription transitions between statuses
-  (payload: [`SubscriptionWebhook`](#subscription-status-webhooks)).
-
-> **Migration note (1.2.1):** `webhookUrl` was removed from `createSession()` for both one-time
-> payments and subscriptions. Set the **Transaction webhook** URL in the dashboard instead — this
-> ensures consistent webhook handling across all transactions.
-
-All webhooks are signed with HMAC. Verify every request — locally with
-`verifyWebhookSignature(...)` or through the API with `client.webhooks.verify(...)` — before
-processing it, using the headers exposed by the SDK:
-
-| Getter                              | Header                     | Purpose                                 |
-| ----------------------------------- | -------------------------- | --------------------------------------- |
-| `client.webhooks.signatureHeader`   | `X-Webhook-Signature-256`  | HMAC signature to verify                |
-| `client.webhooks.timestampHeader`   | `X-Webhook-Timestamp`      | Timestamp included in the signed payload |
-| `client.webhooks.webhookIdHeader`   | `X-Webhook-Id`             | Transaction id, e.g. `pay@<uuid>` (see [Test Webhooks](#test-webhooks)) |
-
-### Transaction Webhooks
-
-Point your dashboard **Transaction webhook** URL at this endpoint. Decode the body with
-`parseSessionWebhook()`: it returns a `SessionWebhookResponse`, whose `session` field is a
-`SessionCheckout` (`OneTimePaymentSession | SubscriptionSession`, decoded by `txType` — narrow it
-with `isSubscriptionSession()`).
-
-```typescript
-import express from 'express';
-import {
-	QBitFlow,
-	TransactionStatusValue,
-	isSubscriptionSession,
-	parseSessionWebhook,
-} from 'qbitflow';
-
-const app = express();
-const qbitflowClient = new QBitFlow(process.env.QBITFLOW_API_KEY!);
-
-app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-	const signature = req.headers[qbitflowClient.webhooks.signatureHeader.toLowerCase()] as string;
-	const timestamp = req.headers[qbitflowClient.webhooks.timestampHeader.toLowerCase()] as string;
-	const webhookId = req.headers[qbitflowClient.webhooks.webhookIdHeader.toLowerCase()] as string;
-
-	if (!signature || !timestamp) {
-		res.status(400).json({ error: 'Missing required headers' });
-		return;
-	}
-
-	if (!(await qbitflowClient.webhooks.verify(req.body, signature, timestamp))) {
-		res.status(401).json({ error: 'Invalid signature' });
-		return;
-	}
-
-	// Reachability check from the dashboard "Test webhook" action — acknowledge and stop.
-	if (webhookId === qbitflowClient.webhooks.testWebhookId) {
-		res.status(200).json({ received: true });
-		return;
-	}
-
-	const event = parseSessionWebhook(req.body);
-	const session = event.session;
-
-	// `status` is null when the server has none to report.
-	if (event.status?.status === TransactionStatusValue.COMPLETED) {
-		// `session.reference` echoes back the reference you set when creating the session
-		// ('' if none), so you can match the transaction to your own order/invoice.
-		console.log('Payment completed for product:', session.productName, 'ref:', session.reference);
-		if (isSubscriptionSession(session)) {
-			console.log('Subscription billed every', session.frequency, 'seconds');
-		}
-	} else if (event.status?.status === TransactionStatusValue.FAILED) {
-		// Handle failed payment
-	}
-
-	res.status(200).json({ received: true });
-});
-```
-
-### Subscription Status Webhooks
-
-Point your dashboard **Subscription status webhook** URL at this endpoint to be notified whenever a
-subscription transitions between statuses. This replaces the old pattern of polling
-`subscriptions.get()` from a cron job.
-
-The same endpoint also receives a delivery on each successful renewal, so the body is a
-`SubscriptionWebhook` — an envelope carrying the subscription identity plus a `type`
-discriminator, with the event-specific payload in `data`. Decode it with
-`parseSubscriptionWebhook()` and narrow it with the type guards
-`isSubscriptionStatusTransitionWebhook()` / `isSubscriptionBillingWebhook()`, which narrow
-`data` too. A `type` this SDK does not know yet is kept as its raw string, with `data` left as
-the raw JSON:
-
-```typescript
-type SubscriptionWebhook =
-	| SubscriptionStatusTransitionWebhook   // type: 'status_transition'
-	| SubscriptionBillingWebhook            // type: 'billing'
-	| UnknownSubscriptionWebhook;           // any other type: raw `type` string, raw `data`
-
-interface SubscriptionStatusTransitionWebhook {
-	subscriptionUUID: string;         // subscription this delivery is about
-	subscriptionReference: string;    // your own reference ('' if none was set at creation)
-	type: SubscriptionWebhookType.STATUS_TRANSITION;
-	data: {
-		previousStatus: SubscriptionStatus | (string & {});
-		currentStatus: SubscriptionStatus | (string & {});
-		updatedAt: string;            // RFC3339 timestamp of the transition
-	};
-}
-
-interface SubscriptionBillingWebhook {
-	subscriptionUUID: string;
-	subscriptionReference: string;
-	type: SubscriptionWebhookType.BILLING;
-	data: SubscriptionHistory;        // the billing record for the renewed period
+```ts
+const params: CustomerListParams = { limit: 100 };
+for (;;) {
+	const page = await client.customers.list(params);
+	for (const c of page.items) console.log(c.email);
+	if (page.nextCursor === null) break;
+	params.cursor = page.nextCursor;
 }
 ```
 
-```typescript
-import {
-	QBitFlow,
-	SubscriptionStatus,
-	isSubscriptionBillingWebhook,
-	isSubscriptionStatusTransitionWebhook,
-	parseSubscriptionWebhook,
-} from 'qbitflow';
+Each paginated list has an `iterate…` twin returning an `AsyncIterableIterator<T>`: it fetches one
+page at a time, only as you consume it, keeps your filters and page size, and stops when you
+`break`. An error is thrown from the `for await` loop and ends it.
 
-app.post('/subscription-status-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-	const signature = req.headers[qbitflowClient.webhooks.signatureHeader.toLowerCase()] as string;
-	const timestamp = req.headers[qbitflowClient.webhooks.timestampHeader.toLowerCase()] as string;
-	const webhookId = req.headers[qbitflowClient.webhooks.webhookIdHeader.toLowerCase()] as string;
-
-	if (!signature || !timestamp) {
-		res.status(400).json({ error: 'Missing required headers' });
-		return;
-	}
-
-	if (!(await qbitflowClient.webhooks.verify(req.body, signature, timestamp))) {
-		res.status(401).json({ error: 'Invalid signature' });
-		return;
-	}
-
-	// Reachability check from the dashboard "Test webhook" action — acknowledge and stop.
-	if (webhookId === qbitflowClient.webhooks.testWebhookId) {
-		res.status(200).json({ received: true });
-		return;
-	}
-
-	const event = parseSubscriptionWebhook(req.body);
-
-	if (isSubscriptionBillingWebhook(event)) {
-		// A period was renewed — record event.data against event.subscriptionUUID.
-		console.log('billed', event.data.amount, event.data.currency.symbol);
-		res.status(200).json({ received: true });
-		return;
-	}
-
-	if (!isSubscriptionStatusTransitionWebhook(event)) {
-		// A delivery type this SDK does not know yet: acknowledge it and look at it later.
-		console.log('unknown subscription webhook type', event.type, event.data);
-		res.status(200).json({ received: true });
-		return;
-	}
-
-	switch (event.data.currentStatus) {
-		case SubscriptionStatus.ACTIVE:
-			// Grant / keep access
-			break;
-		case SubscriptionStatus.PAST_DUE:
-		case SubscriptionStatus.LOW_ON_FUNDS:
-			// Warn the customer that their next billing may fail
-			break;
-		case SubscriptionStatus.CANCELLED:
-			// Revoke access
-			break;
-	}
-
-	console.log(`${event.subscriptionUUID}: ${event.data.previousStatus} → ${event.data.currentStatus}`);
-
-	res.status(200).json({ received: true });
-});
-```
-
-### Test Webhooks
-
-The dashboard **Test webhook** action sends a fake payload to your configured URL to confirm the
-endpoint is reachable. That payload may not match the shape of a real webhook, so if you try to
-process it normally your handler could error.
-
-To handle it safely, check the incoming `X-Webhook-Id` header against
-`client.webhooks.testWebhookId`. When they match, return HTTP `200` immediately and skip normal
-payload processing (as shown in both examples above).
-
-**Do this check *after* verifying the signature, not before.** Running the probe through your
-verification path first is what makes the dashboard button a genuine end-to-end test of your
-setup — secret, headers and all. Short-circuiting before the signature check would make the
-button report success even with a broken or missing secret. This assumes the dashboard signs
-the probe like a normal delivery (the SDK examples and the Express snippet above do it this way).
-
-```typescript
-if (webhookId === qbitflowClient.webhooks.testWebhookId) {
-	res.status(200).json({ received: true });
-	return;
+```ts
+for await (const c of client.customers.iterate({ verified: true })) {
+	console.log(c.uuid, c.email);
 }
 ```
 
-## Error Handling
+| Method | Iterator | Page size: default / max |
+|---|---|---|
+| `customers.list` | `iterate` | 10 / 100 |
+| `payments.list`, `payments.listCombined` | `iterate`, `iterateCombined` | 10 / 50 |
+| `failures.list` | `iterate` | 10 / 50 |
+| `subscriptions.list`, `subscriptions.listBills` | `iterate`, `iterateBills` | 20 / 100 |
+| `refunds.listInactive` | `iterateInactive` | 10 / 50 |
+| `members.list`, `invitations.list` | `iterate` | 20 / 100 |
+| `webhooks.events.list` (cursor `evt_…`) | `iterate` | 20 / 100 |
 
-Every error the SDK throws extends `QBitFlowError`, so one `instanceof` catches them all. Errors
-raised from an API response carry the HTTP status in `statusCode` and any per-field failures
-in `fields` (`{ field, message }[]`); errors the SDK raises itself — client-side validation, a
-request that got no response — leave `statusCode` undefined.
+The other lists are short and return a plain array: `products.list`, `refunds.list`,
+`wallets.*`, `currencies.*`, `webhooks.endpoints.list` (at most 10), `members.listHeldFunds` and
+`subscriptions.getPublicHistory` (the 10 latest bills).
 
-| HTTP status            | Class                   | Extra                                    |
-| ---------------------- | ----------------------- | ---------------------------------------- |
-| 400, 422               | `ValidationException`   | also thrown client-side (no `statusCode`) |
-| 401                    | `UnauthorizedException` |                                          |
-| 403                    | `ForbiddenException`    |                                          |
-| 404                    | `NotFoundException`     |                                          |
-| 409                    | `ConflictException`     | e.g. `executeTestBilling()` not yet due   |
-| 429                    | `RateLimitException`    | `retryAfter?: number` (seconds), never retried |
-| any other 4xx          | `QBitFlowError` (base)  | `statusCode` tells you which             |
-| 3xx, 5xx               | `ServerException`       | 5xx on a GET is retried first            |
-| empty (non-204) or non-JSON 2xx, a field of the wrong JSON type | `ServerException` | the message names the field path; `statusCode` is the response's |
-| no response            | `NetworkException`      | GET retried first (not a request that could not be sent) |
+## Errors
 
-```typescript
-import {
-	ConflictException,
-	NotFoundException,
-	QBitFlowError,
-	RateLimitException,
-	ValidationException,
-} from 'qbitflow';
+Every error the SDK throws is a `QBitFlowError`; each class below extends `ApiError`, which
+extends `QBitFlowError`. Match them with `instanceof` (it works across the CommonJS and ES module
+builds, even with two copies of the package installed):
 
+| Class | When | Codes and properties worth knowing |
+|---|---|---|
+| `ValidationError` | 400 `validation_failed`, or input the SDK refused **before sending** (`status` `undefined`) | `fieldErrors`: each failing input by its wire name, dotted when nested (`frequency.unit`) |
+| `BadRequestError` | any other 400 | `bad_request`, `foreign_key_violation` (`details.field`) |
+| `AuthenticationError` | 401 | a missing, unknown, expired or revoked key (a removed member's keys too) |
+| `PermissionDeniedError` | 403 | `forbidden`, `policy_disabled` (`details.policy`), `plan_required` |
+| `NotFoundError` | 404 | unknown, deleted, or outside the request's space |
+| `ConflictError` | 409 | `unique_violation` (`details.field`), `tx_already_sent`, `merchant_not_ready` (`details.reason`), `refund_already_exists` (`details.refundUuid`), `held_funds_released`, `held_funds_pending`, `already_joined`, `payment_not_due`, `idempotency_key_in_use`, `conflict` |
+| `GoneError` | 410 | `merchant_closed`: a removed member's or a closed organization's space |
+| `IdempotencyError` | 422 `idempotency_key_reused` | an `Idempotency-Key` reused for another request: a bug, never retried |
+| `RateLimitError` | 429 | `retryAfter` (seconds), `limit`, `periodSeconds` |
+| `ServerError` | 5xx (503 `network_unavailable`, 504 `timeout`), an unexpected 3xx (redirects are never followed), a 2xx whose body is not the expected JSON | |
+| `NetworkError` | no response: DNS, connection, TLS, timeout, an aborted `signal` | `cause`: the underlying error or the signal's reason |
+| `WebhookSignatureError` | a webhook signature refused, locally or by `verifyRemote` | `reason`: `missingHeader`, `malformedHeader`, `timestampOutsideTolerance`, `noMatchingSignature`, `invalidSignature` |
+| `ApiError` | any other HTTP error (e.g. 413 `request_too_large`) | |
+
+Every `ApiError` carries `status` (`undefined` when no response was received), `code` (branch on
+it, never on the message; `''` when absent), `rawMessage` (the API's own message), `details`
+(never `null`), `requestId` (quote it to support), `fieldErrors`, `rawBody` (the error response as
+received, `''` without one) and `cause`. Its `message` reads
+`"<message> (status <status>, code <code>, request <requestId>)"`, followed by
+`"; <field>: <message>"` for each field error, and its `name` is the class name.
+
+```ts
 try {
-	await client.products.create({ name: 'Widget', description: 'A fine widget', price: 0 });
-} catch (error) {
-	if (error instanceof ValidationException) {
-		// Rejected locally (statusCode undefined) or by the API (statusCode 400/422)
-		console.error(error.message, error.statusCode, error.fields);
-	} else if (error instanceof NotFoundException) {
-		console.error('Not found');
-	} else if (error instanceof ConflictException) {
-		console.error('Conflict:', error.message);
-	} else if (error instanceof RateLimitException) {
-		console.error('Rate limited, retry in', error.retryAfter, 's');
-	} else if (error instanceof QBitFlowError) {
-		console.error('QBitFlow error', error.statusCode, error.message);
+	await client.customers.create({ name: 'Ada', email: 'ada@example.com' });
+	console.log('created');
+} catch (err) {
+	if (err instanceof ValidationError) {
+		for (const f of err.fieldErrors) console.log(`${f.field}: ${f.message}`); // next to the form field
+	} else if (err instanceof ConflictError && err.code === 'unique_violation') {
+		console.log('taken:', err.details.field); // email or reference
+	} else if (err instanceof RateLimitError) {
+		console.log(`slow down, retry in ${err.retryAfter} s`);
+	} else if (err instanceof ApiError) {
+		console.log(`QBitFlow error ${err.status} ${err.code} (request ${err.requestId})`);
+	} else {
+		throw err;
 	}
 }
 ```
 
-The message precedence for API errors is `error` → every entry of `errors[]` joined as
-`Field: message; Field: message` → `message` → the plain-text body (shortened to 200
-characters) → the HTTP status text. A JSON error body is parsed the same way for the CSV
-export. The only errors that are not a `QBitFlowError` are the `QBitFlow` constructor's: a plain
-`Error` for an invalid configuration (blank API key, malformed base URL, bad `timeout` /
-`maxRetries`).
+**Client-side validation** runs before every request: names and texts (lengths in characters, no
+markup characters), references (`A-Z a-z 0-9 . _ : @ -`, 1 to 100), emails, phone numbers,
+absolute `http(s)` URLs, prices above 0, percents (at most 2 decimals), durations (a frequency
+between 1 unit and 1 year), UUIDs and transaction ids, dates, the checkout's product choice, and
+exclusive filters. A failure is a `ValidationError` with `status` `undefined`, its message
+`validation failed` followed by the field list, and nothing is sent. What depends on the key's mode
+or on stored data is left to the API: the 5 USD test-mode cap, `https`-only live URLs, the
+frequency minimum (1 hour live, 5 minutes test), the 95-day export window, uniqueness.
 
-### Client-side validation
+## Retries and idempotency
 
-The SDK mirrors the API's `binding` rules before sending (the same rule set in all four QBitFlow
-SDKs), so invalid input fails fast with the same `ValidationException` a `400` would produce:
+| | |
+|---|---|
+| Retried methods | every read (GET), and the 7 creates: `checkoutSessions.createPayment`, `checkoutSessions.createSubscription`, `products.create`, `customers.create`, `webhooks.endpoints.create`, `invitations.create`, `refunds.initiate` |
+| Never retried | every other write: updates, deletes, `checkoutSessions.expire`, `subscriptions.cancel`, `subscriptions.executeTestBilling`, `members.trust`, `members.remove`, `invitations.revoke`, `webhooks.verifyRemote` |
+| Retried on | a network error or timeout, a 5xx, a 429, a 409 `idempotency_key_in_use` |
+| Not retried on | any other 4xx (422 `idempotency_key_reused` included), a 3xx, an unusable response |
+| Attempts | 3 retries by default (`maxRetries`; `0` disables them) |
+| Back-off | 1 s, 2 s, 4 s…; a 429 waits for its `Retry-After` if longer. A wait above 60 s is not made: the `RateLimitError` is thrown at once |
 
-- `alphanumspace` names (2–100 characters: letters, decimal digits, spaces, `-` `_` `'` `.`) and
-  valid e-mails on customers and users; `role` `admin | user`; `organizationFeeBps` an integer
-  0–5000;
-- `producttext` (2–100 / 2–500, not blank, no markup or control characters) and a finite
-  `price > 0` on products and inline session products;
-- sessions: a product by `productId`, `productReference` or the inline triple; absolute http(s)
-  redirect URLs; `customerUUID` a bare UUID; a required `frequency` (integer 1–4294967295, known
-  unit) for subscriptions, `trialPeriod` and `minPeriods` 0–4294967295;
-- real `YYYY-MM-DD` dates with `from <= to` for the accounting export;
-- non-empty / positive identifiers on every method, a positive `limit` on pages.
+`isRetryable(err)` says whether an error is of a transient kind. `timeout` bounds each attempt;
+pass a `signal` to bound or cancel the whole call, retries and waits included (an abort is a
+`NetworkError` whose `cause` is the signal's reason):
 
-Empty optional strings are left out of the request, as the API's `omitempty` treats them as "not
-provided". Values JSON cannot represent (`NaN`, `Infinity`, a BigInt) are rejected before
-sending.
-
-## API Reference
-
-### QBitFlow
-
-Main client class.
-
-#### Constructor
-
-```typescript
-new QBitFlow(apiKey: string)
-new QBitFlow(config: QBitFlowConfig)
+```ts
+try {
+	const page = await client.payments.list({ limit: 50 }, { signal: AbortSignal.timeout(20_000) });
+	console.log(page.items.length);
+} catch (err) {
+	if (!isRetryable(err)) throw err;
+	console.log('QBitFlow is unreachable for now: try again later'); // the SDK's retries are spent
+}
 ```
 
-#### Methods
+**Idempotency keys.** Each call of a create sends a fresh `Idempotency-Key` (a UUID v4) and reuses it
+on every retry of that call: a create retried after a timeout answers the first result instead of
+opening a second checkout. To retry **across processes** (a queue re-running a job after a crash),
+pass your own stable key:
 
-| Method                 | Returns    | Description                                                   |
-| ---------------------- | ---------- | ------------------------------------------------------------- |
-| `onBehalfOf(userId)`   | `QBitFlow` | A client whose every service sends `On-Behalf-Of` (`0` = org) |
-| `getApiKey()`          | `string`   | The configured API key                                        |
-| `getBaseUrl()`         | `string`   | The base URL, trailing slash removed                          |
+```ts
+const orderId = 'order-1044';
+try {
+	const session = await client.checkoutSessions.createPayment(
+		{ productName: 'T-shirt', price: 4.99, reference: orderId },
+		{
+			idempotencyKey: `checkout-${orderId}`, // the same key returns the same session
+			requestId: 'job-7781', // sent as X-Request-Id, echoed in errors
+		}
+	);
+	console.log(session.link);
+} catch (err) {
+	if (err instanceof IdempotencyError) {
+		throw new Error('this key was already used with other params'); // 422 idempotency_key_reused
+	}
+	throw err;
+}
+```
 
-#### Properties
+A key is 1 to 255 printable ASCII characters without spaces, and only successful answers are kept
+(24 hours): after a 4xx, the same key runs the request again. A `409 idempotency_key_in_use` (the
+first request still running) is retried automatically. Other methods ignore the option. Retry
+the other writes yourself only after reading the resource's state (a 504 may have done the work).
 
-| Property            | Type                         | Description                              |
-| ------------------- | ---------------------------- | ---------------------------------------- |
-| `customers`         | `CustomerRequests`           | Customer CRUD operations                 |
-| `products`          | `ProductRequests`            | Product CRUD operations                  |
-| `users`             | `UserRequests`               | User management                          |
-| `apiKeys`           | `ApiKeyRequests`             | API key management                       |
-| `webhooks`          | `WebhookRequests`            | Webhook signature verification           |
-| `oneTimePayments`   | `PaymentRequests`            | One-time payment sessions and history    |
-| `subscriptions`     | `SubscriptionRequests`       | Subscription sessions and management     |
-| `transactionStatus` | `TransactionStatusRequests`  | Transaction status lookup                |
-| `refunds`           | `RefundRequests`             | Refund query operations                  |
-| `accounting`        | `AccountingRequests`         | Accounting data export (JSON / CSV)      |
-| `claims`            | `ClaimRequests`              | Fund claim request management            |
-| `currencies`        | `CurrencyRequests`           | Supported-currency lookups (public)      |
+## Configuration
 
-The service classes are exported as types (`import type { PaymentRequests } from 'qbitflow'`).
-Webhook helpers: `verifyWebhookSignature`, `computeWebhookSignature`, `canonicalJson`,
-`extractWebhookHeaders`, `parseSessionWebhook`, `parseSubscriptionWebhook`.
+```ts
+const client = new QBitFlow({
+	apiKey: process.env.QBITFLOW_API_KEY ?? '',
+	timeout: 10_000, // ms, per attempt
+	maxRetries: 5,
+	// Any fetch-compatible function: a proxy agent, tracing, a test double. Never log the headers:
+	// they carry the API key.
+	fetch: (url, init) => {
+		console.debug(init.method, url);
+		return fetch(url, init);
+	},
+});
+console.log(client.webhooks !== undefined);
+```
 
+`new QBitFlow(apiKey)`, `new QBitFlow(apiKey, options)` and `new QBitFlow({ apiKey, ...options })`
+are equivalent.
+
+| Client option | Default | |
+|---|---|---|
+| `baseUrl` | `https://api.qbitflow.app/v2` (`DEFAULT_BASE_URL`) | an absolute `http(s)` URL; a trailing `/` is stripped |
+| `timeout` | `30000` ms (`DEFAULT_TIMEOUT`) | per attempt, in milliseconds; positive |
+| `maxRetries` | `3` (`DEFAULT_MAX_RETRIES`) | `0` disables retries; a negative or fractional value is refused |
+| `onBehalfOf` | none | every request acts in that member's space (a member's `userUuid`) |
+| `fetch` | the global `fetch` | `(url, init) => Promise<{ status, headers.get(), text() }>`; called with `redirect: 'manual'` and a `signal` |
+
+| Request option (any method, last argument) | |
+|---|---|
+| `onBehalfOf` | acts in that member's space for this call; `''` forces the organization's |
+| `idempotencyKey` | the 7 creates only: your own `Idempotency-Key` |
+| `requestId` | sends `X-Request-Id` (1 to 128 of `A-Z a-z 0-9 - _ . :`) |
+| `signal` | an `AbortSignal` cancelling the call, its retries and its waits |
+
+| Webhook option (`webhooks.verify`, `webhooks.constructEvent`) | Default |
+|---|---|
+| `tolerance` | 300 seconds (`webhooks.DEFAULT_TOLERANCE`); `0` or less keeps the default |
+| `now` | the current time: a `Date`, or a function returning one |
+
+A bad option makes the constructor throw a `ValidationError`. A client's configuration never
+changes after construction; `client.onBehalfOf` derives clients that share it. Every request sends
+`User-Agent: qbitflow-js/3.0.0` (`VERSION`).
+
+## Migrating from 2.x
+
+3.0.0 is a rewrite for API v2: base URL `/v2`, a `checkoutSessions` service, UUID ids, members and
+invitations instead of users and claims, a new webhook signature, typed errors, no `axios` or `ws`
+dependency. **[MIGRATION-v3.md](MIGRATION-v3.md)** maps every 2.x method and type to its
+replacement, with before/after code for the common tasks.
+
+## Examples
+
+Runnable TypeScript programs in [`examples/`](examples) (see its [README](examples/README.md)):
+
+| Example | Shows |
+|---|---|
+| [`checkout.ts`](examples/checkout.ts) | a payment checkout, its status, expiry |
+| [`subscriptions.ts`](examples/subscriptions.ts) | a subscription checkout with a trial, filtered lists, bills, cancel at period end |
+| [`marketplace.ts`](examples/marketplace.ts) | invite a seller, sell `onBehalfOf`, held funds, trust |
+| [`webhook-handler.ts`](examples/webhook-handler.ts) | a verified `node:http` receiver with deduplication and typed events |
+| [`errors-and-retries.ts`](examples/errors-and-retries.ts) | error classes, `isRetryable`, idempotency keys across processes |
+
+## Testing
+
+```bash
+npm run build && npm run lint && npm test
+```
+
+`npm test` type-checks the sources and the tests, then runs the offline suites against a stubbed
+`fetch`, including the cross-SDK vectors the four QBitFlow SDKs share (see
+[tests/README.md](tests/README.md)). The live suite needs an API key **and** an explicit base URL:
+
+```bash
+QBITFLOW_API_KEY=sk_… QBITFLOW_BASE_URL=https://… npm run test:live
+```
+
+The read-only checks only read; the write checks also need `QBITFLOW_LIVE_WRITES=1` and a test-mode
+key (`QBITFLOW_ALLOW_LIVE_MODE_WRITES=1` allows a live-mode key, for a disposable server only).
 
 ## License
 
-This project is licensed under the MPL-2.0 License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MPL-2.0 License: see the [LICENSE](LICENSE) file. See also
+[COMPLIANCE.md](COMPLIANCE.md) and the [trademark policy](TRADEMARKS.md).
 
 ## Support
 
@@ -1219,5 +1037,5 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## Security
 
-For security issues, please email security@qbitflow.app instead of using the issue tracker.
-
+For security issues, please email security@qbitflow.app instead of using the issue tracker (see
+[SECURITY.md](SECURITY.md)).
