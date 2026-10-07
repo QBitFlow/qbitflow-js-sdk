@@ -3,7 +3,8 @@
  */
 
 /**
- * Represents a cryptocurrency
+ * Represents a cryptocurrency. A token (e.g. USDC on Ethereum) references its main
+ * (native) currency; a main currency references nothing.
  */
 export interface Currency {
 	/** Unique identifier for the currency */
@@ -14,10 +15,12 @@ export interface Currency {
 	name: string;
 	/** Number of decimal places */
 	decimals: number;
-	/** Identifier of the main currency (if this is a sub-currency, meaning token) */
-	mainCurrencyId?: number;
-	/** Details of the main currency (if applicable) */
-	mainCurrency?: Currency;
-	/** Whether this is a test currency */
+	/** Contract/mint address for tokens; empty string for main (native) currencies */
+	address: string;
+	/** Identifier of the main currency for a token; `null` for a main currency */
+	mainCurrencyId: number | null;
+	/** The main currency for a token; `null` for a main currency */
+	mainCurrency: Currency | null;
+	/** Whether this is a test-network currency */
 	test: boolean;
 }

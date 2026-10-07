@@ -11,9 +11,21 @@ export interface AccountingEvent {
 	paymentId: string;
 	/** Your own reference for the payment, if one was set */
 	paymentReference: string;
-	/** Transaction type */
-	type: 'payment' | 'subscriptionHistory' | 'refund' | 'organizationFee' | 'referralFee';
-	/** Transaction timestamp (UTC) */
+	/**
+	 * Event type: `payment`, the subscription-billing value (`subscriptionHistory` per the
+	 * server constant; the API docs also spell it `subHistory`, so both are listed), `refund`,
+	 * `organizationFee` or `referralFee`. A value this SDK does not know yet arrives as its
+	 * raw string.
+	 */
+	type:
+		| 'payment'
+		| 'subscriptionHistory'
+		| 'subHistory'
+		| 'refund'
+		| 'organizationFee'
+		| 'referralFee'
+		| (string & {});
+	/** Transaction timestamp (UTC, RFC3339) */
 	txTimeUtc: string;
 	/** URL to the payment receipt */
 	receiptUrl: string;
@@ -75,10 +87,10 @@ export interface AccountingEvent {
 	/** Organization fee in token units */
 	organizationFee: string;
 
-	/** Network fees in USD (present when QBitFlow paid the network fee, e.g. for refunds) */
-	networkFeesUsd?: number;
-	/** Network fees in token units */
-	networkFees?: string;
+	/** Network fees in USD (non-zero only when QBitFlow paid the network fee, e.g. for refunds) */
+	networkFeesUsd: number;
+	/** Network fees in token units, as a decimal string */
+	networkFees: string;
 
 	/** Net amount received in USD (gross minus all fees) */
 	netAmountUsd: number;

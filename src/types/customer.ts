@@ -10,30 +10,35 @@
  * @param name - First name of the customer
  * @param lastName - Last name of the customer
  * @param email - Email address of the customer
- * @param phoneNumber - (Optional) Phone number of the customer
- * @param address - (Optional) Address of the customer
- * @param reference - (Optional) Reference code for the customer
- * @param createdAt - Date when the customer was created
+ * @param phoneNumber - Phone number of the customer (`''` when not set)
+ * @param address - Address of the customer (`''` when not set)
+ * @param reference - Reference code for the customer (`''` when not set)
+ * @param createdAt - RFC3339 timestamp when the customer was created
  */
 export interface Customer {
+	/** Customer UUID (a bare UUID) */
 	uuid: string;
 	name: string;
 	lastName: string;
 	email: string;
 
-	phoneNumber?: string;
-	address?: string;
+	/** Phone number (`''` when not set) */
+	phoneNumber: string;
+	/** Physical address (`''` when not set) */
+	address: string;
 
-	reference?: string;
-	createdAt: Date;
+	/** Your own reference for the customer (`''` when not set) */
+	reference: string;
+	/** RFC3339 timestamp, e.g. `"2026-09-21T22:02:09.986381+02:00"` */
+	createdAt: string;
 
 	/** Whether this is a test-mode customer (test and live sets are isolated) */
 	test: boolean;
 
-	/** ID of the organization that owns this customer (authenticated only) */
-	organizationId?: number;
-	/** ID of the user that owns this customer, 0 for organization-level customers (authenticated only) */
-	userId?: number;
+	/** ID of the organization that owns this customer */
+	organizationId: number;
+	/** ID of the user that owns this customer; `0` for an organization-level customer */
+	userId: number;
 }
 
 /**
@@ -61,7 +66,8 @@ export interface CreateCustomerDto {
  * Data Transfer Object for updating an existing customer
  *
  * Updates are **partial**: every field is optional and any field you omit keeps its
- * stored value. An empty object is a valid no-op.
+ * stored value. An empty string counts as "not provided" and is left out of the request.
+ * An empty object is a valid no-op.
  *
  * `reference` is deliberately absent: a customer reference is immutable and the API
  * ignores it on update.

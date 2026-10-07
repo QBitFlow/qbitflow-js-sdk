@@ -2,6 +2,230 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.0] - 2026-09-23
+
+Aligns the SDK with docs revision `5e7d5a5` and with the other three QBitFlow SDKs (Go,
+Python, PHP), which now share one response-decoding policy, one retry policy, one error
+taxonomy, one client-side validation rule set and one canonical-JSON implementation.
+
+**The headline change: responses now match their types at runtime.** Until 2.1.0 every
+response was `JSON.parse` output cast to an interface, so fields the API legitimately leaves out
+were `undefined` behind a type that promised a value, and a `null` list crashed `.forEach`.
+Every response — and every webhook body decoded with the new `parse*Webhook` helpers — is now
+decoded against the server's type. Read **Changed (breaking)** before upgrading.
+
+> **⚠️ Breaking changes in a minor release.** They are listed under **Removed** and
+> **Changed (breaking)** below. Semver-aware resolvers treat `2.5.0` as a safe upgrade
+> from any `2.x`, so `^2` / `~2.1` constraints will pick it up automatically — review
+> before updating, or pin.
+
+> **Node baseline:** Node 18 or later (`engines.node >= 18`).
+
+### Changed (breaking)
+
+-   **Response decoding.** A field without `| null` is always present: when the API leaves an
+    optional value out (or sends `null`), you get its zero value — `0`, `''`, `false`, `[]`, a
+    zero-valued nested object, or Go's zero time `0001-01-01T00:00:00Z` for a timestamp —
+    exactly as the Go server reads it. A field typed `T | null` (a pointer on the server) is
+    always present as its value or `null`. A field of the wrong JSON type is a response-shape
+    failure: a `ServerException` naming the field path and carrying the HTTP status. Unknown
+    extra fields are kept; unknown enum values stay raw strings. Concretely, compared with
+    2.1.0:
+    -   **Now always present (required):** `Payment` / `SubscriptionHistory`
+        `organizationId`, `userId`, `metadata` and `productId`; `Customer` `organizationId`,
+        `userId`, `phoneNumber`, `address`, `reference`; `Product.reference`;
+        `ApiKey.userId`; `RefundEntry` `organizationId`, `userId`, `merchantMessage` and
+        `txHash` (plain strings, `''` until set); `TransactionStatus.txHash` / `message`
+        (`''` until set); `OrganizationFee` / `ReferralFee` ids and addresses;
+        `TxMetadata.mainCurrencyPriceUSD`, `TxAmountsUSD.organization` / `referral` (`0` when
+        none); every session field (`reference`, `productId`, `productName`, `price`, `successUrl`,
+        `organizationId`, `feeBps`, `userId`, `userName`, `customerReference`, `trialPeriod`,
+        `minPeriods`, `upgradingFromTrial` …); `Subscription.lastBillingDate` (Go's zero time
+        before the first billing); `SessionWebhookResponse.managementPageLink` and the
+        subscription webhook's `subscriptionReference` (`''` when none).
+    -   **Now nullable (`T | null`, always present):** `Payment.reference`,
+        `Payment.customerUUID`, `Subscription.reference` / `customerUUID` /
+        `minimumCancellationDate`, `SubscriptionHistory.customerUUID`, session `customerUUID`,
+        `CombinedPayment` `productId` / `subscriptionUUID` / `metadata`, `User.claimedAt`,
+        `ApiKey.expiresAt`, `Currency.mainCurrencyId` / `mainCurrency`,
+        `PaymentMetadata.organizationFee` / `referralFee`,
+        `TransactionStatus.settlementDetails`, `SessionWebhookResponse.status`,
+        `RefundEntry.respondedAt` / `metadata`.
+    -   **`currency` is a required `Currency`** on `Payment`, `CombinedPayment`, `Subscription`
+        and `SubscriptionHistory` — the full currency object (`payment.currency.symbol`),
+        alongside `currencyId`.
+    -   **Lists are never null:** top-level list responses, `CursorData.items` and
+        `SessionCheckout.availableCurrencies` turn a `null` from the API into `[]`.
+    -   `CombinedPayment` has no `organizationId` / `userId` (the API never sends them).
+    -   An empty 2xx body where JSON is expected (other than a `204`), or a non-JSON 2xx, is
+        a `ServerException` (with the body shortened to 200 characters in the message); a
+        `204` decodes to the zero value.
+-   **Seven fields are `string`, not `Date`**: `User.createdAt`, `User.updatedAt`,
+    `User.claimedAt`, `Customer.createdAt`, `Product.createdAt`, `ApiKey.createdAt`,
+    `ApiKey.expiresAt`. They were always RFC3339 strings at runtime — `user.createdAt.getTime()`
+    type-checked and then threw.
+-   **Enum-typed response fields are `<Enum> | (string & {})`** (`subscriptionStatus`,
+    `status`, `role`, `txType`, `source`, `type` …): the members still autocomplete, and a value
+    this SDK does not know yet is passed through as its raw string — treat an unknown status as
+    "not active". Methods that take an enum also accept its string value
+    (`transactionStatus.get(uuid, 'payment')`, `role: 'user'`).
+-   **`oneTimePayments.getSession()` / `subscriptions.getSession()` check the session kind.**
+    Reading a subscription session through the payment service (or the other way round)
+    throws a `ValidationException` naming the right service, instead of returning a
+    subscription typed as a payment.
+-   **Subscription webhooks are a discriminated union** with a raw-string arm:
+    `SubscriptionWebhook = SubscriptionStatusTransitionWebhook | SubscriptionBillingWebhook |
+    UnknownSubscriptionWebhook`, each carrying `subscriptionUUID`, `subscriptionReference`, a
+    `type` and the payload in `data`. Narrow with `isSubscriptionStatusTransitionWebhook()` /
+    `isSubscriptionBillingWebhook()`; an unknown `type` keeps its raw string and raw `data`. The
+    2.1.0 flat interface decoded a real delivery into `undefined` statuses.
+-   **Error classes take an options object**: `new ValidationException(message, { fields,
+    statusCode })`. Every error exposes `fields: FieldError[]` and `statusCode?: number`;
+    `RateLimitException` adds `retryAfter?: number` (seconds, from `Retry-After`, delta-seconds
+    or HTTP-date).
+-   **Status → exception mapping**: `400`/`422` → `ValidationException`; `409` → new
+    `ConflictException` (e.g. `executeTestBilling()` on a subscription not yet due); any other
+    unmapped `4xx` → the base `QBitFlowError` with `statusCode` (previously
+    `ValidationException`); `3xx` → `ServerException` (redirects are never followed, so the API
+    key is never forwarded to another host).
+-   **Retries are GET-only**, on transport failures and 5xx, with exponential back-off (1 s,
+    2 s, 4 s). POST, PUT and DELETE are sent exactly once, so a checkout session or a customer
+    is never created twice because a proxy timed out after the server had processed the
+    request. The action GETs — `forceCancel()`, `executeTestBilling()` and
+    `triggerTestClaimFunds()` — are never retried, nor is a request that could not be sent at
+    all (an invalid URL, an invalid option). `maxRetries: 0` really disables retries (the
+    constructor used `||`, so `0` silently became `3`; same for `timeout`).
+-   **The constructor rejects a blank API key and a base URL that is not an absolute
+    `http(s)://` URL.** Both used to fail later, on the first request.
+-   **`users.getById(userId: number)`** — it was the only identifier typed as a string, and
+    was interpolated unescaped.
+-   **`CreateUserDto.role` is `AssignableUserRole`** (`UserRole.ADMIN | UserRole.USER`, or
+    `'admin' | 'user'`) rather than the full `UserRole`: the API binds the field
+    `oneof=admin user`, so `OWNER` or `HANDLE` was a guaranteed `400`.
+-   **Client-side validation mirrors the API on every write**, with the rule set all four SDKs
+    share: `alphanumspace` names 2–100 (letters, decimal digits — not `²` or `Ⅻ` — spaces and
+    `- _ ' .`; a whitespace-only name is accepted, as the server does), e-mail, `role`,
+    `organizationFeeBps` an integer 0–5000; `producttext` 2–100 / 2–500 (blank after Unicode
+    whitespace trimming, markup and control characters rejected); a finite `price > 0` on
+    products and on inline session products (the server rejects a price of 0); a bare-UUID
+    `customerUUID`; for subscriptions a required `frequency` (integer 1–4294967295, known
+    unit), `trialPeriod` and `minPeriods` 0–4294967295; accounting dates that are real
+    `YYYY-MM-DD` calendar dates with `from <= to` (the window width is left to the API). Every
+    identifier argument is guarded (`customers.update('')` used to hit the `/customer/`
+    collection route). Empty optional strings (and `minPeriods: 0`) are left out of request
+    bodies, and a body JSON cannot represent (`NaN`, `Infinity`, a BigInt) is rejected with a
+    `ValidationException` instead of being sent as `null`.
+-   **`onBehalfOf()`**: `0` means "organization level" (header omitted); a negative,
+    non-integer or unsafe id throws `ValidationException`.
+-   **`accounting.export()` is overloaded**: `'json'` returns `Promise<AccountingEvent[]>`,
+    `'csv'` returns `Promise<string>` — the casts are no longer needed.
+-   **Package layout**: the `exports` map gives each condition its own declarations
+    (`import` → `dist/esm/index.d.ts`, `require` → `dist/cjs/index.d.ts`) and adds a
+    `./package.json` subpath; the separate `dist/types` copy is gone. Deep imports into `dist/`
+    were never part of the `exports` map.
+
+### Removed
+
+-   **WebSocket status stream removed** — `/transaction/status/ws` is an internal endpoint for
+    the QBitFlow checkout page (it rejects non-frontend origins). Use webhooks, or poll
+    `transactionStatus.get()`. This removes `transactionStatus.connectAndHandleMessages()`, the
+    `StatusResponse` / `StatusResponseError` frame types, `WebSocketException`, and the `ws`
+    dependency.
+-   **Pay-as-you-go** — `PayAsYouGoRequests`, `PaygSubscriptionSession` (and its arm of the
+    `SessionCheckout` union), and `PayAsYouGoSubscription`. The API has no PAYG routes, so none
+    of it could function. The PAYG members of `TransactionType` and `TransactionShortType` are
+    kept — a transaction response can still carry them.
+-   **`StatusRequests`** — a second, broken transaction-status class that sent
+    `transactionUUID`/`transactionType` where the API requires `txUUID`/`txType`. It was
+    exported but never wired to the client. Use `client.transactionStatus`.
+-   **`StatusLinkResponse`** — `executeTestBilling()` was typed to return
+    `{ message, statusLink }`, but the route returns `{ message }`. It returns `SuccessResponse`.
+-   The unused `convertKeysToSnakeCase` / `convertKeysToCamelCase` / `validateRequiredFields`
+    helpers (internal module, never exported from the package).
+
+### Added
+
+-   **`client.onBehalfOf(userId)`** — a client whose every service sends `On-Behalf-Of`,
+    sharing the transport and configuration (the per-service `onBehalfOf()` remains).
+-   **`parseSessionWebhook(body)` / `parseSubscriptionWebhook(body)`** — decode a webhook body
+    (string, Buffer, Uint8Array, ArrayBuffer or parsed JSON) with the same policy as API
+    responses; `isPaymentSession()`, `isSubscriptionStatusTransitionWebhook()`,
+    `isSubscriptionBillingWebhook()` type guards.
+-   **`FieldError` and `error.fields`** — every field failure the API reported, with its field
+    name, on every error type (previously only the first failure surfaced, as prose), and
+    **`error.statusCode`**, **`ConflictException`**, **`RateLimitException.retryAfter`**.
+-   **`UserRole.HANDLE` and `UserRole.OWNER`** — the enum was missing two of the four tiers
+    (`handle < user < admin < owner`).
+-   **`Currency.address`** — the token contract/mint address; `''` for main (native)
+    currencies.
+-   **`SubscriptionSession.upgradingFromTrial`** and **`isSubscriptionSession()`**.
+-   **`getSession(uuid, closeToExpireError?)`** on `oneTimePayments` and `subscriptions`: pass
+    `false` to read a session the API would otherwise refuse as close to expiry.
+-   **`ClaimRequestResponse`** type for `claims.createRequest()` / `getRequestByUser()`.
+-   The service classes (`PaymentRequests`, `CustomerRequests` …) are exported as types.
+-   **`User-Agent: qbitflow-js/<version>`** on every request; **`baseUrl`** trailing slashes
+    are stripped.
+-   **Packaging**: `npm run smoke` packs the tarball and imports it from a Node ESM project, a
+    CommonJS project and TypeScript `nodenext` / `bundler` projects, and checks that the ESM
+    types reject a default import; `prepublishOnly` runs build, lint, type-check, the offline
+    test suite and the smoke test — never the live suite. `CHANGELOG.md` ships in the package.
+
+### Fixed
+
+-   **The ESM build could not be imported.** Every relative import was written without an
+    extension (`from './QBitFlow'`), which Node's ESM loader rejects with
+    `ERR_MODULE_NOT_FOUND`; TypeScript projects using `moduleResolution: nodenext` lost every
+    re-exported type. Every relative specifier now carries `.js`.
+-   **ESM consumers got CommonJS-flavoured types** ("masquerading as CJS"): `import qb from
+    'qbitflow'` type-checked and then crashed at runtime. Each `exports` condition now points at
+    its own declarations.
+-   **`claims.triggerTestClaimFunds()` could never have worked.** It sent the user id as a
+    query parameter where the route takes a path segment (`/user/claim/funds/test-trigger/:userID`).
+-   **`webhooks.verify()` reported outages as forged signatures.** A bare `catch` returned
+    `false` for everything, so an unreachable API, a 5xx or an expired key was
+    indistinguishable from a rejected signature. It now returns `false` only for an HTTP `400`
+    (the API's "signature mismatch") and rethrows everything else as its own typed error. It
+    accepts the raw body (string, Buffer, Uint8Array, ArrayBuffer) as well as parsed JSON —
+    a Buffer used to be posted as `{"type":"Buffer","data":[…]}` and always "failed" — sends the
+    payload exactly as received (`-0`, `{}` / `[]` preserved), and rejects invalid JSON and
+    non-finite numbers with a `ValidationException` instead of an untyped `SyntaxError`.
+-   **Local webhook verification is byte-identical to Go** for more inputs: object keys are
+    sorted by UTF-8 byte order (not UTF-16 code units), a lone surrogate becomes U+FFFD, `-0`
+    is kept, raw `Uint8Array` / `ArrayBuffer` bodies are read as bytes (they used to be
+    canonicalized as `{"0":123,…}` / `{}`), and the timestamp is parsed like Go's
+    `strconv.ParseInt` (`[+-]?[0-9]+`, int64 range, overflow-safe age) with a replay window
+    `<= 0` meaning the default 300 s. A second set of Go-generated golden vectors pins all of
+    it.
+-   **The CSV export's error responses lost their details**: a `400` produced the raw JSON text
+    as the message and no `fields`. The JSON error body is now parsed for both formats.
+-   **Only the first validation failure was reported.** A 400 listing two bad fields surfaced
+    one of them; both now appear in the message and in `fields`. Message precedence is
+    `error` → joined `errors[]` → `message` → plain-text body (shortened) → HTTP status text.
+-   **Identifier path segments were not escaped** at 11 call sites. A `sub@…` id or a
+    reference such as `ORD/2026/17` changed the shape of the request. (References are escaped
+    correctly, but the API currently cannot route a reference containing `/` — it answers
+    `404`.)
+-   **Session validation** allowed `productId: 0` and an inline `price` of 0, skipped
+    `frequency`/`trialPeriod` value checks, and `producttext` did not reject the C1 control range
+    (U+007F–U+009F) the server rejects.
+-   Webhook header constants are defined once (`X-Webhook-Id`) and `TEST_WEBHOOK_ID` once.
+
+### Documentation
+
+-   README: a **Response Types** section (what is always present, what is nullable, zero
+    values, shape errors), client-level `onBehalfOf`, the full retry list, the `/`-in-references
+    caveat, webhook examples that verify the raw body first, then short-circuit the dashboard's
+    test probe, then decode with the `parse*Webhook` helpers, examples that compile under
+    `strict`, an error-handling table with `statusCode` / `fields` / `retryAfter`, and the Node
+    baseline.
+-   Examples read the API key (and optional base URL, product, customer) from the environment,
+    use no placeholder customer UUIDs, look payments up by your own reference on the success
+    page, and escape everything they render.
+-   Tests are type-checked (`npm run typecheck`, with compile-time pinning of every response
+    field's type), and `prettier --check` is part of `npm run lint`. The live suite reads
+    `QBITFLOW_API_KEY` and `QBITFLOW_BASE_URL` from the environment — it never defaults to a
+    URL, fails when the key is set without a base URL, and skips when neither is set.
+
 ## [2.1.0] - 2026-09-21
 
 Aligns the SDK with docs revision `c3c8831`. Partial updates are now genuinely partial,

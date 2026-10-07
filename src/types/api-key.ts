@@ -1,29 +1,31 @@
-import { UserRole } from './user';
+import { UserRole } from './user.js';
 
 /**
  * Represents an API Key in the QBitFlow system
  *
- * API Keys are used to authenticate requests to the QBitFlow API.
+ * API Keys are used to authenticate requests to the QBitFlow API. The hashed key material
+ * is never returned; the plaintext key is shown once, at creation, in the dashboard.
  *
  * @see {@link https://qbitflow.app/docs API Key Documentation}
- *
- * @param id - Unique identifier for the API key
- * @param name - Name of the API key
- * @param organizationId - Identifier of the organization the API key belongs to
- * @param userID - Identifier of the user who created the API key
- * @param createdAt - Date when the API key was created
- * @param expiresAt - (Optional) Date when the API key expires
- * @param role - Role associated with the API key
- * @param test - Indicates if the API key is a test key
  */
 export interface ApiKey {
-	id: number; // Unique identifier for the API key
+	/** Unique identifier for the API key */
+	id: number;
+	/** Name of the API key */
 	name: string;
+	/** Identifier of the organization the API key belongs to */
 	organizationId: number;
+	/** Identifier of the user the key is bound to; `0` for an organization-level key */
 	userId: number;
-	createdAt: Date;
-	/** Date when the API key expires; null/omitted when the key never expires */
-	expiresAt?: Date | null;
-	role: UserRole;
+	/** RFC3339 timestamp for when the API key was created */
+	createdAt: string;
+	/** RFC3339 timestamp for when the API key expires; `null` when the key never expires */
+	expiresAt: string | null;
+	/**
+	 * Role the key carries (derived from its user; an organization-level key is `admin`).
+	 * A role this SDK does not know yet arrives as its raw string.
+	 */
+	role: UserRole | (string & {});
+	/** Indicates if the API key is a test-mode key */
 	test: boolean;
 }

@@ -4,14 +4,12 @@
     "url": "https://github.com/qbitflow/qbitflow-js-sdk/issues"
   },
   "dependencies": {
-    "axios": "^1.13.1",
-    "ws": "^8.18.3"
+    "axios": "^1.13.1"
   },
   "description": "Official JavaScript/TypeScript SDK for QBitFlow - Next Generation Crypto Payment Processing",
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/node": "^24.9.2",
-    "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^8.46.2",
     "@typescript-eslint/parser": "^8.46.2",
     "eslint": "^9.38.0",
@@ -23,21 +21,27 @@
     "typescript-eslint": "^8.70.0"
   },
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=18.0.0"
   },
   "exports": {
     ".": {
-      "import": "./dist/esm/index.js",
-      "require": "./dist/cjs/index.js",
-      "types": "./dist/types/index.d.ts"
-    }
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
     "README.md",
+    "CHANGELOG.md",
     "TRADEMARKS.md",
     "COMPLIANCE.md",
-    "QUICKSTART.md",
     "SECURITY.md",
     "LICENSE"
   ],
@@ -69,18 +73,21 @@
     "url": "https://github.com/qbitflow/qbitflow-js-sdk.git"
   },
   "scripts": {
-    "build": "npm run clean && npm run build:cjs && npm run build:esm && npm run build:types",
+    "build": "npm run clean && npm run build:cjs && npm run build:esm",
     "build:cjs": "tsc --project tsconfig.cjs.json",
     "build:esm": "tsc --project tsconfig.esm.json && echo '{\"type\":\"module\"}' > dist/esm/package.json",
-    "build:types": "tsc --project tsconfig.json --declaration --emitDeclarationOnly --outDir dist/types",
     "clean": "rm -rf dist",
-    "format": "prettier --write \"src/**/*.ts\"",
-    "lint": "eslint src",
-    "prepublishOnly": "npm run build && npm test",
-    "test": "jest",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "lint": "eslint src && prettier --check \"src/**/*.ts\"",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "test": "npm run typecheck && jest",
+    "test:unit": "jest",
     "test:coverage": "jest --coverage",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "test:live": "jest tests/integration.test.ts",
+    "smoke": "node scripts/smoke-pack.mjs",
+    "prepublishOnly": "npm run build && npm run lint && npm test && npm run smoke"
   },
-  "types": "./dist/types/index.d.ts",
-  "version": "2.1.0"
+  "types": "./dist/cjs/index.d.ts",
+  "version": "2.5.0"
 }

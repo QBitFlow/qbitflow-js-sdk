@@ -9,7 +9,8 @@
 
 import { createHmac, timingSafeEqual } from 'crypto';
 
-import { ValidationException } from '../exceptions';
+import { ValidationException } from '../exceptions/index.js';
+import { decodeJsonInput, encodeCanonical } from './canonical.js';
 
 /** Header carrying the HMAC signature, formatted `sha256=<hex>`. */
 export const HEADER_SIGNATURE = 'X-Webhook-Signature-256';
@@ -28,7 +29,10 @@ const SIGNATURE_PREFIX = 'sha256=';
 
 /** Options for {@link verifyWebhookSignature}. */
 export interface VerifyWebhookOptions {
-	/** Replay window in seconds. Defaults to {@link DEFAULT_MAX_TIMESTAMP_AGE_SECONDS}. */
+	/**
+	 * Replay window in seconds. Defaults to {@link DEFAULT_MAX_TIMESTAMP_AGE_SECONDS}; a value
+	 * `<= 0` also means the default.
+	 */
 	maxTimestampAgeSeconds?: number;
 	/** Override the clock, in unix seconds. Test-only. */
 	nowSeconds?: number;
@@ -42,26 +46,6 @@ export interface VerifyWebhookOptions {
 }
 
 /**
- * Recursively sort object keys so that serialization is independent of insertion order.
- * Arrays keep their order — array order is meaningful.
- */
-function sortDeep(value: unknown): unknown {
-	if (Array.isArray(value)) {
-		return value.map(sortDeep);
-	}
-
-	if (value !== null && typeof value === 'object') {
-		const sorted: Record<string, unknown> = {};
-		for (const key of Object.keys(value as Record<string, unknown>).sort()) {
-			sorted[key] = sortDeep((value as Record<string, unknown>)[key]);
-		}
-		return sorted;
-	}
-
-	return value;
-}
-
-/**
  * Render a webhook payload the way QBitFlow signs it.
  *
  * The signature covers a *canonical* rendering rather than the bytes as they arrived,
@@ -69,43 +53,24 @@ function sortDeep(value: unknown): unknown {
  * logging layers) routinely re-serialize a body and reorder keys. Signing raw bytes would
  * make verification fail for a payload that is in fact untouched.
  *
- * Canonical means: object keys sorted lexicographically at every level, no insignificant
- * whitespace, and `<`, `>` and `&` escaped as `<`, `>` and `&`.
+ * Canonical means: object keys sorted at every level (by UTF-8 byte order), no insignificant
+ * whitespace, non-ASCII left literal, `<`, `>`, `&`, U+2028 and U+2029 escaped as `\u003c`,
+ * `\u003e`, `\u0026`, `\u2028`, `\u2029`, a lone surrogate replaced by U+FFFD, and every
+ * number rendered from its float64 value under Go's formatting rules (`-0` included).
  *
- * That last rule exists because the QBitFlow API is written in Go and Go's `encoding/json`
- * escapes those three characters by default. Every QBitFlow SDK reproduces it so all of
- * them compute an identical signature for the same payload.
+ * Those rules come from Go: the QBitFlow API is written in Go and its `encoding/json`
+ * behaves exactly so. Every QBitFlow SDK reproduces them, so all four compute an identical
+ * signature for the same payload, and each SDK's test suite pins the same Go-generated
+ * reference vectors.
  *
- * @param payload - Raw JSON string, a Buffer, or an already-parsed value
+ * @param payload - Raw JSON (a string, a Buffer / Uint8Array / ArrayBuffer), or an
+ *   already-parsed value
  * @returns The canonical JSON string that gets signed
- * @throws {ValidationException} When the payload is missing or not valid JSON
+ * @throws {ValidationException} When the payload is missing, is not valid JSON, or contains a
+ *   value JSON cannot represent (a non-finite number, a BigInt, a circular reference)
  */
 export function canonicalJson(payload: unknown): string {
-	if (payload === undefined || payload === null) {
-		throw new ValidationException('webhook payload is required');
-	}
-
-	let decoded: unknown;
-	if (typeof payload === 'string' || Buffer.isBuffer(payload)) {
-		const text = Buffer.isBuffer(payload) ? payload.toString('utf8') : payload;
-		try {
-			decoded = JSON.parse(text);
-		} catch {
-			throw new ValidationException('webhook payload is not valid JSON');
-		}
-	} else {
-		decoded = payload;
-	}
-
-	// JSON.stringify already emits compact output, leaves non-ASCII literal, and formats
-	// numbers the same way Go does (both use shortest round-trip representation).
-	const json = JSON.stringify(sortDeep(decoded));
-	if (json === undefined) {
-		throw new ValidationException('webhook payload cannot be serialized');
-	}
-
-	// These three only ever appear inside string values in JSON, so a blind replace is safe.
-	return json.replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');
+	return encodeCanonical(decodeJsonInput(payload));
 }
 
 /**
@@ -210,25 +175,42 @@ export function verifyWebhookSignature(
 	}
 }
 
+/** Bounds of a Go `int64`, the type the server parses the timestamp into. */
+const INT64_MIN = -(2n ** 63n);
+const INT64_MAX = 2n ** 63n - 1n;
+
 /**
  * Enforce the replay window, comparing in absolute terms so a webhook from a clock
  * slightly ahead of ours is treated the same as one slightly behind.
+ *
+ * The timestamp is parsed like Go's `strconv.ParseInt`: ASCII `[+-]?[0-9]+`, no surrounding
+ * whitespace, within the int64 range. The age is computed exactly (BigInt), so an extreme
+ * timestamp cannot overflow into the window.
  */
 function verifyTimestamp(timestamp: string, options: VerifyWebhookOptions): void {
 	if (!timestamp) {
 		throw new ValidationException('webhook timestamp is required');
 	}
 
-	if (!/^-?\d+$/.test(timestamp)) {
+	if (!/^[+-]?[0-9]+$/.test(timestamp)) {
 		throw new ValidationException('webhook timestamp is not a unix-seconds integer');
 	}
 
-	const ts = Number(timestamp);
-	const now = options.nowSeconds ?? Math.floor(Date.now() / 1000);
-	const maxAge = options.maxTimestampAgeSeconds ?? DEFAULT_MAX_TIMESTAMP_AGE_SECONDS;
-	const age = Math.abs(now - ts);
+	const ts = BigInt(timestamp);
+	if (ts < INT64_MIN || ts > INT64_MAX) {
+		throw new ValidationException('webhook timestamp is out of range');
+	}
 
-	if (age > maxAge) {
+	const now = BigInt(Math.floor(options.nowSeconds ?? Date.now() / 1000));
+	const configured = options.maxTimestampAgeSeconds;
+	const maxAge =
+		typeof configured === 'number' && Number.isFinite(configured) && configured > 0
+			? configured
+			: DEFAULT_MAX_TIMESTAMP_AGE_SECONDS;
+	const diff = now - ts;
+	const age = diff < 0n ? -diff : diff;
+
+	if (Number(age) > maxAge) {
 		throw new ValidationException(
 			`webhook timestamp expired: age ${age}s exceeds the maximum of ${maxAge}s`
 		);

@@ -2,7 +2,7 @@
  * Refund types
  */
 
-import { TxMetadata } from './common';
+import { TxMetadata } from './common.js';
 
 /**
  * Possible states of a refund
@@ -15,33 +15,36 @@ export enum RefundStatus {
 }
 
 /**
- * A refund entry attached to a transaction
+ * A refund entry attached to a transaction.
  */
 export interface RefundEntry {
-	/** Unique identifier for the refund */
+	/** Unique identifier for the refund, `refund@`-prefixed */
 	uuid: string;
-	/** Internal transaction ID, e.g. "pay@<uuid>" */
+	/** Transaction ID the refund is for, e.g. "pay@<uuid>" */
 	txId: string;
 	/** Whether this is a test refund */
 	test: boolean;
 	/** Reason provided for the refund */
 	reason: string;
-	/** Current status of the refund */
-	status: RefundStatus;
-	/** Timestamp when the refund was created */
+	/**
+	 * Current status of the refund. A value this SDK does not know yet arrives as its raw
+	 * string.
+	 */
+	status: RefundStatus | (string & {});
+	/** RFC3339 timestamp when the refund was created */
 	createdAt: string;
-	/** Optional message from the merchant */
-	merchantMessage?: string;
-	/** Timestamp when the refund was processed (null if still pending) */
-	respondedAt?: string;
-	/** On-chain transaction hash of the refund (null until processed) */
-	txHash?: string;
-	/** Refund amount in the smallest units of the currency */
+	/** Message from the merchant (`''` until the merchant answers) */
+	merchantMessage: string;
+	/** RFC3339 timestamp when the merchant responded; `null` while pending */
+	respondedAt: string | null;
+	/** On-chain transaction hash of the refund (`''` until processed) */
+	txHash: string;
+	/** Refund amount in the smallest units of the currency, as a decimal string */
 	amountMinUnits: string;
-	/** ID of the organization that owns this refund (authenticated only) */
-	organizationId?: number;
-	/** ID of the user that owns this refund (authenticated only) */
-	userId?: number;
-	/** On-chain metadata attached to the refund (authenticated only) */
-	metadata?: TxMetadata;
+	/** ID of the organization that owns this refund */
+	organizationId: number;
+	/** ID of the user that owns this refund; `0` for organization-level */
+	userId: number;
+	/** On-chain metadata attached to the refund; `null` until processed */
+	metadata: TxMetadata | null;
 }

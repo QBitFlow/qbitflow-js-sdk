@@ -1,7 +1,26 @@
+/**
+ * A user's role.
+ *
+ * The hierarchy is `HANDLE < USER < ADMIN < OWNER`. `HANDLE` and `OWNER` are read-only —
+ * the API accepts only `admin` or `user` when creating a user, so use
+ * {@link AssignableUserRole} there.
+ */
 export enum UserRole {
-	ADMIN = 'admin',
+	/** Lowest authenticated tier — a special case of a user, backing the second frontend app */
+	HANDLE = 'handle',
 	USER = 'user',
+	ADMIN = 'admin',
+	/** Organization owner */
+	OWNER = 'owner',
 }
+
+/**
+ * The roles that can be assigned when creating a user.
+ *
+ * The API binds this field `oneof=admin user`, so `HANDLE` and `OWNER` are rejected with a
+ * `400`. Narrowing the type turns that into a compile error instead.
+ */
+export type AssignableUserRole = UserRole.ADMIN | UserRole.USER;
 
 /**
  * Represents a user in the QBitFlow system
@@ -18,20 +37,23 @@ export enum UserRole {
  * @param organizationId - Identifier of the organization the user belongs to
  * @param role - Role of the user within the organization
  * @param organizationFeeBps - Organization fee in basis points for this user (if applicable). 1 BPS = 0.01%
- * @param claimedAt - (Optional) Date when the invited user claimed their account
+ * @param claimedAt - RFC3339 timestamp when the invited user claimed their account, `null` until then
  */
 export interface User {
 	id: number;
 	name: string;
 	lastName: string;
 	email: string;
-	createdAt: Date;
-	updatedAt: Date;
+	/** RFC3339 timestamp, e.g. `"2026-09-21T22:02:09.986381+02:00"` */
+	createdAt: string;
+	/** RFC3339 timestamp */
+	updatedAt: string;
 	organizationId: number;
-	role: UserRole;
+	/** Role within the organization. A role this SDK does not know yet arrives as its raw string. */
+	role: UserRole | (string & {});
 	organizationFeeBps: number;
-	/** Set once the invited user has claimed their account */
-	claimedAt?: Date;
+	/** RFC3339 timestamp, set once the invited user has claimed their account; `null` until then */
+	claimedAt: string | null;
 }
 
 /**
@@ -47,8 +69,9 @@ export interface CreateUserDto {
 	name: string;
 	lastName: string;
 	email: string;
-	role: UserRole;
-	/** Optional. Organization fee in basis points, 0-5000 (100 bps = 1%). Defaults to 0. */
+	/** Only `ADMIN` / `USER` (or the strings `'admin'` / `'user'`) — the API rejects `HANDLE` and `OWNER` on create */
+	role: AssignableUserRole | `${AssignableUserRole}`;
+	/** Optional. Organization fee in basis points, an integer 0-5000 (100 bps = 1%). Defaults to 0. */
 	organizationFeeBps?: number;
 }
 
@@ -56,7 +79,8 @@ export interface CreateUserDto {
  * Data Transfer Object for updating an existing user.
  *
  * Updates are **partial**: every field is optional and any field you omit keeps its
- * stored value. An empty object is a valid no-op.
+ * stored value. An empty string for `name` / `lastName` / `email` counts as "not provided"
+ * and is left out of the request. An empty object is a valid no-op.
  *
  * `password` is deliberately absent. Changing a password is a JWT-only, self-service
  * operation on the API — it cannot be done with an API key, which is the only credential

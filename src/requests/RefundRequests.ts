@@ -1,7 +1,9 @@
-import { CursorData, CursorDataResponse, getCursorData } from '../types';
-import { RefundEntry } from '../types/refund';
-import { cursorQueryBuilder } from '../utils';
-import { Request } from './Request';
+import { list } from '../decode.js';
+import { cursorPage, RefundEntrySchema } from '../schemas.js';
+import { CursorData, getCursorData } from '../types/index.js';
+import { RefundEntry } from '../types/refund.js';
+import { cursorQueryBuilder, requireNonEmpty } from '../utils/index.js';
+import { Request } from './Request.js';
 
 /**
  * Refund requests
@@ -10,26 +12,28 @@ export class RefundRequests extends Request {
 	private static readonly BASE_ROUTE = '/transaction/refunds';
 
 	/**
-	 * Get the refund associated with a transaction.
-	 * This endpoint is public and does not require authentication.
+	 * Get the refund associated with a transaction (public status lookup).
 	 *
-	 * @param transactionUUID - UUID of the original transaction
+	 * @param transactionUUID - Prefixed id of the original transaction (e.g. `pay@<uuid>`)
 	 * @returns Refund entry
+	 * @throws {ValidationException} When `transactionUUID` is empty
 	 *
 	 * @example
 	 * ```typescript
-	 * const refund = await client.refunds.getByTransaction('tx-uuid');
+	 * const refund = await client.refunds.getByTransaction('pay@…');
 	 * console.log(refund.status, refund.reason);
 	 * ```
 	 */
 	async getByTransaction(transactionUUID: string): Promise<RefundEntry> {
-		return this.getReq<RefundEntry>(
-			`${ RefundRequests.BASE_ROUTE }/by-transaction/${ transactionUUID }`
+		requireNonEmpty('transactionUUID', transactionUUID);
+		return this.getJson(
+			RefundEntrySchema,
+			`${RefundRequests.BASE_ROUTE}/by-transaction/${encodeURIComponent(transactionUUID)}`
 		);
 	}
 
 	/**
-	 * Get all active refunds for your organization
+	 * Get all refunds awaiting a merchant response (`respondedAt === null`)
 	 * @returns List of active refund entries
 	 *
 	 * @example
@@ -39,13 +43,14 @@ export class RefundRequests extends Request {
 	 * ```
 	 */
 	async getAll(): Promise<RefundEntry[]> {
-		return this.getReq<RefundEntry[]>(`${ RefundRequests.BASE_ROUTE }/all`);
+		return this.getJson(list(RefundEntrySchema), `${RefundRequests.BASE_ROUTE}/all`);
 	}
 
 	/**
-	 * Get inactive (resolved) refunds for your organization with cursor-based pagination
+	 * Get handled refunds (`respondedAt !== null`) with cursor-based pagination
 	 * @param options - Pagination options
 	 * @returns Paginated list of inactive refund entries
+	 * @throws {ValidationException} When `limit` is not a positive integer
 	 *
 	 * @example
 	 * ```typescript
@@ -60,10 +65,11 @@ export class RefundRequests extends Request {
 		cursor?: string | null;
 	}): Promise<CursorData<RefundEntry>> {
 		const params = cursorQueryBuilder(options?.limit, options?.cursor);
-		const partial = await this.getReq<CursorDataResponse<RefundEntry>>(
-			`${ RefundRequests.BASE_ROUTE }/all/inactive`,
+		const page = await this.getJson(
+			cursorPage(RefundEntrySchema),
+			`${RefundRequests.BASE_ROUTE}/all/inactive`,
 			params
 		);
-		return getCursorData(partial);
+		return getCursorData(page);
 	}
 }

@@ -1,5 +1,8 @@
-import { ApiKey } from '../types/api-key';
-import { Request } from './Request';
+import { list } from '../decode.js';
+import { ApiKeySchema } from '../schemas.js';
+import { ApiKey } from '../types/api-key.js';
+import { requirePositiveInt } from '../utils/index.js';
+import { Request } from './Request.js';
 
 /**
  * Handler for API key-related requests.
@@ -12,19 +15,22 @@ export class ApiKeyRequests extends Request {
 	private static readonly BASE_ROUTE = '/api-key';
 
 	/**
-	 * Get all API keys for the current user
+	 * Get the caller's API keys. A `user` sees only their own keys; an admin/owner (or an
+	 * organization-level key) sees every key in the organization.
 	 * @returns List of API keys
 	 */
 	async getAll(): Promise<ApiKey[]> {
-		return this.getReq<ApiKey[]>(`${ ApiKeyRequests.BASE_ROUTE }/`);
+		return this.getJson(list(ApiKeySchema), `${ApiKeyRequests.BASE_ROUTE}/`);
 	}
 
 	/**
-	 * Get all API keys for a specified user (must be an admin)
+	 * Get all API keys for a specified user (admin role required)
 	 * @param userId - The user ID
 	 * @returns List of API keys
+	 * @throws {ValidationException} When `userId` is not a positive integer
 	 */
 	async getForUser(userId: number): Promise<ApiKey[]> {
-		return this.getReq<ApiKey[]>(`${ ApiKeyRequests.BASE_ROUTE }/user/${ userId }`);
+		requirePositiveInt('userId', userId);
+		return this.getJson(list(ApiKeySchema), `${ApiKeyRequests.BASE_ROUTE}/user/${userId}`);
 	}
 }

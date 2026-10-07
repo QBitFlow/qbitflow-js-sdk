@@ -2,7 +2,7 @@
  * Transaction status types and enums
  */
 
-import { PaymentMetadata } from './common';
+import { PaymentMetadata } from './common.js';
 
 /**
  * Types of transactions supported by the API
@@ -20,7 +20,7 @@ export enum TransactionType {
 	CANCEL_SUBSCRIPTION = 'cancelSubscription',
 	/** Execute subscription payment transaction */
 	EXECUTE_SUBSCRIPTION_PAYMENT = 'executeSubscription',
-	/** Create pay-as-you-go subscription transaction */
+	/** Create pay-as-you-go subscription transaction (no PAYG routes exist yet) */
 	CREATE_PAYG_SUBSCRIPTION = 'createPAYGSubscription',
 	/** Cancel pay-as-you-go subscription transaction */
 	CANCEL_PAYG_SUBSCRIPTION = 'cancelPAYGSubscription',
@@ -76,40 +76,21 @@ export enum TransactionStatusValue {
 }
 
 /**
- * Detailed status information for a transaction. Provides detailed information about the current state of a transaction.
+ * Detailed status information for a transaction.
  */
 export interface TransactionStatus {
-	/** Current status of the transaction */
-	status: TransactionStatusValue;
-	/** Transaction hash on the blockchain */
-	txHash: string;
-	/** Additional status message */
-	message?: string;
 	/**
-	 * Finalized payment metadata for a completed, successful transaction
-	 * (omitted until the transaction is settled).
+	 * Current status of the transaction. A value this SDK does not know yet arrives as its
+	 * raw string.
 	 */
-	settlementDetails?: PaymentMetadata;
-}
-
-/**
- * WebSocket status response for real-time updates
- */
-export interface StatusResponse {
-	/** UUID of the transaction */
-	transactionUUID: string;
-	/** Current status of the transaction */
-	status: TransactionStatus;
-}
-
-/**
- * Error response from WebSocket status connection
- */
-export interface StatusResponseError {
-	/** Error message */
-	error: string;
-	/** HTTP status code */
-	status: number;
-	/** Additional error message */
+	status: TransactionStatusValue | (string & {});
+	/** Transaction hash on the blockchain; `''` until the transaction is broadcast */
+	txHash: string;
+	/** Additional status message (`''` when there is none) */
 	message: string;
+	/**
+	 * Finalized payment metadata for a completed, successful transaction; `null` until the
+	 * transaction is settled.
+	 */
+	settlementDetails: PaymentMetadata | null;
 }
