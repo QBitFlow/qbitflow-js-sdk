@@ -1,25 +1,59 @@
 /**
  * Tests for TypeScript type definitions — verifies types compile and carry correct values.
+ * This file is type-checked by `npm run typecheck`, so the `Equals<>` assertions below are
+ * compile-time guarantees: each response field is pinned to exactly the type the decoder
+ * guarantees (no `?:`; `T | null` only for Go pointers).
  */
 
 import {
+	Currency,
+	UserRole,
 	CreatePaymentSessionDto,
 	CreateSubscriptionSessionDto,
+	CreateUserDto,
 	Duration,
 	OneTimePaymentSession,
-	PaygSubscriptionSession,
 	QBitFlowConfig,
 	RefundStatus,
 	SubscriptionSession,
 	SubscriptionStatus,
-	TransactionShortType,
 	TransactionStatusValue,
 	TransactionType,
+	isPaymentSession,
+	isSubscriptionSession,
+	isSubscriptionBillingWebhook,
+	isSubscriptionStatusTransitionWebhook,
+	SessionWebhookResponse,
+	SubscriptionWebhook,
+	SubscriptionWebhookType,
 } from '../src/types';
 
 import type { AccountingEvent } from '../src/types/accounting';
-import type { ClaimFunds, ClaimRequest, Organization } from '../src/types/claim';
+import type { ApiKey } from '../src/types/api-key';
+import type { ClaimFunds, ClaimRequestResponse, Organization } from '../src/types/claim';
+import type {
+	OrganizationFee,
+	PaymentMetadata,
+	ReferralFee,
+	TxMetadata,
+} from '../src/types/common';
+import type { Customer } from '../src/types/customer';
+import type { Payment, CombinedPayment } from '../src/types/payment';
+import type { Product } from '../src/types/product';
 import type { RefundEntry } from '../src/types/refund';
+import type { TransactionStatus } from '../src/types/status';
+import type { Subscription, SubscriptionHistory } from '../src/types/subscription';
+import type { User } from '../src/types/user';
+
+/** `true` only when `A` and `B` are exactly the same type. */
+type Equals<A, B> =
+	(<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+
+/** Keys of `T` declared optional (`?:`). */
+type OptionalKeys<T> = { [K in keyof T]-?: object extends Pick<T, K> ? K : never }[keyof T];
+
+/** Compile-time assertion helper: `assertType<Equals<A, B>>(true)`. */
+const assertType = <T extends true>(value: T): T => value;
 
 describe('Type Definitions', () => {
 	describe('Duration', () => {
@@ -31,38 +65,71 @@ describe('Type Definitions', () => {
 	});
 
 	describe('TransactionType', () => {
-		it('should have correct enum values', () => {
-			expect(TransactionType.ONE_TIME_PAYMENT).toBe('payment');
-			expect(TransactionType.CREATE_SUBSCRIPTION).toBe('createSubscription');
+		it('has all 13 members the API defines', () => {
+			expect(Object.values(TransactionType)).toEqual([
+				'payment',
+				'transfer',
+				'tokenTransfer',
+				'createSubscription',
+				'cancelSubscription',
+				'executeSubscription',
+				'createPAYGSubscription',
+				'cancelPAYGSubscription',
+				'increaseAllowance',
+				'updateMaxAmount',
+				'refund',
+				'faucet',
+				'claimFunds',
+			]);
 		});
 	});
 
 	describe('TransactionStatusValue', () => {
-		it('should have correct enum values', () => {
-			expect(TransactionStatusValue.CREATED).toBe('created');
-			expect(TransactionStatusValue.PENDING).toBe('pending');
-			expect(TransactionStatusValue.COMPLETED).toBe('completed');
-			expect(TransactionStatusValue.FAILED).toBe('failed');
+		it('has the 7 documented members', () => {
+			expect(Object.values(TransactionStatusValue).sort()).toEqual(
+				[
+					'created',
+					'waitingConfirmation',
+					'pending',
+					'completed',
+					'failed',
+					'cancelled',
+					'expired',
+				].sort()
+			);
 		});
 	});
 
 	describe('SubscriptionStatus', () => {
-		it('should have correct enum values', () => {
-			expect(SubscriptionStatus.ACTIVE).toBe('active');
-			expect(SubscriptionStatus.CANCELLED).toBe('cancelled');
-			expect(SubscriptionStatus.PAST_DUE).toBe('past_due');
-			expect(SubscriptionStatus.LOW_ON_FUNDS).toBe('low_on_funds');
-			expect(SubscriptionStatus.TRIAL).toBe('trial');
-			expect(SubscriptionStatus.TRIAL_EXPIRED).toBe('trial_expired');
+		it('has the 7 documented members', () => {
+			expect(Object.values(SubscriptionStatus).sort()).toEqual(
+				[
+					'active',
+					'cancelled',
+					'past_due',
+					'low_on_funds',
+					'pending',
+					'trial',
+					'trial_expired',
+				].sort()
+			);
+		});
+	});
+
+	describe('RefundStatus', () => {
+		it('has the 4 documented members ("rejected" is not one of them)', () => {
+			expect(Object.values(RefundStatus)).toEqual([
+				'pending',
+				'approved',
+				'refused',
+				'failed',
+			]);
 		});
 	});
 
 	describe('CreatePaymentSessionDto', () => {
 		it('should accept session with productId', () => {
-			const dto: CreatePaymentSessionDto = {
-				productId: 1,
-				customerUUID: 'uuid',
-			};
+			const dto: CreatePaymentSessionDto = { productId: 1, customerUUID: 'uuid' };
 			expect(dto.productId).toBe(1);
 		});
 
@@ -76,7 +143,7 @@ describe('Type Definitions', () => {
 			expect(dto.productName).toBe('Product');
 		});
 
-		it('should accept optional webhook and redirect URLs', () => {
+		it('should accept optional redirect URLs', () => {
 			const dto: CreatePaymentSessionDto = {
 				productId: 1,
 				successUrl: 'https://example.com/success',
@@ -94,7 +161,6 @@ describe('Type Definitions', () => {
 				frequency: { value: 1, unit: 'months' },
 			};
 			expect(dto.frequency.value).toBe(1);
-			expect(dto.frequency.unit).toBe('months');
 		});
 
 		it('should accept optional trial period and min periods', () => {
@@ -110,101 +176,220 @@ describe('Type Definitions', () => {
 	});
 
 	describe('Session types', () => {
-		it('OneTimePaymentSession should compile with required fields', () => {
-			const session: OneTimePaymentSession = {
-				uuid: 'sess-uuid',
-				organizationName: 'My Org',
-				test: false,
-				availableCurrencies: [1, 2, 3],
-			};
-			expect(session.uuid).toBeDefined();
-			expect(session.availableCurrencies).toEqual([1, 2, 3]);
+		const base: OneTimePaymentSession = {
+			uuid: 'pay@1',
+			reference: '',
+			productId: 0,
+			productReference: '',
+			productName: 'Coffee',
+			description: 'Hot',
+			price: 3.5,
+			successUrl: '',
+			cancelUrl: '',
+			organizationId: 1,
+			organizationName: 'My Org',
+			feeBps: 150,
+			organizationFeeBps: 0,
+			userId: 0,
+			userName: '',
+			test: false,
+			customerUUID: null,
+			customerReference: '',
+			txType: TransactionType.ONE_TIME_PAYMENT,
+			availableCurrencies: [1, 2, 3],
+		};
+
+		it('every session field is required; customerUUID is the only nullable one', () => {
+			assertType<Equals<OptionalKeys<OneTimePaymentSession>, never>>(true);
+			assertType<Equals<OptionalKeys<SubscriptionSession>, never>>(true);
+			assertType<Equals<OneTimePaymentSession['customerUUID'], string | null>>(true);
+			assertType<Equals<OneTimePaymentSession['availableCurrencies'], number[]>>(true);
+			assertType<Equals<SubscriptionSession['trialPeriod'], number>>(true);
+			assertType<Equals<SubscriptionSession['upgradingFromTrial'], boolean>>(true);
+			expect(base.availableCurrencies).toEqual([1, 2, 3]);
 		});
 
-		it('OneTimePaymentSession should accept authenticated-only fields', () => {
-			const session: OneTimePaymentSession = {
-				uuid: 'sess-uuid',
-				organizationName: 'My Org',
-				txType: TransactionShortType.PAYMENT,
-				test: false,
-				availableCurrencies: [1],
-				organizationId: 1,
-				feeBps: 150,
-				organizationFeeBps: 50,
-				userId: 7,
-				userName: 'Alice',
-				customerUUID: 'cust-uuid',
-				customerReference: 'my-ref',
+		it('isSubscriptionSession / isPaymentSession follow txType, then frequency', () => {
+			const sub: SubscriptionSession = {
+				...base,
+				uuid: 'sub@1',
+				txType: TransactionType.CREATE_SUBSCRIPTION,
+				frequency: 2592000,
+				trialPeriod: 0,
+				minPeriods: 0,
+				upgradingFromTrial: false,
 			};
-			expect(session.feeBps).toBe(150);
-			expect(session.txType).toBe('payment');
-			expect(session.userName).toBe('Alice');
-		});
-
-		it('SubscriptionSession should include frequency in seconds', () => {
-			const session: SubscriptionSession = {
-				uuid: 'sess-uuid',
-				organizationName: 'My Org',
-				test: false,
-				availableCurrencies: [1],
-				frequency: 2592000, // 30 days in seconds
-				trialPeriod: 604800, // 7 days
-				minPeriods: 3,
-			};
-			expect(session.frequency).toBe(2592000);
-			expect(session.trialPeriod).toBe(604800);
-		});
-
-		it('PaygSubscriptionSession should include structured Duration frequency', () => {
-			const session: PaygSubscriptionSession = {
-				uuid: 'sess-uuid',
-				organizationName: 'My Org',
-				test: false,
-				availableCurrencies: [1],
-				frequency: { value: 1, unit: 'months' },
-				freeCredits: 10.0,
-			};
-			expect(session.frequency.unit).toBe('months');
-			expect(session.freeCredits).toBe(10.0);
+			expect(isSubscriptionSession(sub)).toBe(true);
+			expect(isPaymentSession(sub)).toBe(false);
+			expect(isSubscriptionSession(base)).toBe(false);
+			expect(isPaymentSession(base)).toBe(true);
+			// Unknown txType (e.g. from a newer API): a billing frequency makes it a subscription.
+			expect(isSubscriptionSession({ ...sub, txType: 'somethingNew' })).toBe(true);
+			expect(isSubscriptionSession({ ...base, txType: 'somethingNew' })).toBe(false);
+			expect(isPaymentSession({ ...base, txType: 'somethingNew' })).toBe(false);
+			// No txType at all and no frequency: a payment (the rule every SDK applies).
+			expect(isPaymentSession({ ...base, txType: '' })).toBe(true);
+			expect(isPaymentSession({ ...sub, txType: '' })).toBe(false);
 		});
 	});
 
 	describe('QBitFlowConfig', () => {
-		it('should accept minimal config', () => {
-			const config: QBitFlowConfig = { apiKey: 'test-key' };
-			expect(config.apiKey).toBe('test-key');
-		});
-
-		it('should accept full config', () => {
-			const config: QBitFlowConfig = {
+		it('should accept minimal and full configs, including maxRetries: 0', () => {
+			const minimal: QBitFlowConfig = { apiKey: 'test-key' };
+			const full: QBitFlowConfig = {
 				apiKey: 'test-key',
 				baseUrl: 'https://api.example.com',
 				timeout: 30000,
-				maxRetries: 3,
+				maxRetries: 0,
 			};
-			expect(config.baseUrl).toBe('https://api.example.com');
+			expect(minimal.apiKey).toBe('test-key');
+			expect(full.maxRetries).toBe(0);
 		});
 	});
 
-	describe('RefundEntry', () => {
-		it('should accept a valid refund entry', () => {
-			const entry: RefundEntry = {
-				uuid: 'refund-uuid',
-				txId: 'pay@payment-uuid',
-				test: false,
-				reason: 'Customer requested refund',
-				status: RefundStatus.PENDING,
-				createdAt: '2024-01-01T00:00:00Z',
-				organizationId: 1,
-				amountMinUnits: '100000',
+	describe('Response types say exactly what the decoder guarantees (compile-time)', () => {
+		it('no response type has an optional (?:) field', () => {
+			assertType<Equals<OptionalKeys<Payment>, never>>(true);
+			assertType<Equals<OptionalKeys<CombinedPayment>, never>>(true);
+			assertType<Equals<OptionalKeys<Subscription>, never>>(true);
+			assertType<Equals<OptionalKeys<SubscriptionHistory>, never>>(true);
+			assertType<Equals<OptionalKeys<Customer>, never>>(true);
+			assertType<Equals<OptionalKeys<Product>, never>>(true);
+			assertType<Equals<OptionalKeys<User>, never>>(true);
+			assertType<Equals<OptionalKeys<ApiKey>, never>>(true);
+			assertType<Equals<OptionalKeys<RefundEntry>, never>>(true);
+			assertType<Equals<OptionalKeys<Currency>, never>>(true);
+			assertType<Equals<OptionalKeys<TransactionStatus>, never>>(true);
+			assertType<Equals<OptionalKeys<PaymentMetadata>, never>>(true);
+			assertType<Equals<OptionalKeys<TxMetadata>, never>>(true);
+			assertType<Equals<OptionalKeys<AccountingEvent>, never>>(true);
+			assertType<Equals<OptionalKeys<SessionWebhookResponse>, never>>(true);
+			expect(true).toBe(true);
+		});
+
+		it('pins the nullable (Go pointer) fields and the required ones', () => {
+			// Payment
+			assertType<Equals<Payment['reference'], string | null>>(true);
+			assertType<Equals<Payment['customerUUID'], string | null>>(true);
+			assertType<Equals<Payment['currency'], Currency>>(true);
+			assertType<Equals<Payment['metadata'], PaymentMetadata>>(true);
+			assertType<Equals<Payment['organizationId'], number>>(true);
+			assertType<Equals<Payment['userId'], number>>(true);
+			assertType<Equals<Payment['productId'], number>>(true);
+			// CombinedPayment
+			assertType<Equals<CombinedPayment['productId'], number | null>>(true);
+			assertType<Equals<CombinedPayment['subscriptionUUID'], string | null>>(true);
+			assertType<Equals<CombinedPayment['metadata'], PaymentMetadata | null>>(true);
+			assertType<Equals<CombinedPayment['customerUUID'], string>>(true);
+			assertType<Equals<CombinedPayment['currency'], Currency>>(true);
+			// Subscription / history
+			assertType<Equals<Subscription['currency'], Currency>>(true);
+			assertType<Equals<Subscription['lastBillingDate'], string>>(true);
+			assertType<Equals<Subscription['minimumCancellationDate'], string | null>>(true);
+			assertType<Equals<Subscription['reference'], string | null>>(true);
+			assertType<Equals<SubscriptionHistory['currency'], Currency>>(true);
+			assertType<Equals<SubscriptionHistory['metadata'], PaymentMetadata>>(true);
+			// Metadata
+			assertType<Equals<PaymentMetadata['organizationFee'], OrganizationFee | null>>(true);
+			assertType<Equals<PaymentMetadata['referralFee'], ReferralFee | null>>(true);
+			assertType<Equals<OrganizationFee['organizationId'], number>>(true);
+			assertType<Equals<ReferralFee['referrer'], string>>(true);
+			assertType<Equals<TxMetadata['mainCurrencyPriceUSD'], number>>(true);
+			// Others
+			assertType<Equals<Currency['mainCurrency'], Currency | null>>(true);
+			assertType<Equals<Currency['mainCurrencyId'], number | null>>(true);
+			assertType<Equals<User['claimedAt'], string | null>>(true);
+			assertType<Equals<ApiKey['expiresAt'], string | null>>(true);
+			assertType<Equals<ApiKey['userId'], number>>(true);
+			assertType<Equals<Customer['userId'], number>>(true);
+			assertType<Equals<Customer['reference'], string>>(true);
+			assertType<Equals<Product['reference'], string>>(true);
+			assertType<Equals<RefundEntry['merchantMessage'], string>>(true);
+			assertType<Equals<RefundEntry['txHash'], string>>(true);
+			assertType<Equals<RefundEntry['respondedAt'], string | null>>(true);
+			assertType<Equals<RefundEntry['metadata'], TxMetadata | null>>(true);
+			assertType<Equals<TransactionStatus['txHash'], string>>(true);
+			assertType<Equals<TransactionStatus['settlementDetails'], PaymentMetadata | null>>(
+				true
+			);
+			assertType<Equals<SessionWebhookResponse['status'], TransactionStatus | null>>(true);
+			assertType<Equals<SessionWebhookResponse['managementPageLink'], string>>(true);
+			expect(true).toBe(true);
+		});
+
+		it('unknown enum values stay assignable as raw strings, members still autocomplete', () => {
+			const sub = { subscriptionStatus: 'paused_by_merchant' } as Pick<
+				Subscription,
+				'subscriptionStatus'
+			>;
+			const status: SubscriptionStatus | (string & {}) = sub.subscriptionStatus;
+			const known: Subscription['subscriptionStatus'] = SubscriptionStatus.ACTIVE;
+			const source: CombinedPayment['source'] = 'subscription_history';
+			const txType: TransactionStatus['status'] = TransactionStatusValue.COMPLETED;
+			const refund: RefundEntry['status'] = RefundStatus.REFUSED;
+			const role: User['role'] = 'handle';
+			expect(status).toBe('paused_by_merchant');
+			expect(status === SubscriptionStatus.ACTIVE).toBe(false);
+			expect([known, source, txType, refund, role]).toHaveLength(5);
+		});
+
+		it('CombinedPayment has no organizationId/userId', () => {
+			assertType<
+				Equals<'organizationId' extends keyof CombinedPayment ? true : false, false>
+			>(true);
+			assertType<Equals<'userId' extends keyof CombinedPayment ? true : false, false>>(true);
+			expect(true).toBe(true);
+		});
+
+		it('request enums accept the string values too', () => {
+			const user: CreateUserDto = {
+				name: 'A',
+				lastName: 'B',
+				email: 'a@b.co',
+				role: 'user',
 			};
-			expect(entry.uuid).toBeDefined();
-			expect(entry.status).toBe(RefundStatus.PENDING);
+			const admin: CreateUserDto = { ...user, role: UserRole.ADMIN };
+			// @ts-expect-error owner cannot be assigned on create
+			const owner: CreateUserDto = { ...user, role: 'owner' };
+			expect([user.role, admin.role, owner.role]).toEqual(['user', 'admin', 'owner']);
+		});
+	});
+
+	describe('Subscription webhook envelope', () => {
+		it('narrows data with the type guards; an unknown type keeps raw data', () => {
+			const events: SubscriptionWebhook[] = [
+				{
+					subscriptionUUID: 'sub@1',
+					subscriptionReference: '',
+					type: SubscriptionWebhookType.STATUS_TRANSITION,
+					data: {
+						previousStatus: SubscriptionStatus.TRIAL,
+						currentStatus: SubscriptionStatus.ACTIVE,
+						updatedAt: 'now',
+					},
+				},
+				{
+					subscriptionUUID: 'sub@1',
+					subscriptionReference: 'ref',
+					type: 'paused',
+					data: { raw: true },
+				},
+			];
+			const [transition, unknown] = events;
+			if (isSubscriptionStatusTransitionWebhook(transition)) {
+				const current: string = transition.data.currentStatus;
+				expect(current).toBe('active');
+			} else {
+				throw new Error('unexpected type');
+			}
+			expect(isSubscriptionBillingWebhook(unknown)).toBe(false);
+			expect(isSubscriptionStatusTransitionWebhook(unknown)).toBe(false);
+			expect(unknown.data).toEqual({ raw: true });
 		});
 	});
 
 	describe('AccountingEvent', () => {
-		it('should accept a valid accounting event', () => {
+		it('should accept a valid accounting event (network fees always present)', () => {
 			const event: AccountingEvent = {
 				paymentId: 'pay-uuid',
 				paymentReference: 'order-123',
@@ -236,6 +421,8 @@ describe('Type Definitions', () => {
 				organizationFeePercent: 0,
 				organizationFeeUsd: 0,
 				organizationFee: '0',
+				networkFeesUsd: 0,
+				networkFees: '0',
 				netAmountUsd: 98.5,
 				netAmount: '98.500000',
 			};
@@ -245,26 +432,14 @@ describe('Type Definitions', () => {
 	});
 
 	describe('Claim types', () => {
-		it('should accept a valid ClaimRequest', () => {
-			const req: ClaimRequest = {
-				uuid: 'claim-uuid',
-				userId: 42,
-				createdAt: '2024-01-01T00:00:00Z',
-			};
-			expect(req.userId).toBe(42);
-		});
-
-		it('should accept a valid Organization', () => {
+		it('should accept a ClaimRequestResponse, an Organization and a ClaimFunds', () => {
+			const req: ClaimRequestResponse = { message: 'ok', link: 'https://x' };
 			const org: Organization = {
 				id: 1,
 				name: 'My Org',
 				feePercentage: 1.5,
 				createdAt: '2024-01-01T00:00:00Z',
 			};
-			expect(org.name).toBe('My Org');
-		});
-
-		it('should accept a valid ClaimFunds', () => {
 			const funds: ClaimFunds = {
 				userId: 42,
 				totalAmountOwed: 250.5,
@@ -272,7 +447,15 @@ describe('Type Definitions', () => {
 				test: false,
 				createdAt: '2024-01-01T00:00:00Z',
 			};
+			expect(req.link).toContain('http');
+			expect(org.name).toBe('My Org');
 			expect(funds.totalAmountOwed).toBe(250.5);
 		});
+	});
+});
+
+describe('UserRole hierarchy', () => {
+	it('covers every role the API returns', () => {
+		expect(Object.values(UserRole)).toEqual(['handle', 'user', 'admin', 'owner']);
 	});
 });

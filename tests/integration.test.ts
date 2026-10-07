@@ -1,23 +1,28 @@
 /**
- * Integration tests for QBitFlow SDK.
+ * Integration tests for the QBitFlow SDK, against a real QBitFlow server.
  *
- * These tests run against the actual QBitFlow test API.
- * Make sure to set QBITFLOW_API_KEY environment variable.
+ * The suite reads its target from the environment — it never defaults to localhost or to
+ * production:
  *
- * Run with:
- *     export QBITFLOW_API_KEY="your_test_api_key"
- *     npm test -- tests/integration.test.ts
+ * - `QBITFLOW_API_KEY` and `QBITFLOW_BASE_URL` both set → the suite runs against that server;
+ * - `QBITFLOW_API_KEY` set without `QBITFLOW_BASE_URL` → the suite FAILS, naming the missing
+ *   variable;
+ * - neither set → the suite is skipped, so the offline `npm test` stays green.
+ *
+ * Run with (from the SDK directory, loading the workspace's `.local.env` — never print it):
+ *     set -a; source ../.local.env; set +a
+ *     npm run test:live
  */
+
+import { randomUUID } from 'node:crypto';
 
 import { QBitFlow } from '../src/QBitFlow';
 import { Duration, TransactionType } from '../src/types';
 
-import { NotFoundException } from '../src/exceptions';
+import { NotFoundException, ValidationException } from '../src/exceptions';
 import { CreateCustomerDto, Customer, UpdateCustomerDto } from '../src/types/customer';
 import { CreateProductDto, Product, UpdateProductDto } from '../src/types/product';
 import { CreateUserDto, UpdateUserDto, User, UserRole } from '../src/types/user';
-
-const LOCAL_URL = 'http://localhost:3001';
 
 // Global variables to store created entities across tests
 let createdUser: User | null = null;
@@ -31,6 +36,7 @@ const createTestCustomerData = (): CreateCustomerDto => ({
 	email: `test+${Math.random().toString(36).substring(7)}@example.com`,
 	phoneNumber: '+1234567890',
 	address: '123 Test Street',
+	reference: `CUST-${Math.random().toString(36).substring(7)}`,
 });
 
 const createTestProductData = (): CreateProductDto => ({
@@ -51,18 +57,26 @@ const createTestUserData = (): CreateUserDto => ({
 // Setup and teardown
 let client: QBitFlow;
 let apiKey: string;
+let baseUrl: string;
 
-beforeAll(() => {
-	if (!process.env.QBITFLOW_API_KEY) {
-		throw new Error('QBITFLOW_API_KEY environment variable is not set');
-	}
-	apiKey = process.env.QBITFLOW_API_KEY;
+// Without a key there is nothing to talk to: skip the whole suite instead of failing it, so
+// `npm test` stays green offline and the live run is opt-in (`npm run test:live`).
+const describeLive = process.env.QBITFLOW_API_KEY ? describe : describe.skip;
 
-	const baseUrl = process.env.QBITFLOW_BASE_URL || process.env.QBITFLOW_API_URL || LOCAL_URL;
-	client = new QBitFlow({ apiKey, baseUrl });
-});
+describeLive('QBitFlow Integration Tests', () => {
+	beforeAll(() => {
+		const configuredUrl = process.env.QBITFLOW_BASE_URL;
+		if (!configuredUrl) {
+			throw new Error(
+				'QBITFLOW_API_KEY is set but QBITFLOW_BASE_URL is not: set the base URL of the server ' +
+					'to test against (see tests/README.md). The live suite never defaults to a URL.'
+			);
+		}
+		apiKey = process.env.QBITFLOW_API_KEY as string;
+		baseUrl = configuredUrl;
+		client = new QBitFlow({ apiKey, baseUrl });
+	});
 
-describe('QBitFlow Integration Tests', () => {
 	describe('Client', () => {
 		it('should initialize with API key string', () => {
 			const testClient = new QBitFlow(apiKey);
@@ -79,12 +93,12 @@ describe('QBitFlow Integration Tests', () => {
 		it('should initialize with config object', () => {
 			const testClient = new QBitFlow({
 				apiKey,
-				baseUrl: LOCAL_URL,
+				baseUrl,
 				timeout: 60000,
 				maxRetries: 5,
 			});
 			expect(testClient.getApiKey()).toBe(apiKey);
-			expect(testClient.getBaseUrl()).toBe(LOCAL_URL);
+			expect(testClient.getBaseUrl()).toBe(baseUrl.replace(/\/+$/, ''));
 		});
 
 		it('should throw error when API key is not provided', () => {
@@ -101,9 +115,20 @@ describe('QBitFlow Integration Tests', () => {
 			expect(customer.name).toBe(customerData.name);
 			expect(customer.lastName).toBe(customerData.lastName);
 			expect(customer.email).toBe(customerData.email);
-			expect(customer.createdAt).toBeDefined();
+			expect(customer.reference).toBe(customerData.reference);
+			expect(typeof customer.createdAt).toBe('string');
+			expect(typeof customer.organizationId).toBe('number');
+			expect(customer.userId).toBe(0); // organization-level customer
 
 			createdCustomer = customer;
+		});
+
+		it('should get customer by reference', async () => {
+			expect(createdCustomer).not.toBeNull();
+			if (!createdCustomer) return;
+
+			const retrieved = await client.customers.getByReference(createdCustomer.reference);
+			expect(retrieved.uuid).toBe(createdCustomer.uuid);
 		});
 
 		it('should get customer by UUID', async () => {
@@ -211,11 +236,20 @@ describe('QBitFlow Integration Tests', () => {
 			expect(retrieved.id).toBeDefined();
 		});
 
+		it('should get user by email', async () => {
+			expect(createdUser).not.toBeNull();
+			if (!createdUser) return;
+
+			const retrieved = await client.users.getByEmail(createdUser.email);
+			expect(retrieved.id).toBe(createdUser.id);
+			expect(retrieved.claimedAt).toBeNull(); // a provisioned user starts unclaimed
+		});
+
 		it('should get user by ID', async () => {
 			expect(createdUser).not.toBeNull();
 			if (!createdUser) return;
 
-			const retrieved = await client.users.getById(createdUser.id.toString());
+			const retrieved = await client.users.getById(createdUser.id);
 
 			expect(retrieved.id).toBe(createdUser.id);
 			expect(retrieved.email).toBe(createdUser.email);
@@ -256,9 +290,7 @@ describe('QBitFlow Integration Tests', () => {
 			const response = await client.users.delete(tempUser.id);
 			expect(response.message).toBeDefined();
 
-			await expect(client.users.getById(tempUser.id.toString())).rejects.toThrow(
-				NotFoundException
-			);
+			await expect(client.users.getById(tempUser.id)).rejects.toThrow(NotFoundException);
 		});
 	});
 
@@ -387,7 +419,8 @@ describe('QBitFlow Integration Tests', () => {
 			expect(currencies.length).toBeGreaterThan(0);
 			// Main currencies are native currencies, so they have no main currency reference.
 			for (const currency of currencies) {
-				expect(currency.mainCurrencyId).toBeFalsy();
+				expect(currency.mainCurrencyId).toBeNull();
+				expect(currency.mainCurrency).toBeNull();
 			}
 		});
 
@@ -411,18 +444,35 @@ describe('QBitFlow Integration Tests', () => {
 
 	describe('Payments', () => {
 		it('should create payment session with product ID', async () => {
-			try {
-				const response = await client.oneTimePayments.createSession({
-					productId: createdProduct?.id,
-					customerUUID: createdCustomer?.uuid,
-				});
+			expect(createdProduct).not.toBeNull();
+			const response = await client.oneTimePayments.createSession({
+				productId: createdProduct?.id,
+				customerUUID: createdCustomer?.uuid,
+			});
 
-				expect(response.uuid).toBeDefined();
-				expect(response.link).toBeDefined();
-				expect(response.link).toContain('http');
-			} catch (err) {
-				console.log(err);
-			}
+			expect(response.uuid).toMatch(/^pay@/);
+			expect(response.link).toContain('http');
+		});
+
+		it('should refuse to read a payment session through subscriptions.getSession', async () => {
+			expect(createdProduct).not.toBeNull();
+			if (!createdProduct) return;
+
+			const created = await client.oneTimePayments.createSession({
+				productId: createdProduct.id,
+			});
+			await expect(client.subscriptions.getSession(created.uuid)).rejects.toThrow(
+				ValidationException
+			);
+		});
+
+		it('should answer 404 for an unknown payment uuid and reference', async () => {
+			await expect(client.oneTimePayments.get(`pay@${randomUUID()}`)).rejects.toThrow(
+				NotFoundException
+			);
+			await expect(
+				client.oneTimePayments.getByReference(`missing-${randomUUID()}`)
+			).rejects.toThrow(NotFoundException);
 		});
 
 		it('should create payment session with inline product details', async () => {
@@ -503,8 +553,9 @@ describe('QBitFlow Integration Tests', () => {
 					session.uuid
 				);
 				expect(customer.uuid).toBeDefined();
-			} catch {
-				// Expected if the transaction has not been completed yet
+			} catch (error) {
+				// Expected while the transaction has not been completed yet.
+				expect(error).toBeInstanceOf(NotFoundException);
 			}
 		});
 	});
@@ -568,7 +619,27 @@ describe('QBitFlow Integration Tests', () => {
 
 			expect(session.uuid).toBe(created.uuid);
 			expect(session.price).toBeGreaterThan(0);
+			expect(session.frequency).toBeGreaterThan(0);
 			expect(session.availableCurrencies.length).toBeGreaterThan(0);
+		});
+
+		it('should answer 404 for an unknown subscription and [] for its history', async () => {
+			const unknown = `sub@${randomUUID()}`;
+			await expect(client.subscriptions.get(unknown)).rejects.toThrow(NotFoundException);
+			await expect(
+				client.subscriptions.getByReference(`missing-${randomUUID()}`)
+			).rejects.toThrow(NotFoundException);
+			await expect(client.subscriptions.getPaymentHistory(unknown)).resolves.toEqual([]);
+		});
+
+		it('should answer 404 for force-cancel and execute-billing on an unknown subscription', async () => {
+			const unknown = `sub@${randomUUID()}`;
+			await expect(client.subscriptions.forceCancel(unknown)).rejects.toThrow(
+				NotFoundException
+			);
+			await expect(client.subscriptions.executeTestBilling(unknown)).rejects.toThrow(
+				NotFoundException
+			);
 		});
 	});
 
@@ -590,7 +661,7 @@ describe('QBitFlow Integration Tests', () => {
 					session.uuid,
 					TransactionType.ONE_TIME_PAYMENT
 				);
-				expect(status.type).toBe(TransactionType.ONE_TIME_PAYMENT);
+				expect(status.status).toBeDefined();
 			} catch (error) {
 				expect(error).toBeInstanceOf(NotFoundException);
 			}
@@ -621,13 +692,14 @@ describe('QBitFlow Integration Tests', () => {
 
 	describe('Accounting', () => {
 		it('should export accounting data as JSON', async () => {
-			const events = await client.accounting.export('2024-11-01', '2024-12-31', 'json');
+			const events = await client.accounting.export('2026-08-01', '2026-08-31', 'json');
 			expect(Array.isArray(events)).toBe(true);
 		});
 
 		it('should export accounting data as CSV', async () => {
-			const csv = await client.accounting.export('2024-11-01', '2024-12-31', 'csv');
+			const csv = await client.accounting.export('2026-08-01', '2026-08-31', 'csv');
 			expect(typeof csv).toBe('string');
+			expect(csv).toContain('paymentId'); // the header row is always present
 		});
 	});
 
@@ -645,6 +717,45 @@ describe('QBitFlow Integration Tests', () => {
 			expect(result.message).toBeDefined();
 			expect(result.link).toBeDefined();
 			expect(result.link).toContain('http');
+		});
+
+		it('should get the claim request created for the user', async () => {
+			expect(createdUser).not.toBeNull();
+			if (!createdUser) return;
+
+			const result = await client.claims.getRequestByUser(createdUser.id);
+			expect(result.link).toContain('http');
+		});
+
+		it('should trigger test claim funds (test keys) or answer 400 (live keys)', async () => {
+			expect(createdUser).not.toBeNull();
+			if (!createdUser) return;
+
+			try {
+				const result = await client.claims.triggerTestClaimFunds(createdUser.id);
+				expect(typeof result.message).toBe('string');
+			} catch (error) {
+				expect(error).toBeInstanceOf(ValidationException);
+				expect((error as ValidationException).statusCode).toBe(400);
+			}
+		});
+	});
+
+	describe('Webhooks', () => {
+		it('should report a forged signature as not verified', async () => {
+			const verified = await client.webhooks.verify(
+				{ uuid: 'pay@forged', txType: 'payment' },
+				'sha256=' + '0'.repeat(64),
+				String(Math.floor(Date.now() / 1000))
+			);
+			expect(verified).toBe(false);
+		});
+	});
+
+	describe('On-Behalf-Of', () => {
+		it('should act at the organization level with onBehalfOf(0)', async () => {
+			const products = await client.onBehalfOf(0).products.getAll();
+			expect(Array.isArray(products)).toBe(true);
 		});
 	});
 

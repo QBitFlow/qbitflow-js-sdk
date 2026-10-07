@@ -9,8 +9,8 @@
  * @param name - Name of the product
  * @param description - Description of the product
  * @param price - Price of the product
- * @param reference - (Optional) Reference code for the product
- * @param createdAt - Date when the product was created
+ * @param reference - Reference code for the product (auto-generated when not given at creation)
+ * @param createdAt - RFC3339 timestamp when the product was created
  * @param isActive - Indicates if the product is active
  */
 export interface Product {
@@ -18,8 +18,9 @@ export interface Product {
 	name: string; // Name of the product
 	description: string; // Description of the product
 	price: number; // Price of the product
-	reference?: string; // Optional reference code for the product
-	createdAt: Date; // Date when the product was created
+	reference: string; // Reference code for the product (auto-generated when not given)
+	/** RFC3339 timestamp for when the product was created */
+	createdAt: string;
 	isActive: boolean; // Indicates if the product is active
 	/** Whether this is a test-mode product (test and live sets are isolated) */
 	test: boolean;
@@ -40,7 +41,9 @@ export interface Product {
 export interface CreateProductDto {
 	name: string;
 	description: string;
+	/** Price in USD, greater than 0 */
 	price: number;
+	/** Optional; auto-generated when omitted (an empty string counts as omitted) */
 	reference?: string;
 }
 

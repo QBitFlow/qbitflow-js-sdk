@@ -1,278 +1,166 @@
-import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
-import {
-	DEFAULT_BASE_URL,
-	DEFAULT_MAX_RETRIES,
-	DEFAULT_RETRY_DELAY,
-	DEFAULT_TIMEOUT,
-} from '../config';
-import {
-	ForbiddenException,
-	NetworkException,
-	NotFoundException,
-	RateLimitException,
-	ServerException,
-	UnauthorizedException,
-	ValidationException,
-} from '../exceptions';
-import { sleep } from '../utils';
+import { DEFAULT_BASE_URL } from '../config.js';
+import { decodeWith, Schema } from '../decode.js';
+import { ServerException, ValidationException } from '../exceptions/index.js';
+import { excerpt, SendOptions, Transport, TransportResponse } from './Transport.js';
+
+export type { HttpMethod } from './Transport.js';
+
+/** Per-request knobs for GET requests, used by the request classes. */
+export type RequestOptions = Pick<SendOptions, 'retriable'>;
+
+/** Strip a trailing slash so `baseUrl + '/customer/'` never yields `//customer/`. */
+export function normalizeBaseUrl(baseUrl: string | undefined): string {
+	const trimmed = (baseUrl ?? '').trim();
+	if (trimmed === '') {
+		return DEFAULT_BASE_URL;
+	}
+	return trimmed.replace(/\/+$/, '');
+}
 
 /**
- * Base Request class for making HTTP requests to the QBitFlow API
+ * Build the `On-Behalf-Of` header for a user id.
+ *
+ * `0` means "act at the organization level": no header at all (the API rejects
+ * `On-Behalf-Of: 0`).
+ *
+ * @throws {ValidationException} When `userId` is not a non-negative safe integer
+ */
+export function onBehalfOfHeaders(userId: unknown): Record<string, string> {
+	if (typeof userId !== 'number' || !Number.isSafeInteger(userId) || userId < 0) {
+		throw new ValidationException(
+			'userId must be a non-negative safe integer (0 = organization level)'
+		);
+	}
+	return userId > 0 ? { 'On-Behalf-Of': String(userId) } : {};
+}
+
+/**
+ * Base class of every service (`client.products`, `client.customers` …).
+ *
+ * A service holds the client's shared {@link Transport} plus its own extra headers (the
+ * `On-Behalf-Of` header of an `onBehalfOf()` copy). Every JSON response is decoded against a
+ * schema — see `decode.ts` for the policy — so the returned objects match their declared
+ * types at runtime, not just at compile time.
  */
 export class Request {
-	protected apiKey: string;
-	protected baseUrl: string;
-	protected timeout: number;
-	protected maxRetries: number;
-	protected axiosInstance: AxiosInstance;
+	/** The HTTP transport shared with every other service of the client. */
+	protected readonly transport: Transport;
+	/** Extra headers sent with every request of this service. */
+	protected readonly headers: Readonly<Record<string, string>>;
 
 	/**
-	 * Create a new Request instance
-	 * @param apiKey - API key for authentication
-	 * @param baseUrl - Base URL for the API
-	 * @param timeout - Request timeout in milliseconds
-	 * @param maxRetries - Maximum number of retry attempts
+	 * @param transport - The client's shared transport
+	 * @param headers - Extra headers sent with every request (used for `On-Behalf-Of`)
 	 */
-	constructor(
-		apiKey: string,
-		baseUrl: string = DEFAULT_BASE_URL,
-		timeout: number = DEFAULT_TIMEOUT,
-		maxRetries: number = DEFAULT_MAX_RETRIES,
-		headers?: Record<string, string>
-	) {
-		this.apiKey = apiKey;
-		this.baseUrl = baseUrl;
-		this.timeout = timeout;
-		this.maxRetries = maxRetries;
-
-		// Create axios instance with default configuration
-		this.axiosInstance = axios.create({
-			baseURL: this.baseUrl,
-			timeout: this.timeout,
-			headers: {
-				'X-API-Key': this.apiKey,
-				'Content-Type': 'application/json',
-				...headers,
-			},
-		});
+	constructor(transport: Transport, headers: Readonly<Record<string, string>> = {}) {
+		this.transport = transport;
+		this.headers = headers;
 	}
 
 	/**
-	 * Act on behalf of a specific user within the same organization, scoping the request
-	 * to that user's resources. Requires an organization-level admin/owner API key.
+	 * Act on behalf of a specific user within the same organization, scoping this service's
+	 * requests to that user's resources. Requires an organization-level admin/owner API key.
+	 * To scope every service at once, use `client.onBehalfOf(userId)`.
 	 *
-	 * Passing `0` means "act at the organization level" — the header is omitted entirely
-	 * rather than sent as `0`, which the API rejects.
+	 * Passing `0` means "act at the organization level" — the header is omitted entirely.
 	 *
-	 * @param userID - ID of the user to act for, or 0 to act at the organization level
-	 * @returns A new Request instance with the `On-Behalf-Of` header set
+	 * @param userId - ID of the user to act for, or 0 to act at the organization level
+	 * @returns A copy of this service that sends `On-Behalf-Of: <userId>`
+	 * @throws {ValidationException} When `userId` is negative, not an integer or not a safe
+	 *   integer
 	 *
 	 * @example
 	 * ```typescript
-	 * // Acting for user with ID 123 - return all products available to that user
+	 * // All products available to user 123
 	 * const userProducts = await client.products.onBehalfOf(123).getAll();
 	 * ```
 	 */
-	public onBehalfOf(userID: number): this {
-		const RequestConstructor = this.constructor as new (
-			apiKey: string,
-			baseUrl?: string,
-			timeout?: number,
-			maxRetries?: number,
-			headers?: Record<string, string>
+	public onBehalfOf(userId: number): this {
+		const headers = onBehalfOfHeaders(userId);
+		const ServiceConstructor = this.constructor as new (
+			transport: Transport,
+			headers?: Readonly<Record<string, string>>
 		) => this;
-		// 0 (or anything not a positive integer) means no impersonation: omit the header.
-		const headers: Record<string, string> =
-			Number.isInteger(userID) && userID > 0 ? { 'On-Behalf-Of': userID.toString() } : {};
-		return new RequestConstructor(
-			this.apiKey,
-			this.baseUrl,
-			this.timeout,
-			this.maxRetries,
-			headers
-		);
+		return new ServiceConstructor(this.transport, headers);
 	}
 
 	/**
-	 * Make an HTTP request with retry logic
-	 * @param endpoint - API endpoint (with or without leading slash)
-	 * @param method - HTTP method
-	 * @param data - Request body data (for POST, PUT)
-	 * @param params - URL query parameters (for GET)
-	 * @returns Response data
+	 * Decode a JSON response body against `schema`.
+	 *
+	 * An empty body (other than a 204) or a body that is not JSON is a response-shape failure
+	 * ({@link ServerException} with the HTTP status); so is a field of the wrong JSON type.
 	 */
-	protected async makeRequest<T = any>(
-		endpoint: string,
-		method: 'GET' | 'POST' | 'PUT' | 'DELETE',
-		data?: any,
-		params?: any,
-		extraConfig?: Partial<AxiosRequestConfig>
-	): Promise<T> {
-		// Ensure endpoint starts with /
-		if (!endpoint.startsWith('/')) {
-			endpoint = '/' + endpoint;
+	private decodeJson<T>(schema: Schema<T>, response: TransportResponse): T {
+		const { status, data } = response;
+		if (status === 204) {
+			return decodeWith(schema, undefined, { statusCode: status });
 		}
-
-		const config: AxiosRequestConfig = {
-			method,
-			url: endpoint,
-			data,
-			params,
-			...extraConfig,
-		};
-
-		let lastError: Error | null = null;
-
-		// Retry logic
-		for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
-			try {
-				const response: AxiosResponse<T> = await this.axiosInstance.request(config);
-				return response.data;
-			} catch (error) {
-				lastError = error as Error;
-
-				if (axios.isAxiosError(error)) {
-					const axiosError = error as AxiosError;
-
-					// Handle specific HTTP status codes
-					if (axiosError.response) {
-						const status = axiosError.response.status;
-						const errorMessage = this.extractErrorMessage(axiosError);
-
-						// Don't retry on client errors (4xx)
-						if (status >= 400 && status < 500) {
-							throw this.handleClientError(status, errorMessage);
-						}
-
-						// Retry on server errors (5xx)
-						if (status >= 500 && attempt < this.maxRetries) {
-							await sleep(DEFAULT_RETRY_DELAY * (attempt + 1));
-							continue;
-						}
-
-						throw new ServerException(errorMessage);
-					} else if (axiosError.request) {
-						// Network error - retry
-						if (attempt < this.maxRetries) {
-							await sleep(DEFAULT_RETRY_DELAY * (attempt + 1));
-							continue;
-						}
-						throw new NetworkException('Network request failed: No response received');
-					}
-				}
-
-				// Unknown error - don't retry
-				throw lastError;
-			}
+		if (data === undefined || data === '') {
+			throw new ServerException('Expected a JSON response but the body was empty', {
+				statusCode: status,
+			});
 		}
-
-		// If we exhausted all retries
-		throw new NetworkException(
-			`Request failed after ${this.maxRetries} retries: ${lastError?.message}`
-		);
-	}
-
-	/**
-	 * Extract error message from Axios error response
-	 * @param error - Axios error
-	 * @returns Error message string
-	 */
-	private extractErrorMessage(error: AxiosError): string {
-		const response = error.response;
-		if (!response?.data) {
-			return 'An error occurred';
-		}
-
-		const data = response.data as any;
-
 		if (typeof data === 'string') {
-			return data;
+			throw new ServerException(
+				`Expected a JSON response but the body could not be parsed: ${excerpt(data)}`,
+				{ statusCode: status }
+			);
 		}
-
-		// Check for error field
-		if (data.error) {
-			return data.error;
-		}
-
-		// Check for errors array
-		if (data.errors && Array.isArray(data.errors) && data.errors.length > 0) {
-			const firstError = data.errors[0];
-			if (firstError.message) {
-				return firstError.message;
-			}
-		}
-
-		// Check for message field
-		if (data.message) {
-			return data.message;
-		}
-
-		return 'An error occurred';
+		return decodeWith(schema, data, { statusCode: status });
 	}
 
-	/**
-	 * Handle client errors (4xx status codes)
-	 * @param status - HTTP status code
-	 * @param message - Error message
-	 * @returns Appropriate error instance
-	 */
-	private handleClientError(status: number, message: string): Error {
-		switch (status) {
-			case 400:
-				return new ValidationException(message);
-			case 401:
-				return new UnauthorizedException(message);
-			case 403:
-				return new ForbiddenException(message);
-			case 404:
-				return new NotFoundException(message);
-			case 429:
-				return new RateLimitException(message);
-			default:
-				return new ValidationException(message);
-		}
-	}
-
-	/**
-	 * Make a GET request
-	 * @param endpoint - API endpoint
-	 * @param params - Query parameters
-	 * @returns Response data
-	 */
-	protected async getReq<T = any>(
+	/** GET a JSON resource and decode it. */
+	protected async getJson<T>(
+		schema: Schema<T>,
 		endpoint: string,
-		params?: any,
-		extraConfig?: Partial<AxiosRequestConfig>
+		params?: Record<string, unknown>,
+		options: RequestOptions = {}
 	): Promise<T> {
-		return this.makeRequest<T>(endpoint, 'GET', undefined, params, extraConfig);
+		const response = await this.transport.send('GET', endpoint, {
+			...options,
+			params,
+			headers: this.headers,
+		});
+		return this.decodeJson(schema, response);
 	}
 
-	/**
-	 * Make a POST request
-	 * @param endpoint - API endpoint
-	 * @param data - Request body data
-	 * @returns Response data
-	 */
-	protected async postReq<T = any>(endpoint: string, data: any): Promise<T> {
-		return this.makeRequest<T>(endpoint, 'POST', data);
+	/** GET a text resource (the CSV export), returned verbatim. */
+	protected async getText(endpoint: string, params?: Record<string, unknown>): Promise<string> {
+		const response = await this.transport.send('GET', endpoint, {
+			params,
+			headers: this.headers,
+			responseType: 'text',
+		});
+		return typeof response.data === 'string' ? response.data : String(response.data ?? '');
 	}
 
-	/**
-	 * Make a PUT request
-	 * @param endpoint - API endpoint
-	 * @param data - Request body data
-	 * @returns Response data
-	 */
-	protected async putReq<T = any>(endpoint: string, data: any): Promise<T> {
-		return this.makeRequest<T>(endpoint, 'PUT', data);
+	/** POST a JSON body (never retried) and decode the response. */
+	protected async postJson<T>(
+		schema: Schema<T>,
+		endpoint: string,
+		body: unknown,
+		options: Pick<SendOptions, 'rawBody'> = {}
+	): Promise<T> {
+		const response = await this.transport.send('POST', endpoint, {
+			body,
+			rawBody: options.rawBody,
+			headers: this.headers,
+		});
+		return this.decodeJson(schema, response);
 	}
 
-	/**
-	 * Make a DELETE request
-	 * @param endpoint - API endpoint
-	 * @returns Response data
-	 */
-	protected async deleteReq<T = any>(endpoint: string): Promise<T> {
-		return this.makeRequest<T>(endpoint, 'DELETE');
+	/** PUT a JSON body (never retried) and decode the response. */
+	protected async putJson<T>(schema: Schema<T>, endpoint: string, body: unknown): Promise<T> {
+		const response = await this.transport.send('PUT', endpoint, {
+			body,
+			headers: this.headers,
+		});
+		return this.decodeJson(schema, response);
+	}
+
+	/** DELETE (never retried) and decode the response. */
+	protected async deleteJson<T>(schema: Schema<T>, endpoint: string): Promise<T> {
+		const response = await this.transport.send('DELETE', endpoint, { headers: this.headers });
+		return this.decodeJson(schema, response);
 	}
 }

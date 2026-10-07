@@ -1,6 +1,13 @@
+/**
+ * Account-claim types.
+ *
+ * An organization provisions users, holds the funds they earn, and later invites them to
+ * claim their account (set a password, connect a wallet). Once claimed, the amounts owed
+ * are transferred to the user's wallet.
+ */
 
 /**
- * Organization information (returned alongside a claim request)
+ * Organization record (shared model; not returned by the claim routes themselves)
  */
 export interface Organization {
 	/** Organization ID */
@@ -9,8 +16,18 @@ export interface Organization {
 	name: string;
 	/** Default platform fee percentage */
 	feePercentage: number;
-	/** Timestamp when the organization was created */
+	/** RFC3339 timestamp when the organization was created */
 	createdAt: string;
+}
+
+/**
+ * Response of `claims.createRequest()` / `claims.getRequestByUser()`.
+ */
+export interface ClaimRequestResponse {
+	/** Human-readable confirmation */
+	message: string;
+	/** The invite link the user follows to set a password and connect a wallet */
+	link: string;
 }
 
 /**
@@ -26,6 +43,6 @@ export interface ClaimFunds {
 	funded: boolean;
 	/** Whether this is a test entry */
 	test: boolean;
-	/** Timestamp when the claim funds entry was created */
+	/** RFC3339 timestamp when the claim funds entry was created */
 	createdAt: string;
 }

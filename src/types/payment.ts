@@ -1,18 +1,18 @@
-import { Currency } from './currency';
-import { PaymentMetadata } from './common';
+import { Currency } from './currency.js';
+import { PaymentMetadata } from './common.js';
 
 /**
- * One-time payment information
+ * A completed one-time payment.
  */
 export interface Payment {
-	/** Unique identifier for the payment */
+	/** Unique identifier for the payment, `pay@`-prefixed */
 	uuid: string;
 	/**
-	 * Your own reference for the payment, set when the session was created.
-	 * Use `oneTimePayments.getByReference()` to look the payment up by this value.
+	 * Your own reference for the payment, set when the session was created; `null` when none
+	 * was set. Use `oneTimePayments.getByReference()` to look the payment up by this value.
 	 */
-	reference?: string;
-	/** Timestamp when payment was created */
+	reference: string | null;
+	/** RFC3339 timestamp when the payment was created */
 	createdAt: string;
 	/** Sender address */
 	from: string;
@@ -24,37 +24,40 @@ export interface Payment {
 	description: string;
 	/** Amount paid in USD */
 	amount: number;
-	/** Amount in the smallest units of the payment currency (e.g. satoshis for BTC) */
+	/** Amount in the smallest units of the payment currency (e.g. satoshis for BTC), as a decimal string */
 	amountMinUnits: string;
-	/** Currency ID used for payment */
+	/** ID of the currency used for the payment */
 	currencyId: number;
-	/** Currency details */
+	/** The currency used for the payment */
 	currency: Currency;
 	/** Whether this is a test payment */
 	test: boolean;
-	/** Product ID (if applicable) */
-	productId?: number;
+	/** ID of the product paid for; `0` when the payment was not for a stored product */
+	productId: number;
 	/** Blockchain transaction hash */
 	transactionHash: string;
-	/** Customer UUID */
-	customerUUID: string;
-	/** ID of the organization that owns this payment (authenticated only) */
-	organizationId?: number;
-	/** ID of the user that owns this payment (authenticated only) */
-	userId?: number;
-	/** Structured metadata attached to the payment (authenticated only) */
-	metadata?: PaymentMetadata;
+	/** UUID of the paying customer; `null` when no customer is attached */
+	customerUUID: string | null;
+	/** ID of the organization that owns this payment */
+	organizationId: number;
+	/** ID of the user that owns this payment; `0` for an organization-level payment */
+	userId: number;
+	/** Structured metadata attached to the payment (fee breakdown, on-chain details, amounts) */
+	metadata: PaymentMetadata;
 }
 
 /**
  * Combined entry from one-time payments and subscription billing history
  */
 export interface CombinedPayment {
-	/** Where this entry originated */
-	source: 'payment' | 'subscription_history';
-	/** Unique identifier */
+	/**
+	 * Where this entry originated. A value this SDK does not know yet arrives as its raw
+	 * string.
+	 */
+	source: 'payment' | 'subscription_history' | (string & {});
+	/** Unique identifier (`pay@…` or `sub-hist@…`) */
 	uuid: string;
-	/** Timestamp when the payment was created */
+	/** RFC3339 timestamp when the payment was created */
 	createdAt: string;
 	/** Sender address */
 	from: string;
@@ -66,26 +69,22 @@ export interface CombinedPayment {
 	description: string;
 	/** Amount paid in USD */
 	amount: number;
-	/** Amount in the smallest units of the payment currency */
+	/** Amount in the smallest units of the payment currency, as a decimal string */
 	amountMinUnits: string;
 	/** Currency ID */
 	currencyId: number;
-	/** Currency details */
+	/** The currency used for the payment */
 	currency: Currency;
-	/** Product ID (if applicable, may be null) */
-	productId?: number | null;
+	/** Product ID; `null` when the entry is not for a stored product */
+	productId: number | null;
 	/** Blockchain transaction hash */
 	transactionHash: string;
-	/** Customer UUID */
+	/** Customer UUID (the zero UUID when no customer is attached) */
 	customerUUID: string;
-	/** Subscription UUID (only present for subscription_history entries) */
-	subscriptionUUID?: string;
+	/** Parent subscription UUID (`sub@…`); `null` for a one-time payment */
+	subscriptionUUID: string | null;
 	/** Whether this is a test payment */
 	test: boolean;
-	/** ID of the organization that owns this payment (authenticated only) */
-	organizationId?: number;
-	/** ID of the user that owns this payment (authenticated only) */
-	userId?: number;
-	/** Structured metadata attached to the payment (authenticated only) */
-	metadata?: PaymentMetadata;
+	/** Structured metadata attached to the payment; `null` when the API has none */
+	metadata: PaymentMetadata | null;
 }

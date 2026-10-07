@@ -1,8 +1,14 @@
-import { ValidationException } from '../exceptions';
-import { CursorData, CursorDataResponse, getCursorData, SuccessResponse } from '../types';
-import { CreateCustomerDto, Customer, UpdateCustomerDto } from '../types/customer';
-import { cursorQueryBuilder } from '../utils';
-import { Request } from './Request';
+import { cursorPage, CustomerSchema, SuccessResponseSchema } from '../schemas.js';
+import { CursorData, getCursorData, SuccessResponse } from '../types/index.js';
+import { CreateCustomerDto, Customer, UpdateCustomerDto } from '../types/customer.js';
+import {
+	cursorQueryBuilder,
+	prepareCreateCustomerBody,
+	prepareUpdateCustomerBody,
+	requireNonEmpty,
+	validateEmail,
+} from '../utils/index.js';
+import { Request } from './Request.js';
 
 /**
  * Handler for customer-related API requests
@@ -14,36 +20,43 @@ export class CustomerRequests extends Request {
 	 * Create a new customer
 	 * @param customerData The customer data
 	 * @returns The created customer
+	 * @throws {ValidationException} When `name`/`lastName` are not 2–100 alphanumspace
+	 *   characters or `email` is invalid
 	 */
 	async create(customerData: CreateCustomerDto): Promise<Customer> {
-		return this.postReq<Customer>(`${ CustomerRequests.BASE_ROUTE }/`, customerData);
+		const body = prepareCreateCustomerBody(customerData);
+		return this.postJson(CustomerSchema, `${CustomerRequests.BASE_ROUTE}/`, body);
 	}
 
 	/**
-	 * Get customer by ID
-	 * @param customerUUID The customer ID
+	 * Get customer by UUID
+	 * @param customerUUID The customer UUID
 	 * @returns The customer
+	 * @throws {ValidationException} When `customerUUID` is empty
 	 */
 	async get(customerUUID: string): Promise<Customer> {
-		if (!customerUUID) {
-			throw new ValidationException('Customer UUID is required');
-		}
-		return this.getReq<Customer>(`${ CustomerRequests.BASE_ROUTE }/uuid/${ customerUUID }`);
+		requireNonEmpty('customerUUID', customerUUID);
+		return this.getJson(
+			CustomerSchema,
+			`${CustomerRequests.BASE_ROUTE}/uuid/${encodeURIComponent(customerUUID)}`
+		);
 	}
 
 	/**
 	 * Get customer by the reference you assigned when creating it.
 	 * Lets you resolve a customer from your own identifier without storing QBitFlow's UUID.
+	 * The reference is escaped correctly, but the API currently cannot route a reference
+	 * containing `/` (it answers 404).
 	 *
 	 * @param reference The customer reference
 	 * @returns The customer
+	 * @throws {ValidationException} When `reference` is empty
 	 */
 	async getByReference(reference: string): Promise<Customer> {
-		if (!reference) {
-			throw new ValidationException('Customer reference is required');
-		}
-		return this.getReq<Customer>(
-			`${ CustomerRequests.BASE_ROUTE }/reference/${ encodeURIComponent(reference) }`
+		requireNonEmpty('reference', reference);
+		return this.getJson(
+			CustomerSchema,
+			`${CustomerRequests.BASE_ROUTE}/reference/${encodeURIComponent(reference)}`
 		);
 	}
 
@@ -51,50 +64,64 @@ export class CustomerRequests extends Request {
 	 * Get customer by email
 	 * @param email The customer email
 	 * @returns The customer
+	 * @throws {ValidationException} When `email` is not a valid e-mail address
 	 */
 	async getByEmail(email: string): Promise<Customer> {
-		if (!email?.includes('@')) {
-			throw new ValidationException('Valid email is required');
-		}
-		return this.getReq<Customer>(
-			`${ CustomerRequests.BASE_ROUTE }/email/${ encodeURIComponent(email) }`
+		validateEmail('email', email);
+		return this.getJson(
+			CustomerSchema,
+			`${CustomerRequests.BASE_ROUTE}/email/${encodeURIComponent(email)}`
 		);
 	}
 
 	/**
-	 * Get all customers
-	 * @returns List of customers
+	 * Get all customers (cursor-paginated)
+	 * @param options Page size and cursor
+	 * @returns One page of customers
+	 * @throws {ValidationException} When `limit` is not a positive integer
 	 */
 	async getAll(options?: {
 		limit?: number;
 		cursor?: string | null;
 	}): Promise<CursorData<Customer>> {
 		const params = cursorQueryBuilder(options?.limit, options?.cursor);
-
-		const partialCursor = await this.getReq<CursorDataResponse<Customer>>(
-			`${ CustomerRequests.BASE_ROUTE }/all`,
+		const page = await this.getJson(
+			cursorPage(CustomerSchema),
+			`${CustomerRequests.BASE_ROUTE}/all`,
 			params
 		);
-
-		return getCursorData(partialCursor);
+		return getCursorData(page);
 	}
 
 	/**
-	 * Update customer by ID
+	 * Update customer by UUID. Updates are partial: omitted fields keep their stored value, and
+	 * an empty string counts as "not provided".
+	 * @param customerUUID The customer UUID
 	 * @param customerData The data to update
 	 * @returns The updated customer
+	 * @throws {ValidationException} When `customerUUID` is empty or a provided field breaks
+	 *   the API's rules
 	 */
 	async update(customerUUID: string, customerData: UpdateCustomerDto): Promise<Customer> {
-		return this.putReq<Customer>(`${ CustomerRequests.BASE_ROUTE }/${ customerUUID }`, customerData);
+		requireNonEmpty('customerUUID', customerUUID);
+		const body = prepareUpdateCustomerBody(customerData);
+		return this.putJson(
+			CustomerSchema,
+			`${CustomerRequests.BASE_ROUTE}/${encodeURIComponent(customerUUID)}`,
+			body
+		);
 	}
 
 	/**
-	 * Delete customer by ID
-	 * @param customerUUID The customer ID
+	 * Delete (soft-delete) customer by UUID
+	 * @param customerUUID The customer UUID
+	 * @throws {ValidationException} When `customerUUID` is empty
 	 */
 	async delete(customerUUID: string): Promise<SuccessResponse> {
-		return this.deleteReq<SuccessResponse>(
-			`${ CustomerRequests.BASE_ROUTE }/uuid/${ customerUUID }`
+		requireNonEmpty('customerUUID', customerUUID);
+		return this.deleteJson(
+			SuccessResponseSchema,
+			`${CustomerRequests.BASE_ROUTE}/uuid/${encodeURIComponent(customerUUID)}`
 		);
 	}
 }

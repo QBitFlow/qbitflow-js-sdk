@@ -1,19 +1,35 @@
-import { DEFAULT_BASE_URL, DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT } from './config';
+import { DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT } from './config.js';
 import {
 	AccountingRequests,
+	ApiKeyRequests,
 	ClaimRequests,
 	CurrencyRequests,
+	CustomerRequests,
 	PaymentRequests,
+	ProductRequests,
 	RefundRequests,
 	SubscriptionRequests,
 	TransactionStatusRequests,
-} from './requests';
-import { ApiKeyRequests } from './requests/ApiKeyRequests';
-import { CustomerRequests } from './requests/CustomerRequests';
-import { ProductRequests } from './requests/ProductRequests';
-import { UserRequests } from './requests/UserRequests';
-import { WebhookRequests } from './requests/WebhookRequests';
-import { QBitFlowConfig } from './types';
+	UserRequests,
+	WebhookRequests,
+} from './requests/index.js';
+import { normalizeBaseUrl, onBehalfOfHeaders } from './requests/Request.js';
+import { Transport } from './requests/Transport.js';
+import { QBitFlowConfig } from './types/index.js';
+
+/** Module-private key used by {@link QBitFlow.onBehalfOf} to build a scoped copy. */
+const SCOPED = Symbol('qbitflow.scoped');
+
+/** What a scoped copy shares with its parent client. */
+interface ScopedInit {
+	readonly [SCOPED]: {
+		readonly transport: Transport;
+		readonly headers: Readonly<Record<string, string>>;
+	};
+}
+
+const isScopedInit = (value: unknown): value is ScopedInit =>
+	typeof value === 'object' && value !== null && SCOPED in value;
 
 /**
  * Main QBitFlow SDK client
@@ -22,27 +38,23 @@ import { QBitFlowConfig } from './types';
  * ```typescript
  * import { QBitFlow } from 'qbitflow';
  *
- * const client = new QBitFlow('<your-api-key>');
+ * const client = new QBitFlow(process.env.QBITFLOW_API_KEY!);
  *
  * // Create a one-time payment
  * const payment = await client.oneTimePayments.createSession({
  *   productId: 1,
- *   customerUUID: 'customer-uuid',
+ *   successUrl: 'https://shop.example.com/thanks',
  * });
  *
  * // Create a subscription
  * const sub = await client.subscriptions.createSession({
  *   productId: 1,
  *   frequency: { value: 1, unit: 'months' },
- *   customerUUID: 'customer-uuid'
  * });
  * ```
  */
 export class QBitFlow {
-	private readonly apiKey: string;
-	private readonly baseUrl: string;
-	private readonly timeout: number;
-	private readonly maxRetries: number;
+	private readonly transport: Transport;
 
 	/** Customer-related operations */
 	public readonly customers: CustomerRequests;
@@ -65,9 +77,6 @@ export class QBitFlow {
 	/** Subscription payment operations */
 	public readonly subscriptions: SubscriptionRequests;
 
-	// Pay-as-you-go subscriptions are temporarily disabled — will be re-enabled in a future release
-	// public readonly payAsYouGo: PayAsYouGoRequests;
-
 	/** Transaction status operations */
 	public readonly transactionStatus: TransactionStatusRequests;
 
@@ -86,6 +95,8 @@ export class QBitFlow {
 	/**
 	 * Create a new QBitFlow client instance
 	 * @param apiKeyOrConfig - API key string or configuration object
+	 * @throws {Error} When the API key is missing or blank, the base URL is not an absolute
+	 *   http(s) URL, or `timeout` / `maxRetries` are invalid
 	 *
 	 * @example
 	 * ```typescript
@@ -96,86 +107,93 @@ export class QBitFlow {
 	 * const client = new QBitFlow({
 	 *   apiKey: 'your-api-key',
 	 *   timeout: 30000,
-	 *   maxRetries: 3
+	 *   maxRetries: 0, // disable retries
 	 * });
 	 * ```
 	 */
 	constructor(apiKeyOrConfig: string | QBitFlowConfig) {
-		if (typeof apiKeyOrConfig === 'string') {
-			this.apiKey = apiKeyOrConfig;
-			this.baseUrl = DEFAULT_BASE_URL;
-			this.timeout = DEFAULT_TIMEOUT;
-			this.maxRetries = DEFAULT_MAX_RETRIES;
+		let headers: Readonly<Record<string, string>> = {};
+
+		if (isScopedInit(apiKeyOrConfig)) {
+			this.transport = apiKeyOrConfig[SCOPED].transport;
+			headers = apiKeyOrConfig[SCOPED].headers;
 		} else {
-			this.apiKey = apiKeyOrConfig.apiKey;
-			this.baseUrl = apiKeyOrConfig.baseUrl || DEFAULT_BASE_URL;
-			this.timeout = apiKeyOrConfig.timeout || DEFAULT_TIMEOUT;
-			this.maxRetries = apiKeyOrConfig.maxRetries || DEFAULT_MAX_RETRIES;
+			this.transport = new Transport(QBitFlow.resolveSettings(apiKeyOrConfig));
 		}
 
-		if (!this.apiKey) {
+		const transport = this.transport;
+		this.customers = new CustomerRequests(transport, headers);
+		this.products = new ProductRequests(transport, headers);
+		this.users = new UserRequests(transport, headers);
+		this.apiKeys = new ApiKeyRequests(transport, headers);
+		this.webhooks = new WebhookRequests(transport, headers);
+		this.oneTimePayments = new PaymentRequests(transport, headers);
+		this.subscriptions = new SubscriptionRequests(transport, headers);
+		this.transactionStatus = new TransactionStatusRequests(transport, headers);
+		this.refunds = new RefundRequests(transport, headers);
+		this.accounting = new AccountingRequests(transport, headers);
+		this.claims = new ClaimRequests(transport, headers);
+		this.currencies = new CurrencyRequests(transport, headers);
+	}
+
+	/** Validate the constructor argument and resolve the defaults. */
+	private static resolveSettings(apiKeyOrConfig: string | QBitFlowConfig) {
+		const config: QBitFlowConfig =
+			typeof apiKeyOrConfig === 'string' ? { apiKey: apiKeyOrConfig } : apiKeyOrConfig;
+
+		if (typeof config?.apiKey !== 'string' || config.apiKey.trim() === '') {
 			throw new Error('API key is required');
 		}
 
-		this.customers = new CustomerRequests(
-			this.apiKey,
-			this.baseUrl,
-			this.timeout,
-			this.maxRetries
-		);
+		const baseUrl = normalizeBaseUrl(config.baseUrl);
+		let parsed: URL | undefined;
+		try {
+			parsed = new URL(baseUrl);
+		} catch {
+			parsed = undefined;
+		}
+		if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) {
+			throw new Error('baseUrl must be an absolute http:// or https:// URL');
+		}
 
-		this.products = new ProductRequests(
-			this.apiKey,
-			this.baseUrl,
-			this.timeout,
-			this.maxRetries
-		);
+		// `??`, not `||`: an explicit 0 must be honoured (0 retries disables retrying).
+		const timeout = config.timeout ?? DEFAULT_TIMEOUT;
+		const maxRetries = config.maxRetries ?? DEFAULT_MAX_RETRIES;
 
-		this.users = new UserRequests(this.apiKey, this.baseUrl, this.timeout, this.maxRetries);
+		if (!Number.isInteger(maxRetries) || maxRetries < 0) {
+			throw new Error('maxRetries must be a non-negative integer');
+		}
+		if (!Number.isFinite(timeout) || timeout < 0) {
+			throw new Error('timeout must be a non-negative number of milliseconds');
+		}
 
-		this.apiKeys = new ApiKeyRequests(this.apiKey, this.baseUrl, this.timeout, this.maxRetries);
-		this.webhooks = new WebhookRequests(this.apiKey, this.baseUrl, this.timeout, this.maxRetries);
+		return { apiKey: config.apiKey, baseUrl, timeout, maxRetries };
+	}
 
-		this.oneTimePayments = new PaymentRequests(
-			this.apiKey,
-			this.baseUrl,
-			this.timeout,
-			this.maxRetries
-		);
-
-		this.subscriptions = new SubscriptionRequests(
-			this.apiKey,
-			this.baseUrl,
-			this.timeout,
-			this.maxRetries
-		);
-
-		// this.payAsYouGo = new PayAsYouGoRequests(this.apiKey, this.baseUrl, this.timeout, this.maxRetries);
-
-		this.transactionStatus = new TransactionStatusRequests(
-			this.apiKey,
-			this.baseUrl,
-			this.timeout,
-			this.maxRetries
-		);
-
-		this.refunds = new RefundRequests(this.apiKey, this.baseUrl, this.timeout, this.maxRetries);
-
-		this.accounting = new AccountingRequests(
-			this.apiKey,
-			this.baseUrl,
-			this.timeout,
-			this.maxRetries
-		);
-
-		this.claims = new ClaimRequests(this.apiKey, this.baseUrl, this.timeout, this.maxRetries);
-
-		this.currencies = new CurrencyRequests(
-			this.apiKey,
-			this.baseUrl,
-			this.timeout,
-			this.maxRetries
-		);
+	/**
+	 * Act on behalf of a specific user of your organization for every service at once.
+	 *
+	 * Returns a client whose every request carries `On-Behalf-Of: <userId>`, sharing this
+	 * client's transport and configuration. This client is left untouched, so org-level and
+	 * per-user calls can be mixed freely. Requires an organization-level admin/owner API key.
+	 * `0` means "act at the organization level" (no header). A service of the returned client
+	 * can still be re-scoped with its own `onBehalfOf()`.
+	 *
+	 * @param userId - ID of the user to act for, or 0 for the organization level
+	 * @returns A client scoped to that user
+	 * @throws {ValidationException} When `userId` is not a non-negative safe integer
+	 *
+	 * @example
+	 * ```typescript
+	 * const asUser = client.onBehalfOf(123);
+	 * const products = await asUser.products.getAll();
+	 * const payments = await asUser.oneTimePayments.getAll();
+	 * ```
+	 */
+	onBehalfOf(userId: number): QBitFlow {
+		const headers = onBehalfOfHeaders(userId);
+		const init: ScopedInit = { [SCOPED]: { transport: this.transport, headers } };
+		return new QBitFlow(init as unknown as QBitFlowConfig);
 	}
 
 	/**
@@ -183,14 +201,14 @@ export class QBitFlow {
 	 * @returns Current API key
 	 */
 	getApiKey(): string {
-		return this.apiKey;
+		return this.transport.apiKey;
 	}
 
 	/**
-	 * Get the current base URL
+	 * Get the current base URL (trailing slash removed)
 	 * @returns Current base URL
 	 */
 	getBaseUrl(): string {
-		return this.baseUrl;
+		return this.transport.baseUrl;
 	}
 }

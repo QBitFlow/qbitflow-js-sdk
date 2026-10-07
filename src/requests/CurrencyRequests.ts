@@ -1,12 +1,13 @@
-import { Currency } from '../types/currency';
-import { Request } from './Request';
+import { list } from '../decode.js';
+import { CurrencySchema } from '../schemas.js';
+import { Currency } from '../types/currency.js';
+import { Request } from './Request.js';
 
 /**
  * Handler for supported-currency lookups.
  *
  * These endpoints are public (no authentication required); use them to resolve the
- * currency IDs returned in `SessionCheckout.availableCurrencies` and on payment /
- * subscription records.
+ * currency IDs returned in `SessionCheckout.availableCurrencies`.
  */
 export class CurrencyRequests extends Request {
 	private static readonly BASE_ROUTE = '/utils';
@@ -23,9 +24,11 @@ export class CurrencyRequests extends Request {
 	 * ```
 	 */
 	async getAllAvailable(test = false): Promise<Currency[]> {
-		return this.getReq<Currency[]>(`${ CurrencyRequests.BASE_ROUTE }/all-available-currencies`, {
-			test,
-		});
+		return this.getJson(
+			list(CurrencySchema),
+			`${CurrencyRequests.BASE_ROUTE}/all-available-currencies`,
+			{ test }
+		);
 	}
 
 	/**
@@ -34,8 +37,10 @@ export class CurrencyRequests extends Request {
 	 * @returns List of main currencies
 	 */
 	async getAllMain(test = false): Promise<Currency[]> {
-		return this.getReq<Currency[]>(`${ CurrencyRequests.BASE_ROUTE }/all-main-currencies`, {
-			test,
-		});
+		return this.getJson(
+			list(CurrencySchema),
+			`${CurrencyRequests.BASE_ROUTE}/all-main-currencies`,
+			{ test }
+		);
 	}
 }

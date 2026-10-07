@@ -2,20 +2,17 @@
  * Export all request classes
  */
 
-export { AccountingRequests } from './AccountingRequests';
-export { ApiKeyRequests } from './ApiKeyRequests';
-export { ClaimRequests } from './ClaimRequests';
-export { CurrencyRequests } from './CurrencyRequests';
-export { CustomerRequests } from './CustomerRequests';
-// PayAsYouGoRequests temporarily disabled — will be re-enabled in a future release
-// export { PayAsYouGoRequests } from './PayAsYouGoRequests';
-export { PaymentRequests } from './PaymentRequests';
-export { ProductRequests } from './ProductRequests';
-export { RefundRequests } from './RefundRequests';
-export { Request } from './Request';
-export { SessionRequests } from './SessionRequests';
-export { StatusRequests } from './StatusRequests';
-export { SubscriptionRequests } from './SubscriptionRequests';
-export { TransactionStatusRequests } from './TransactionStatusRequests';
-export { UserRequests } from './UserRequests';
-export { WebhookRequests } from './WebhookRequests';
+export { AccountingRequests } from './AccountingRequests.js';
+export { ApiKeyRequests } from './ApiKeyRequests.js';
+export { ClaimRequests } from './ClaimRequests.js';
+export { CurrencyRequests } from './CurrencyRequests.js';
+export { CustomerRequests } from './CustomerRequests.js';
+export { PaymentRequests } from './PaymentRequests.js';
+export { ProductRequests } from './ProductRequests.js';
+export { RefundRequests } from './RefundRequests.js';
+export { Request } from './Request.js';
+export { SessionRequests } from './SessionRequests.js';
+export { SubscriptionRequests } from './SubscriptionRequests.js';
+export { TransactionStatusRequests } from './TransactionStatusRequests.js';
+export { UserRequests } from './UserRequests.js';
+export { WebhookRequests } from './WebhookRequests.js';
