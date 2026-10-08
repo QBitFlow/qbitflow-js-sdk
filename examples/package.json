@@ -8,12 +8,20 @@
 		"node": ">=20.0.0"
 	},
 	"scripts": {
+		"client-setup": "tsx client-setup.ts",
 		"checkout": "tsx checkout.ts",
+		"catalog": "tsx catalog.ts",
+		"payments": "tsx payments.ts",
 		"subscriptions": "tsx subscriptions.ts",
+		"refunds": "tsx refunds.ts",
 		"marketplace": "tsx marketplace.ts",
+		"webhooks": "tsx webhooks.ts",
 		"webhook-handler": "tsx webhook-handler.ts",
+		"webhook-verify": "tsx webhook-verify.ts",
 		"errors-and-retries": "tsx errors-and-retries.ts",
-		"typecheck": "tsc --noEmit --strict --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 --types node checkout.ts subscriptions.ts marketplace.ts webhook-handler.ts errors-and-retries.ts"
+		"accounting": "tsx accounting.ts",
+		"currencies": "tsx currencies.ts",
+		"typecheck": "tsc --noEmit --strict --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 --types node client-setup.ts checkout.ts catalog.ts payments.ts subscriptions.ts refunds.ts marketplace.ts webhooks.ts webhook-handler.ts webhook-verify.ts errors-and-retries.ts accounting.ts currencies.ts"
 	},
 	"dependencies": {
 		"qbitflow": "file:.."
