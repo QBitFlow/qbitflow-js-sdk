@@ -127,8 +127,34 @@ but never published; its changes are part of 3.0.0).
     is sent on failure).
 -   `User-Agent: qbitflow-js/3.0.0`, the `VERSION` constant, and `DEFAULT_BASE_URL`,
     `DEFAULT_TIMEOUT`, `DEFAULT_MAX_RETRIES`.
--   Examples: `checkout.ts`, `subscriptions.ts`, `marketplace.ts`, `webhook-handler.ts`,
-    `errors-and-retries.ts`; `MIGRATION-v3.md`.
+-   **Integration helpers**, the same in the four QBitFlow SDKs:
+    -   `webhooks.router(secret, { tolerance?, now?, onError? })` (also
+        `client.webhooks.router(secret)`): verifies, parses and dispatches deliveries to handlers
+        registered with `on(type, (data, event) => …)` (typed per event type, async allowed),
+        `onUnknown` and `onAny`; `await router.handle(rawBody, header)` returns
+        `{ status, event, error }` (200 handled or ignored, 400 bad signature or not a v2 event,
+        500 a handler threw: the remaining handlers are skipped; `onError` sees every 400 and
+        500). Adapters:
+        `router.fetchHandler()` (`Request` → `Response`: Next.js route handlers, Hono, Bun, Deno,
+        Cloudflare Workers) and `router.nodeHandler()` (`node:http`, Express with `express.raw`;
+        a `req.body` already parsed by `express.json()` is answered 500 with a message saying so).
+        They answer 405 to anything but POST and 413 above 1 MiB, with a small JSON body.
+    -   `webhooks.sign(rawBody, secret, timestamp?)`: the `QBitFlow-Signature` header QBitFlow
+        would send, to test webhook handlers.
+    -   `checkoutSessions.waitForCompletion(uuid, { timeout?, interval?, ...requestOptions })`:
+        polls the status until `completed` or `expired` (the last status seen at the timeout),
+        for scripts, tests and back-office jobs.
+    -   `hasAccess(subscription, at?)`: `currentPeriodEnd` set and `at < currentPeriodEnd`.
+    -   `formatAmount(minUnits, decimals)` / `parseAmount(amount, decimals)`: exact conversions
+        between min units and decimal strings (string arithmetic, never floats).
+    -   `accounting.exportJsonRange` / `exportCsvRange`: exports over any range, split into
+        windows of at most 95 days and concatenated (the CSV header once).
+    -   `QBitFlow.fromEnv(config?)`: a client from `QBITFLOW_API_KEY`, `QBITFLOW_BASE_URL` and
+        `QBITFLOW_ON_BEHALF_OF`, explicit options overriding them.
+    -   `Placeholders.UUID` / `Placeholders.TRANSACTION_TYPE`: the redirect placeholders.
+-   Examples: `checkout.ts`, `subscriptions.ts`, `marketplace.ts`, `webhook-handler.ts` (built on
+    the webhook router), `errors-and-retries.ts`; `MIGRATION-v3.md`; README "Integration
+    recipes" (Next.js, Express, Hono and Workers, plain Node).
 
 ### Changed
 

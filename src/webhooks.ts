@@ -163,6 +163,28 @@ export function verify(
 	if (!matched) throw signatureError('noMatchingSignature', 'no webhook signature matches');
 }
 
+/**
+ * The `QBitFlow-Signature` header QBitFlow would send for `rawBody`: `t=<timestamp>,v1=<hex>`,
+ * `hex(HMAC-SHA256(secret, t + "." + rawBody))`. For tests of your webhook handler:
+ * `verify(body, sign(body, secret), secret)` passes. `timestamp` is in Unix seconds (default
+ * now). An empty secret, or a timestamp that is not a non-negative integer, is a
+ * `ValidationError`.
+ */
+export function sign(rawBody: RawBody, secret: string, timestamp?: number): string {
+	if (typeof secret !== 'string' || secret === '') {
+		throw fieldError('secret', "is required (the endpoint's whsec_… secret)");
+	}
+	const t = timestamp ?? Math.floor(Date.now() / 1000);
+	if (typeof t !== 'number' || !Number.isSafeInteger(t) || t < 0) {
+		throw fieldError('timestamp', 'must be a non-negative integer (Unix seconds)');
+	}
+	const signature = createHmac('sha256', Buffer.from(secret, 'utf8'))
+		.update(`${t}.`)
+		.update(bodyBytes(rawBody))
+		.digest('hex');
+	return `t=${t},v1=${signature}`;
+}
+
 /** The decode context of a webhook body: a wrong type is the caller's input, a `ValidationError`. */
 function eventContext(field: 'body' | 'data', eventType: string): DecodeContext {
 	return {

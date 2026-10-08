@@ -118,6 +118,17 @@ live('live: read-only', () => {
 		expect(await c.accounting.exportCsv(isoDate(from), isoDate(to))).not.toBe('');
 	});
 
+	it('accounting over more than 95 days (exportJsonRange / exportCsvRange)', async () => {
+		const to = new Date();
+		const from = new Date(to.getTime() - 200 * 86_400_000); // 3 windows
+		expect(Array.isArray(await c.accounting.exportJsonRange(isoDate(from), isoDate(to)))).toBe(
+			true
+		);
+		const csv = await c.accounting.exportCsvRange(isoDate(from), isoDate(to));
+		const header = csv.split(/\r?\n/)[0];
+		expect(csv.split(/\r?\n/).filter((line) => line === header)).toHaveLength(1);
+	});
+
 	it('webhooks', async () => {
 		await c.webhooks.endpoints.list();
 		const page = await c.webhooks.events.list({ limit: 5 });
@@ -207,7 +218,17 @@ liveWrites('live: writes', () => {
 			expect(session.link).toBeTruthy();
 			expect(session.expiresAt).toBeTruthy();
 			expect((await c.checkoutSessions.getStatus(session.uuid)).status).toBe('created');
+			// Nobody pays: the wait times out on the last status seen (not final).
+			const waited = await c.checkoutSessions.waitForCompletion(session.uuid, {
+				timeout: 2_500,
+				interval: 1_000,
+			});
+			expect(waited.status).toBe('created');
 			expect((await c.checkoutSessions.expire(session.uuid)).status).toBe('expired');
+			// Final now: returned at once.
+			expect((await c.checkoutSessions.waitForCompletion(session.uuid)).status).toBe(
+				'expired'
+			);
 		} finally {
 			await c.checkoutSessions.expire(session.uuid).catch((err: unknown) => {
 				if (!(err instanceof ConflictError) && !(err instanceof NotFoundError)) throw err; // already final

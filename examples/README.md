@@ -8,7 +8,7 @@ imports from `'qbitflow'` and reads its configuration from the environment: neve
 | [`checkout.ts`](checkout.ts) | a payment checkout with an inline product, its status (`getStatus`), its expiry |
 | [`subscriptions.ts`](subscriptions.ts) | a subscription checkout with a trial, filtered lists, the access rule, bills with `for await`, cancel at period end |
 | [`marketplace.ts`](marketplace.ts) | invite a seller, then act `onBehalfOf` them: a product, a checkout, held funds, trust |
-| [`webhook-handler.ts`](webhook-handler.ts) | a `node:http` receiver: raw body, `webhooks.constructEvent`, deduplication on `event.id`, typed events, 2xx to every type |
+| [`webhook-handler.ts`](webhook-handler.ts) | a `node:http` receiver built on `webhooks.router`: typed handlers per event type, `onUnknown`, `onError`, deduplication on `event.id`, `hasAccess`, `formatAmount` |
 | [`errors-and-retries.ts`](errors-and-retries.ts) | the error classes with `instanceof`, `isRetryable`, an `AbortSignal`, idempotency keys across processes |
 
 ## Running them
@@ -39,17 +39,13 @@ accepts `http`).
 
 ## With Express
 
-`webhook-handler.ts` uses `node:http` to stay dependency-free. With Express, keep the body raw on
-the webhook route (a JSON body parser would re-serialize it and break the signature):
+`webhook-handler.ts` uses `node:http` to stay dependency-free. With Express, give the webhook route
+the raw body, and register it before any `app.use(express.json())` (a parsed body can no longer be
+verified: the router answers 500 and says so):
 
 ```ts
-app.post('/webhooks/qbitflow', express.raw({ type: 'application/json' }), (req, res) => {
-	try {
-		const event = webhooks.constructEvent(req.body, req.headers['qbitflow-signature'], secret);
-		// … deduplicate on event.id, handle it …
-		res.sendStatus(200);
-	} catch {
-		res.sendStatus(400);
-	}
-});
+app.post('/webhooks/qbitflow', express.raw({ type: 'application/json' }), router.nodeHandler());
 ```
+
+With Next.js (App Router), Hono, Bun, Deno or Cloudflare Workers, use `router.fetchHandler()`, a
+`(request: Request) => Promise<Response>`: `export const POST = router.fetchHandler();`.

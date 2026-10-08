@@ -65,6 +65,31 @@ export class WalletsService {
 	}
 }
 
+/** The longest window one export request may cover: `to - from` at most 95 days. */
+const EXPORT_WINDOW_DAYS = 95;
+const DAY_MS = 86_400_000;
+
+/** `[from, to]` split into consecutive windows of at most 95 days (calendar dates, UTC). */
+export function exportWindows(from: string, to: string): Array<[string, string]> {
+	accountingQuery(from, to, 'json'); // the same checks as one export
+	const day = (s: string): number => Date.parse(`${s}T00:00:00Z`);
+	const text = (t: number): string => new Date(t).toISOString().slice(0, 10);
+	const end = day(to);
+	const windows: Array<[string, string]> = [];
+	for (let start = day(from); start <= end; ) {
+		const stop = Math.min(start + EXPORT_WINDOW_DAYS * DAY_MS, end);
+		windows.push([text(start), text(stop)]);
+		start = stop + DAY_MS;
+	}
+	return windows;
+}
+
+/** CSV `text` without its first line (the header), line ending included. */
+function withoutHeader(text: string): string {
+	const nl = text.indexOf('\n');
+	return nl < 0 ? '' : text.slice(nl + 1);
+}
+
 /** Exports the accounting events (`/accounting/export`). Reach it as `client.accounting`. */
 export class AccountingService {
 	/** @internal */
@@ -92,6 +117,47 @@ export class AccountingService {
 	async exportCsv(from: string, to: string, options?: RequestOptions): Promise<string> {
 		const query = accountingQuery(from, to, 'csv');
 		return this.core.callText({ method: 'GET', path: '/accounting/export', query }, options);
+	}
+
+	/**
+	 * The accounting events between two dates (`YYYY-MM-DD`, both included) over any range:
+	 * checked like {@link exportJson}, then split into consecutive windows of at most 95 days
+	 * (`[from, from + 95 d]`, the next one starting the day after), requested in order and
+	 * concatenated. A range of 95 days or less is one request.
+	 */
+	async exportJsonRange(
+		from: string,
+		to: string,
+		options?: RequestOptions
+	): Promise<AccountingEvent[]> {
+		const rows: AccountingEvent[] = [];
+		for (const [f, t] of exportWindows(from, to)) {
+			rows.push(...(await this.exportJson(f, t, options)));
+		}
+		return rows;
+	}
+
+	/**
+	 * {@link exportJsonRange} as CSV text: the first window's header line once, then every
+	 * window's data rows, line endings as the server sent them.
+	 */
+	async exportCsvRange(from: string, to: string, options?: RequestOptions): Promise<string> {
+		let csv = '';
+		for (const [f, t] of exportWindows(from, to)) {
+			const text = await this.exportCsv(f, t, options);
+			if (csv === '') {
+				csv = text;
+				continue;
+			}
+			const rows = withoutHeader(text);
+			if (rows === '') continue;
+			if (!csv.endsWith('\n')) {
+				const nl = csv.indexOf('\n'); // the header's line ending
+				csv += nl > 0 && csv[nl - 1] === '\r' ? '\r\n' : '\n';
+			}
+			csv += rows;
+		}
+		return csv;
 	}
 }
 

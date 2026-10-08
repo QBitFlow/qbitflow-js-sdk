@@ -53,12 +53,21 @@ export type * from './models/accounting.js';
 export type * from './models/events.js';
 export type * from './models/webhooks.js';
 
-export * as webhooks from './webhooks.js';
+export * as webhooks from './webhooksNamespace.js';
 export type { RawBody, SignatureHeader, VerifyOptions } from './webhooks.js';
+export type {
+	WebhookEventHandler,
+	WebhookHandler,
+	WebhookResult,
+	WebhookRouter,
+	WebhookRouterOptions,
+} from './webhookRouter.js';
+
+export { formatAmount, hasAccess, parseAmount, Placeholders } from './helpers.js';
 
 export type { ProductsService } from './services/products.js';
 export type { CustomersService } from './services/customers.js';
-export type { CheckoutSessionsService } from './services/checkout.js';
+export type { CheckoutSessionsService, WaitOptions } from './services/checkout.js';
 export type { FailuresService, PaymentsService } from './services/payments.js';
 export type { SubscriptionsService } from './services/subscriptions.js';
 export type { RefundsService } from './services/refunds.js';

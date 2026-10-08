@@ -18,7 +18,10 @@ wallets, on Ethereum, Base and Solana, straight to yours.
   sends an `Idempotency-Key`, so a retry never charges or creates twice.
 - **Async iterators**: `for await (const p of client.payments.iterate())` walks every page lazily.
 - **Webhooks** verified locally (`QBitFlow-Signature`, secret rotation included) and parsed into a
-  typed event union.
+  typed event union; a **webhook router** turns a delivery into the right HTTP answer, for Next.js,
+  Express, Hono, Workers or plain Node.
+- **Integration helpers**: `waitForCompletion`, `hasAccess`, exact `formatAmount` / `parseAmount`,
+  accounting exports over any range, `QBitFlow.fromEnv()`.
 
 > Coming from 2.x? Read [MIGRATION-v3.md](MIGRATION-v3.md): 3.0.0 targets API v2 and changes the
 > services, the ids, the errors and the webhooks.
@@ -27,6 +30,7 @@ wallets, on Ethereum, Base and Solana, straight to yours.
 
 - [Installation](#installation)
 - [Quick start](#quick-start)
+- [Integration recipes](#integration-recipes)
 - [Authentication and acting for a member](#authentication-and-acting-for-a-member)
 - [Checkout sessions](#checkout-sessions)
 - [Products and customers](#products-and-customers)
@@ -115,6 +119,189 @@ Then fulfil the order when the [`payment.completed` webhook](#webhooks) arrives 
 - **Path segments** you pass (references, emails, ids) are percent-encoded. A value that is
   exactly `.` or `..` is refused with a `ValidationError`: `fetch` would normalise it away.
 
+## Integration recipes
+
+A typical integration is three steps: open a checkout, receive the webhook, grant access. The
+helpers below make each one a few lines; the sections after them document every method.
+
+### A webhook endpoint in your framework
+
+`webhooks.router(secret)` verifies each delivery's signature over the raw body, parses it, runs the
+handlers registered for its type and answers QBitFlow: 200 when handled (or ignored), 400 for a
+bad signature, 500 when a handler throws (QBitFlow retries it later). See
+[Webhooks](#2-handle-the-deliveries-with-the-router) for the details.
+
+**Next.js** (App Router, `app/api/webhooks/qbitflow/route.ts`, the default Node.js runtime): a
+route handler receives the raw body, nothing to configure.
+
+```ts
+import { webhooks } from 'qbitflow';
+
+const router = webhooks
+	.router(process.env.QBITFLOW_WEBHOOK_SECRET!)
+	.on('payment.completed', async (payment, event) => {
+		await fulfilOrder(payment.reference, event.id); // idempotent: deduplicate on event.id
+	});
+
+export const POST = router.fetchHandler();
+```
+
+**Express**: give the route the raw body with `express.raw()`, and register it **before** any
+`app.use(express.json())`. A body already parsed cannot be verified: the router answers 500 and
+says so.
+
+```ts
+import express from 'express';
+import { webhooks } from 'qbitflow';
+
+const router = webhooks
+	.router(process.env.QBITFLOW_WEBHOOK_SECRET!)
+	.on('payment.completed', (payment, event) => fulfilOrder(payment.reference, event.id));
+
+const app = express();
+app.post('/webhooks/qbitflow', express.raw({ type: 'application/json' }), router.nodeHandler());
+app.use(express.json()); // the rest of your API, after the webhook route
+app.listen(3000);
+```
+
+**Hono, Bun, Deno, Cloudflare Workers**: anything that hands over a Web `Request` takes
+`fetchHandler()`. On Workers, enable the `nodejs_compat` compatibility flag (the SDK uses
+`node:crypto`) and build the router from `env`:
+
+```ts
+import { Hono } from 'hono';
+import { webhooks } from 'qbitflow';
+
+const handleWebhook = webhooks
+	.router(process.env.QBITFLOW_WEBHOOK_SECRET!)
+	.on('payment.completed', (payment, event) => fulfilOrder(payment.reference, event.id))
+	.fetchHandler();
+
+const app = new Hono();
+app.post('/webhooks/qbitflow', (c) => handleWebhook(c.req.raw));
+export default app;
+```
+
+```ts
+import { webhooks } from 'qbitflow';
+
+interface Env {
+	QBITFLOW_WEBHOOK_SECRET: string;
+}
+
+// A Cloudflare Worker: the secret comes from env, so the router is built per request (cheap).
+export default {
+	fetch(request: Request, env: Env): Promise<Response> {
+		return webhooks
+			.router(env.QBITFLOW_WEBHOOK_SECRET)
+			.on('payment.completed', (payment, event) => fulfilOrder(payment.reference, event.id))
+			.fetchHandler()(request);
+	},
+};
+```
+
+**Plain Node.js** (`node:http`): `nodeHandler()` reads the raw body itself (at most 1 MiB).
+
+```ts
+import { createServer } from 'node:http';
+import { webhooks } from 'qbitflow';
+
+const handleWebhook = webhooks
+	.router(process.env.QBITFLOW_WEBHOOK_SECRET!)
+	.on('payment.completed', (payment, event) => fulfilOrder(payment.reference, event.id))
+	.nodeHandler();
+
+createServer((req, res) => {
+	if (req.url === '/webhooks/qbitflow') void handleWebhook(req, res);
+	else res.writeHead(404).end();
+}).listen(8080);
+```
+
+### Checkout, success page, and waiting in scripts
+
+```ts
+const client = QBitFlow.fromEnv();
+const session = await client.checkoutSessions.createPayment({
+	productName: 'Premium access',
+	price: 4.99,
+	reference: 'order-1042',
+	// QBitFlow fills the placeholders in on the redirect (never URL-encoded by the SDK).
+	successUrl: `https://shop.example.com/thanks?session=${Placeholders.UUID}`,
+	cancelUrl: 'https://shop.example.com/cart',
+});
+console.log('Send the customer to', session.link);
+
+// The success page may show the status, but never fulfils: the payment.completed webhook does
+// (anyone can open the success URL).
+const shown = await client.checkoutSessions.getStatus(session.uuid);
+console.log(shown.status);
+```
+
+In a script, a test or a back-office job, `waitForCompletion` polls the status until the session
+is `completed` or `expired` (every 3 s, for 10 minutes by default). When the timeout comes first it
+returns the last status seen: check it.
+
+```ts
+const final = await client.checkoutSessions.waitForCompletion(session.uuid, {
+	timeout: 5 * 60_000, // ms
+	interval: 5_000, // ms, at least 1000
+});
+if (final.status === 'completed') console.log('paid, tx', final.txHash);
+else console.log('not paid:', final.status); // expired, or still open at the timeout
+```
+
+### Access control
+
+Grant access while `now < currentPeriodEnd`, whatever the subscription's status: `hasAccess`
+does exactly that.
+
+```ts
+const subscription = await client.subscriptions.getByReference('user-42');
+if (hasAccess(subscription)) {
+	console.log('serve the premium content');
+}
+// The subscription.* webhooks carry the subscription: hasAccess(event.data) works there too.
+console.log(hasAccess(subscription, new Date('2027-01-01'))); // at a given time
+```
+
+### Money display
+
+Exact amounts in a token's smallest unit are decimal strings: convert them with `formatAmount` and
+`parseAmount` (string arithmetic, never floats).
+
+```ts
+const payment = await client.payments.get('pay@0192f1c2-2222-7c4d-9e5f-6a7b8c9d0e1f');
+if (payment.currency) {
+	const amount = formatAmount(payment.amountMinUnits, payment.currency.decimals);
+	console.log(`${amount} ${payment.currency.symbol}`); // e.g. 1.5 USDC
+}
+console.log(formatAmount('1500000', 6), parseAmount('1.5', 6)); // 1.5 1500000
+```
+
+### A yearly accounting export
+
+The API exports at most 95 days at a time; the range helpers split any range into windows,
+request them in order and concatenate the result (the CSV header once).
+
+```ts
+import { writeFile } from 'node:fs/promises';
+
+const csv = await client.accounting.exportCsvRange('2026-01-01', '2026-12-31'); // 4 requests
+await writeFile('qbitflow-2026.csv', csv, { mode: 0o600 });
+const rows = await client.accounting.exportJsonRange('2026-01-01', '2026-12-31');
+console.log(rows.length, 'rows');
+```
+
+### Configuration from the environment
+
+```ts
+// QBITFLOW_API_KEY (required), QBITFLOW_BASE_URL and QBITFLOW_ON_BEHALF_OF when set.
+const client = QBitFlow.fromEnv();
+// Explicit options override the environment and add the others.
+const patient = QBitFlow.fromEnv({ timeout: 60_000, maxRetries: 5 });
+console.log(client !== patient);
+```
+
 ## Authentication and acting for a member
 
 Every request sends your API key in `X-API-Key`. Keys are created in the QBitFlow dashboard; each
@@ -198,7 +385,8 @@ console.log('subscribe at', session.link);
 ```
 
 - **Redirect placeholders.** In `successUrl` and `cancelUrl`, QBitFlow replaces `{{UUID}}` with the
-  session's id and `{{TRANSACTION_TYPE}}` with `payment` or `createSubscription`. In live mode both
+  session's id and `{{TRANSACTION_TYPE}}` with `payment` or `createSubscription`
+  (`Placeholders.UUID`, `Placeholders.TRANSACTION_TYPE`; the SDK sends them as they are). In live mode both
   URLs must be `https`. A redirect proves nothing (anyone can open the URL): fulfil on the
   webhook, or on `getStatus`.
 - **Errors to expect:** a `ConflictError` `merchant_not_ready` (`details.reason`) when the space's
@@ -236,6 +424,13 @@ switch (status.status) {
 
 **Never cancel an order on `lastAttempt`:** a failed attempt is not final, and the customer can pay
 from the same checkout until it expires. Release what the order holds on `checkout.expired`.
+
+`checkoutSessions.waitForCompletion(uuid, { timeout?, interval?, signal? })` polls `getStatus`
+until `completed` or `expired` and returns that status; when `timeout` (ms, default 10 minutes; 0
+or less: the default) elapses first, it returns the last status seen, after one final poll at the
+deadline. `interval` is in ms (default 3000, at least 1000); the request options (`onBehalfOf`,
+`requestId`) apply to each poll; `getStatus`'s errors propagate (a 404 included). It is meant for scripts, tests and back-office
+jobs: [fulfil orders on the webhook](#integration-recipes).
 
 ### Expire
 
@@ -355,9 +550,10 @@ the free trial. It keeps the checkout's `sub@…` id for life.
 `paused` subscription has paid for its period; a `pastDue` one's period has ended.
 
 ```ts
-function hasAccess(sub: Subscription, now: Date = new Date()): boolean {
-	return sub.currentPeriodEnd !== undefined && now.getTime() < Date.parse(sub.currentPeriodEnd);
-}
+import { hasAccess } from 'qbitflow';
+
+console.log(hasAccess(sub)); // currentPeriodEnd set and now < currentPeriodEnd
+console.log(hasAccess(sub, new Date('2027-01-01'))); // at a given time
 ```
 
 `actionRequired` says what the customer must do (`topUpAllowance`, `raiseMaximum`,
@@ -577,7 +773,16 @@ await writeFile('qbitflow-2026-09.csv', csv, { mode: 0o600 });
 ```
 
 The SDK checks the dates and `from <= to` before sending. **The API allows at most 95 days per
-export** and answers 400 beyond: split longer ranges. Rows are typed `payment`,
+export** and answers 400 beyond: `exportJsonRange(from, to)` and `exportCsvRange(from, to)` take
+any range, split it into consecutive windows of at most 95 days (calendar dates, UTC), request them
+in order and concatenate the result (one list; for CSV the header line once, then every window's
+rows, line endings as sent):
+
+```ts
+const year = await client.accounting.exportJsonRange('2026-01-01', '2026-12-31'); // 4 requests
+console.log(year.length);
+```
+ Rows are typed `payment`,
 `subscriptionHistory`, `refund`, `organizationFee` or `referralFee`; amounts in a token's smallest
 unit are decimal strings, and the empty fields of a row are left out.
 
@@ -609,95 +814,98 @@ organization endpoint also receives its members' events unless created with
 `{ enabled: true }` enables it again) and `delete` manage them. An endpoint's secret is shown and
 rotated in the dashboard only.
 
-### 2. Verify and handle the deliveries
+### 2. Handle the deliveries with the router
 
-Verify the `QBitFlow-Signature` header over the **raw body** (the bytes as received: never
-`JSON.parse` and re-serialize them), then switch on the event's type. `webhooks` is usable
-without a client: a receiver needs only the endpoint's secret.
+A router is built with the endpoint's secret (`webhooks` is usable without a client: a receiver
+needs only the secret; `client.webhooks.router(secret)` is the same). Register a handler per event
+type with `on(type, (data, event) => …)`: `data` is typed to the type's model. `onUnknown(event =>
+…)` runs for the types newer than this SDK, `onAny(event => …)` for every event, after the type's
+handlers. Handlers may be async: they are awaited one after the other. Each method returns the
+router.
 
 ```ts
-import { createServer } from 'node:http';
-import { webhooks, type Event } from 'qbitflow';
+import { hasAccess, webhooks } from 'qbitflow';
 
-const secret = process.env.QBITFLOW_WEBHOOK_SECRET ?? '';
 const processed = new Set<string>(); // stands for your database: deliveries are at least once
 
-function handle(event: Event): void {
-	switch (event.type) {
-		case 'payment.completed': // event.data is a PaymentCompleted
-			console.log(`fulfil order "${event.data.reference ?? ''}" (${event.data.uuid}): ${event.data.amount} USD`);
-			break;
-		case 'checkout.expired':
-			if (!webhooks.isSubscriptionSession(event.data)) console.log('release order', event.data.reference);
-			break;
-		case 'subscription.statusChanged': {
-			const end = event.data.currentPeriodEnd;
-			const access = end !== undefined && Date.now() < Date.parse(end);
-			console.log(`${event.data.uuid}: ${event.data.previousStatus} -> ${event.data.status}, access: ${access}`);
-			break;
-		}
-		default:
-		// A type you don't handle, or one added after this SDK: acknowledge it.
-	}
-}
-
-createServer(async (req, res) => {
-	if (req.method !== 'POST' || req.url !== '/webhooks/qbitflow') {
-		res.writeHead(404).end();
-		return;
-	}
-	const chunks: Buffer[] = [];
-	for await (const chunk of req) chunks.push(chunk as Buffer);
-	const rawBody = Buffer.concat(chunks);
-
-	let event: Event;
-	try {
-		// Checks the signature and the timestamp, then parses the body.
-		event = webhooks.constructEvent(rawBody, req.headers['qbitflow-signature'], secret);
-	} catch {
-		// A WebhookSignatureError (err.reason says why), or a ValidationError: not a v2 event.
-		res.writeHead(400).end();
-		return;
-	}
-	if (!processed.has(event.id)) {
-		processed.add(event.id); // a retry of an event already handled is acknowledged only
-		handle(event);
-	}
-	res.writeHead(200).end(); // to every type, the ignored ones too
-}).listen(8080);
+const router = webhooks
+	.router(process.env.QBITFLOW_WEBHOOK_SECRET!, {
+		// Every 400 (event null) and 500: the adapters answer without the details.
+		onError: (event, err) => console.error(`webhook ${event?.id ?? '(unparsed)'}:`, err.message),
+	})
+	.on('payment.completed', async (payment, event) => {
+		if (processed.has(event.id)) return; // a retry of an event already handled
+		console.log(`fulfil order "${payment.reference ?? ''}": ${payment.amount} USD`);
+		processed.add(event.id);
+	})
+	.on('checkout.expired', (session) => {
+		if (!webhooks.isSubscriptionSession(session)) console.log('release order', session.reference);
+	})
+	.on('subscription.statusChanged', (sub) => {
+		console.log(`${sub.uuid}: ${sub.previousStatus} -> ${sub.status}, access: ${hasAccess(sub)}`);
+	})
+	.onUnknown((event) => console.log('a type newer than this SDK:', String(event.type)))
+	.onAny((event) => console.log('received', event.id, event.type));
 ```
 
-With **Express**, mount `express.raw()` on the webhook route only, so `req.body` is the raw
-`Buffer` (a JSON body parser would re-serialize it and break the signature):
+Serve it with the adapter of your framework ([recipes](#a-webhook-endpoint-in-your-framework)), or
+call `handle` yourself:
+
+| | For |
+|---|---|
+| `router.fetchHandler()` | `(request: Request) => Promise<Response>`: Next.js route handlers, Hono (`c.req.raw`), Bun, Deno, Cloudflare Workers |
+| `router.nodeHandler()` | `(req, res) => Promise<void>`: `node:http`, Express (with `express.raw({ type: 'application/json' })`, or no body parser, on the route). It reads the raw body, or uses `req.body` when it is a `Buffer` or a string |
+| `await router.handle(rawBody, signatureHeader)` | anything else: returns `{ status, event, error }`; answer `status` |
+
+| The delivery | `status` | Adapters' JSON body |
+|---|---|---|
+| handled, or no handler for its type (unknown types included) | 200 | `{"received":true}` |
+| bad, missing or stale signature (`error`: a `WebhookSignatureError`); no handler runs | 400 | `{"error":"invalid signature"}` |
+| not a v2 event (`error`: a `ValidationError`); no handler runs | 400 | `{"error":"invalid event"}` |
+| a handler threw or rejected (`error`: its error); the remaining handlers are skipped, QBitFlow retries | 500 | `{"error":"internal error"}` |
+| not a `POST` (adapters) | 405 | `{"error":"method not allowed"}` |
+| a body above 1 MiB, read or declared by `Content-Length` (adapters) | 413 | `{"error":"body too large"}` |
+| the body cannot be read (adapters) | 400 | `{"error":"cannot read the body"}` |
+| `req.body` already parsed into an object, e.g. by `express.json()` (`nodeHandler`) | 500 | a message saying to use `express.raw` |
+
+The adapters read `QBitFlow-Signature` whatever its case, and never echo the secret or an error's
+details: log them with `onError`, called for every 400 and 500 (with `event` `null` when the body
+could not be parsed), not for 405 and 413. The router's options are `tolerance` (seconds, default 300),
+`now` (tests) and `onError`.
+
+**Test your handlers** with `webhooks.sign(rawBody, secret, timestamp?)`, which returns the header
+QBitFlow would send (`t=<unix seconds>,v1=<hex>`):
 
 ```ts
-import express from 'express';
-import { webhooks, WebhookSignatureError } from 'qbitflow';
-
-const app = express();
-const secret = process.env.QBITFLOW_WEBHOOK_SECRET ?? '';
-
-app.post('/webhooks/qbitflow', express.raw({ type: 'application/json' }), (req, res) => {
-	try {
-		const event = webhooks.constructEvent(req.body, req.headers['qbitflow-signature'], secret);
-		if (event.type === 'member.joined') console.log('new seller', event.data.userUuid);
-		res.sendStatus(200);
-	} catch (err) {
-		if (err instanceof WebhookSignatureError) console.warn('rejected:', err.reason);
-		res.sendStatus(400);
-	}
+const body = JSON.stringify({
+	id: 'evt_test_1',
+	type: 'payment.completed',
+	version: 'v2',
+	createdAt: new Date().toISOString(),
+	test: true,
+	data: { uuid: 'pay@0192f1c2-2222-7c4d-9e5f-6a7b8c9d0e1f', reference: 'order-1', amount: 4.99 },
 });
+const result = await router.handle(body, webhooks.sign(body, secret));
+console.log(result.status, result.event?.type); // 200 payment.completed
 ```
 
-`webhooks.verify(rawBody, signatureHeader, secret, options?)` only verifies (it returns nothing, or
-throws a `WebhookSignatureError`), and `webhooks.parseEvent(rawBody)` only parses: use it on a body
-already verified. `rawBody` is a `string`, a `Buffer` or a `Uint8Array`; the header may be a
-string, Node's `string[]` or `undefined` (a `missingHeader` failure).
+### Lower level: `verify`, `constructEvent`, `parseEvent`
+
+The router is built on these. `webhooks.constructEvent(rawBody, signatureHeader, secret, options?)`
+verifies the `QBitFlow-Signature` header over the **raw body** (the bytes as received: never
+`JSON.parse` and re-serialize them) and parses it; a `switch` on `event.type` then narrows
+`event.data`:
 
 ```ts
 try {
 	const event = webhooks.constructEvent(rawBody, signatureHeader, secret, { tolerance: 600 });
-	console.log(event.id, event.type, event.userUuid);
+	switch (event.type) {
+		case 'payment.completed': // event.data is a PaymentCompleted
+			console.log('fulfil', event.data.reference);
+			break;
+		default:
+		// A type you don't handle, or one added after this SDK: acknowledge it.
+	}
 } catch (err) {
 	if (err instanceof WebhookSignatureError) {
 		console.log('rejected:', err.reason); // e.g. noMatchingSignature, timestampOutsideTolerance
@@ -709,12 +917,18 @@ try {
 }
 ```
 
+`webhooks.verify(rawBody, signatureHeader, secret, options?)` only verifies (it returns nothing, or
+throws a `WebhookSignatureError`), and `webhooks.parseEvent(rawBody)` only parses: use it on a body
+already verified. `rawBody` is a `string`, a `Buffer` or a `Uint8Array`; the header may be a
+string, Node's `string[]` or `undefined` (a `missingHeader` failure). With these, your code answers
+QBitFlow itself: 2xx for every event it accepts, the ignored types included.
+
 - **At least once.** The same event can arrive more than once: **deduplicate on `event.id`** (also
   in the `QBitFlow-Event-Id` header, `webhooks.EVENT_ID_HEADER`) and make the handler idempotent.
   `QBitFlow-Event-Type` (`webhooks.EVENT_TYPE_HEADER`) carries the type, for routing before parsing.
-- **Answer 2xx fast**, within 30 seconds, **including to the types you ignore**: anything else is
-  retried (for 3 days in live mode), and an endpoint failing for 3 days is disabled. Store the
-  event, answer, then process it in the background.
+- **Answer 2xx fast**, within 30 seconds, **including to the types you ignore** (the router does):
+  anything else is retried (for 3 days in live mode), and an endpoint failing for 3 days is
+  disabled. Keep handlers short: store the event, answer, then process it in the background.
 - **Secret rotation** needs nothing on your side: for 24 hours after a rotation the header carries
   two `v1=` signatures, the new secret's and the previous one's, and either secret verifies. Switch
   your secret within the day.
@@ -730,8 +944,8 @@ try {
   the API check it (a `WebhookSignatureError` with reason `invalidSignature` when it does not
   match), then `webhooks.parseEvent` parses the body.
 
-`Event` is a discriminated union on `type`: a `switch` or an `if` on `event.type` narrows
-`event.data` to its model, as in the handler above. A type this SDK does not know yet arrives as an
+`Event` is a discriminated union on `type`: the router's `on(type, …)` hands each handler its
+type's `data`, and a `switch` or an `if` on `event.type` narrows `event.data` the same way. A type this SDK does not know yet arrives as an
 `UnknownEvent` (its `data` is `unknown`) and lands in the `default` branch:
 `webhooks.isUnknownEvent(event)` tells it, and `String(event.type)` reads its type (typed `never`
 so that it does not get in the way of the narrowing). `webhooks.isEventType(event, type)` narrows
@@ -958,7 +1172,9 @@ console.log(client.webhooks !== undefined);
 ```
 
 `new QBitFlow(apiKey)`, `new QBitFlow(apiKey, options)` and `new QBitFlow({ apiKey, ...options })`
-are equivalent.
+are equivalent. `QBitFlow.fromEnv(config?)` reads `QBITFLOW_API_KEY` (required: a `ValidationError`
+naming it), `QBITFLOW_BASE_URL` and `QBITFLOW_ON_BEHALF_OF` (an empty variable counts as unset);
+`config` overrides them and adds the other options.
 
 | Client option | Default | |
 |---|---|---|
@@ -975,10 +1191,11 @@ are equivalent.
 | `requestId` | sends `X-Request-Id` (1 to 128 of `A-Z a-z 0-9 - _ . :`) |
 | `signal` | an `AbortSignal` cancelling the call, its retries and its waits |
 
-| Webhook option (`webhooks.verify`, `webhooks.constructEvent`) | Default |
+| Webhook option (`webhooks.verify`, `webhooks.constructEvent`, `webhooks.router`) | Default |
 |---|---|
 | `tolerance` | 300 seconds (`webhooks.DEFAULT_TOLERANCE`); `0` or less keeps the default |
 | `now` | the current time: a `Date`, or a function returning one |
+| `onError` (router only) | none: called with the event (`null` when unparsed) and the error of every 400 and 500 |
 
 A bad option makes the constructor throw a `ValidationError`. A client's configuration never
 changes after construction; `client.onBehalfOf` derives clients that share it. Every request sends
@@ -1000,7 +1217,7 @@ Runnable TypeScript programs in [`examples/`](examples) (see its [README](exampl
 | [`checkout.ts`](examples/checkout.ts) | a payment checkout, its status, expiry |
 | [`subscriptions.ts`](examples/subscriptions.ts) | a subscription checkout with a trial, filtered lists, bills, cancel at period end |
 | [`marketplace.ts`](examples/marketplace.ts) | invite a seller, sell `onBehalfOf`, held funds, trust |
-| [`webhook-handler.ts`](examples/webhook-handler.ts) | a verified `node:http` receiver with deduplication and typed events |
+| [`webhook-handler.ts`](examples/webhook-handler.ts) | a `node:http` receiver built on the webhook router, with deduplication and typed handlers |
 | [`errors-and-retries.ts`](examples/errors-and-retries.ts) | error classes, `isRetryable`, idempotency keys across processes |
 
 ## Testing

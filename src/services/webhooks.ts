@@ -28,6 +28,7 @@ import {
 } from '../schemas.js';
 import type { RequestOptions } from '../transport.js';
 import { checkPathRequired, checkPathUUID } from '../validate.js';
+import { WebhookRouter, type WebhookRouterOptions } from '../webhookRouter.js';
 import {
 	constructEvent,
 	parseEvent,
@@ -188,6 +189,14 @@ export class WebhooksService {
 		options?: VerifyOptions
 	): Event {
 		return constructEvent(rawBody, signatureHeader, secret, options);
+	}
+
+	/**
+	 * A webhook router for the endpoint whose secret is `secret` (see `webhooks.router`): it
+	 * verifies, parses and dispatches deliveries, and answers them.
+	 */
+	router(secret: string, options?: WebhookRouterOptions): WebhookRouter {
+		return new WebhookRouter(secret, options);
 	}
 
 	/** Parses a webhook body without verifying it (see `webhooks.parseEvent`). */

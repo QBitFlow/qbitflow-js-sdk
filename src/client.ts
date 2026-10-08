@@ -182,6 +182,38 @@ export class QBitFlow {
 		this.currencies = new CurrenciesService(core);
 	}
 
+	/**
+	 * A client configured from the environment: the API key from `QBITFLOW_API_KEY` (required: a
+	 * `ValidationError` naming it), the base URL from `QBITFLOW_BASE_URL` and the default
+	 * `On-Behalf-Of` from `QBITFLOW_ON_BEHALF_OF` when set (empty counts as unset). `config`
+	 * overrides the environment and adds the other options.
+	 *
+	 * ```ts
+	 * const client = QBitFlow.fromEnv({ maxRetries: 5 });
+	 * ```
+	 */
+	static fromEnv(config: Partial<ClientConfig> = {}): QBitFlow {
+		const env: Record<string, string | undefined> =
+			typeof process !== 'undefined' && process?.env ? process.env : {};
+		const fromEnv = (name: string): string | undefined => {
+			const value = env[name];
+			return value === undefined || value === '' ? undefined : value;
+		};
+		const apiKey = config?.apiKey ?? fromEnv('QBITFLOW_API_KEY');
+		if (apiKey === undefined || (typeof apiKey === 'string' && apiKey.trim() === '')) {
+			throw fieldError(
+				'QBITFLOW_API_KEY',
+				'is required: set it in the environment, or pass apiKey to fromEnv'
+			);
+		}
+		return new QBitFlow({
+			...config,
+			apiKey,
+			baseUrl: config?.baseUrl ?? fromEnv('QBITFLOW_BASE_URL'),
+			onBehalfOf: config?.onBehalfOf ?? fromEnv('QBITFLOW_ON_BEHALF_OF'),
+		});
+	}
+
 	/** @internal The shared transport (test hooks). */
 	get [TRANSPORT](): Transport {
 		return this.#core.transport;
