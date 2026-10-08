@@ -110,3 +110,75 @@ describe('models match the wire', () => {
 		expect([m.organizationFeePercent, m.acceptedCurrencyIds[0]]).toEqual([2, 8]);
 	});
 });
+
+describe('checkout fees in the models', () => {
+	const ctx = {
+		fail: (path: string, expected: string) => new Error(`${path} should be ${expected}`),
+	};
+	const payment = (extra: string): Payment =>
+		S.PaymentSchema.decode(
+			JSON.parse(`{"uuid":"pay@1","amount":10,"metadata":null${extra}}`),
+			'',
+			ctx
+		);
+
+	it('a payment with its price and fees', () => {
+		const p = decodeStrict('Payment').value as Payment;
+		expect([p.amount, p.price]).toEqual([10, 8.5]);
+		expect(p.fees).toEqual([
+			{ type: 'custom', label: 'VAT (20%)', description: 'France', amountUsd: '1.35' },
+			{ type: 'processingFee', label: 'Processing fee', amountUsd: '0.15' },
+		]);
+		expect('description' in p.fees[1]).toBe(false);
+		// amount = price + Σ fees, the decimal strings untouched.
+		const cents = p.fees.reduce((sum, f) => sum + Math.round(Number(f.amountUsd) * 100), 0);
+		expect(Math.round(p.price * 100) + cents).toBe(Math.round(p.amount * 100));
+	});
+
+	it('a payment without fees (or recorded before them)', () => {
+		const withPrice = payment(',"price":10');
+		expect([withPrice.price, withPrice.fees]).toEqual([10, []]);
+		const before = payment('');
+		expect([before.price, before.fees]).toEqual([0, []]);
+		expect(payment(',"price":10,"fees":null').fees).toEqual([]);
+	});
+
+	it('keeps an unknown line type; refuses a wrong JSON type', () => {
+		const p = payment(
+			',"price":9,"fees":[{"type":"giftWrap","label":"Gift wrap","amountUsd":"1"}]'
+		);
+		expect(p.fees[0].type).toBe('giftWrap');
+		expect(() => payment(',"fees":[{"type":"custom","label":"VAT","amountUsd":1.5}]')).toThrow(
+			'fees[0].amountUsd should be a string'
+		);
+		expect(() => payment(',"fees":{}')).toThrow('fees should be an array');
+		expect(() => payment(',"price":"10"')).toThrow('price should be a number');
+	});
+
+	it("a payment session's fees and amount", () => {
+		const s = S.PaymentSessionDataSchema.decode(
+			JSON.parse(
+				'{"uuid":"pay@1","txType":"payment","price":4.99,"amount":6,"organizationName":"Shop","test":true,' +
+					'"availableCurrencyIds":[8],"fees":[{"type":"custom","label":"Shipping","description":"Standard, 3 to 5 days","amountUsd":"0.75"},' +
+					'{"type":"processingFee","label":"Processing fee","amountUsd":"0.26"}]}'
+			),
+			'',
+			ctx
+		);
+		expect([s.price, s.amount, s.fees.length]).toEqual([4.99, 6, 2]);
+		expect(s.fees[0]).toEqual({
+			type: 'custom',
+			label: 'Shipping',
+			description: 'Standard, 3 to 5 days',
+			amountUsd: '0.75',
+		});
+		expect(s.fees[1].type).toBe('processingFee');
+
+		const plain = S.PaymentSessionDataSchema.decode(
+			JSON.parse('{"uuid":"pay@1","txType":"payment","price":4.99}'),
+			'',
+			ctx
+		);
+		expect([plain.fees, plain.amount, 'amount' in plain]).toEqual([[], undefined, false]);
+	});
+});

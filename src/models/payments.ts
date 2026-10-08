@@ -9,6 +9,7 @@ import type {
 	CombinedPaymentSource,
 	FailureCategory,
 	FailureKind,
+	FeeLineType,
 	NotRefundableReason,
 } from '../enums.js';
 import type {
@@ -29,7 +30,11 @@ export interface Payment {
 	from: string;
 	/** The wallet that received it (the merchant's, or the organization's while it holds the member's funds). */
 	to: string;
-	/** What the customer paid, in USD (the network fee paid on top excluded). */
+	/**
+	 * What the customer paid, in USD: the price plus the checkout's {@link Payment.fees}
+	 * (`amount = price + Σ fees[].amountUsd`). It is what the contracts split (QBitFlow's fee is
+	 * taken on it). The network fee the customer pays on top is not in it.
+	 */
 	amount: number;
 	/** The amount in the token's min units (a decimal string). */
 	amountMinUnits: string;
@@ -49,6 +54,17 @@ export interface Payment {
 	userUuid?: string;
 	/** The merchant's reference for the payment, set when creating its checkout. */
 	reference?: string;
+	/**
+	 * The product's price in USD, as the checkout had it. On a payment recorded before checkout
+	 * fees existed, it equals `amount`.
+	 */
+	price: number;
+	/**
+	 * What the checkout added to the price, line by line, as the customer saw them: the
+	 * merchant's lines (a tax, shipping), then the processing fee when the customer paid it.
+	 * `[]` without any.
+	 */
+	fees: FeeLine[];
 	/** What was paid for: the checkout's product name when the checkout was created. */
 	name: string;
 	/** The same, for the product's description. */
@@ -79,6 +95,24 @@ export interface Payment {
 	notRefundableReason?: NotRefundableReason;
 	/** When its checkout session was created. */
 	checkoutOpenedAt?: string;
+}
+
+/**
+ * An amount a one-time payment's checkout adds to its product's price, shown to the customer and
+ * paid with it (`Payment.fees`, and the session's `fees` in `checkout.expired`).
+ */
+export interface FeeLine {
+	/**
+	 * `custom` (the merchant's line, from `fees.items`) or `processingFee` (QBitFlow's fee, which
+	 * the merchant has the customer pay).
+	 */
+	type: FeeLineType;
+	/** The line's name, as the checkout shows it (`Processing fee` for the processing fee). */
+	label: string;
+	/** More about the line, as the merchant wrote it; absent without one. */
+	description?: string;
+	/** The line's amount in USD, a decimal string with at most 2 decimals (`"4.99"`). */
+	amountUsd: string;
 }
 
 /**

@@ -81,8 +81,8 @@ set -a; source ../.local.env; set +a; npm run test:live
 ```
 
 The read-only checks only read. The write checks (they create a product, a customer, a checkout
-session, which `waitForCompletion` waits on with a short timeout, and a webhook endpoint, then
-delete or expire each of them) also need `QBITFLOW_LIVE_WRITES=1` **and** a test-mode
+session, which `waitForCompletion` waits on with a short timeout, a checkout session with fees,
+and a webhook endpoint, then delete or expire each of them) also need `QBITFLOW_LIVE_WRITES=1` **and** a test-mode
 key (checked with `me()`); `QBITFLOW_ALLOW_LIVE_MODE_WRITES=1` allows a live-mode key, for a
 disposable server only.
 

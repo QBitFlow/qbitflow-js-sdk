@@ -95,7 +95,7 @@ const NON_FINITE: Record<string, number> = {
 	Infinity: Number.POSITIVE_INFINITY,
 	'-Infinity': Number.NEGATIVE_INFINITY,
 };
-const NUMERIC_KEYS = new Set(['price', 'refundPercent', 'organizationFeePercent']);
+const NUMERIC_KEYS = new Set(['price', 'refundPercent', 'organizationFeePercent', 'amountUsd']);
 
 /** The vectors write non-finite numbers as strings: turns them back into numbers. */
 export function revive(value: any, key = ''): any {

@@ -26,6 +26,8 @@ const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a
 const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 const TX_PREFIXES = ['pay', 'sub', 'payg', 'sub-hist', 'refund', 'transfer'];
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+/** An amount in USD sent as a string: digits, then at most 2 decimals. */
+const USD_STRING = /^[0-9]+(\.[0-9]{1,2})?$/;
 const MAX_UINT32 = 4294967295;
 
 /** Each duration unit's length in seconds (months = 30 days, years = 365 days). */
@@ -262,6 +264,32 @@ export class Validator {
 	price(field: string, value: unknown): void {
 		if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
 			this.add(field, 'must be a number above 0');
+		}
+	}
+
+	/**
+	 * Checks a required amount in USD (the API's `usd=<max>`): a finite number, or a string of
+	 * digits with an optional decimal point (no sign, no exponent), above 0, at most `max`, with
+	 * at most 2 decimals (a number's shortest decimal form).
+	 */
+	usd(field: string, value: unknown, max: number): void {
+		if (value === undefined || value === null) {
+			this.add(field, 'is required');
+			return;
+		}
+		let amount: number;
+		if (typeof value === 'number') {
+			amount = Number.isFinite(value) && hasAtMostTwoDecimals(value) ? value : Number.NaN;
+		} else if (typeof value === 'string') {
+			amount = USD_STRING.test(value) ? Number(value) : Number.NaN;
+		} else {
+			amount = Number.NaN;
+		}
+		if (!(amount > 0 && amount <= max)) {
+			this.add(
+				field,
+				`must be an amount in USD above 0 and at most ${max}, with at most 2 decimals`
+			);
 		}
 	}
 

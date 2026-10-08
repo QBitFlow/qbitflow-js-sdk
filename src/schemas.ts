@@ -42,6 +42,7 @@ import type {
 	EventType,
 	FailureCategory,
 	FailureKind,
+	FeeLineType,
 	InvitationStatus,
 	LedgerEntryType,
 	NotRefundableReason,
@@ -102,7 +103,7 @@ import type {
 	Member,
 	MemberHeldFundsSummary,
 } from './models/members.js';
-import type { Bill, CombinedPayment, Failure, Payment } from './models/payments.js';
+import type { Bill, CombinedPayment, Failure, FeeLine, Payment } from './models/payments.js';
 import type { Product, SubscriptionTerms } from './models/products.js';
 import type { Refund, RefundApproval } from './models/refunds.js';
 import type { BillingState, DunningStatus, Subscription } from './models/subscriptions.js';
@@ -231,6 +232,13 @@ export const PaymentMetadataSchema = object<PaymentMetadata>({
 
 // ── Payments ────────────────────────────────────────────────────────────────
 
+const FeeLineSchema = object<FeeLine>({
+	type: enumString<FeeLineType>(),
+	label: string,
+	description: optString,
+	amountUsd: string,
+});
+
 const paymentFields: Fields<Payment> = {
 	uuid: string,
 	createdAt: timestamp,
@@ -246,6 +254,8 @@ const paymentFields: Fields<Payment> = {
 	test: boolean,
 	userUuid: optString,
 	reference: optString,
+	price: number,
+	fees: list(FeeLineSchema),
 	name: string,
 	description: string,
 	productUuid: optString,
@@ -373,6 +383,8 @@ const paymentSessionFields: Fields<PaymentSessionData> = {
 	productName: optString,
 	description: optString,
 	price: optNumber,
+	fees: list(FeeLineSchema),
+	amount: optNumber,
 	successUrl: optString,
 	cancelUrl: optString,
 	redirectUrl: optString,

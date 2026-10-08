@@ -18,7 +18,9 @@ const fxTransfer = `"createdAt":"2026-10-01T12:00:00Z","from":"0xfrom","to":"0xt
 
 export const MODEL_FIXTURES: Record<string, string> = {
 	Currency: fxCurrency,
-	Payment: `{"uuid":"pay@1",${fxTransfer},"reference":"order-1","name":"Pro","description":"Lifetime","productUuid":"p-1",
+	Payment: `{"uuid":"pay@1",${fxTransfer},"reference":"order-1","price":8.5,
+		"fees":[{"type":"custom","label":"VAT (20%)","description":"France","amountUsd":"1.35"},{"type":"processingFee","label":"Processing fee","amountUsd":"0.15"}],
+		"name":"Pro","description":"Lifetime","productUuid":"p-1",
 		"customerUuid":"c-1","customerReference":"crm-1","note":"thanks","customer":${fxSummary},"metadata":${fxMetadata},
 		"confirmedAt":"2026-10-01T11:59:58Z","paidMinUnits":"10004200","paidUsd":10.0042,"refund":${fxRefundSm},"refundable":false,
 		"notRefundableReason":"refundExists","checkoutOpenedAt":"2026-10-01T11:00:00Z"}`,

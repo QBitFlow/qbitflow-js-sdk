@@ -664,3 +664,210 @@ describe('update semantics: what the bodies send', () => {
 		expect(() => P.updateCustomerBody(null as never)).toThrow(ValidationError);
 	});
 });
+
+describe('checkout fees', () => {
+	const line = (p: any) => ({ label: 'Shipping', amountUsd: 0.75, ...p });
+	const withFees = (fees: any) => session({ productUuid: MEMBER, fees });
+	const withLine = (p: any) => withFees({ items: [line(p)] });
+	const AMOUNT = 'fees.items[0].amountUsd';
+	const LABEL = 'fees.items[0].label';
+	const DESCRIPTION = 'fees.items[0].description';
+
+	it('is optional; processingFee alone; up to 10 lines', () => {
+		expect(fields(withFees(undefined))).toEqual([]);
+		expect(fields(withFees(null))).toEqual([]);
+		expect(fields(withFees({}))).toEqual([]);
+		expect(fields(withFees({ processingFee: true }))).toEqual([]);
+		expect(fields(withFees({ processingFee: false, items: [] }))).toEqual([]);
+		expect(fields(withFees({ items: Array.from({ length: 10 }, () => line({})) }))).toEqual([]);
+		expect(fields(withFees({ items: Array.from({ length: 11 }, () => line({})) }))).toEqual([
+			'fees.items',
+		]);
+	});
+
+	it('checks every line, also past the 10th', () => {
+		const items = Array.from({ length: 11 }, () => line({}));
+		items[10] = line({ label: '<b>' });
+		expect(fields(withFees({ items }))).toEqual(['fees.items', 'fees.items[10].label']);
+	});
+
+	it('refuses a wrong shape', () => {
+		expect(fields(withFees('shipping'))).toEqual(['fees']);
+		expect(fields(withFees([line({})]))).toEqual(['fees']);
+		expect(fields(withFees({ processingFee: 'yes' }))).toEqual(['fees.processingFee']);
+		expect(fields(withFees({ items: line({}) }))).toEqual(['fees.items']);
+		expect(fields(withFees({ items: [null] }))).toEqual(['fees.items[0]']);
+		expect(fields(withFees({ items: [line({}), line({ label: '' })] }))).toEqual([
+			'fees.items[1].label',
+		]);
+	});
+
+	it.each<[string, unknown, boolean]>([
+		['1 character', 'S', true],
+		['40 characters', 'x'.repeat(40), true],
+		['40 code points', 'é'.repeat(40), true],
+		['VAT (20%)', 'VAT (20%)', true],
+		['empty', '', false],
+		['absent', undefined, false],
+		['blank', '   ', false],
+		['41 characters', 'x'.repeat(41), false],
+		['a line break', 'Ship\nping', false],
+		['a tab', 'Ship\tping', false],
+		['markup', '<b>Tax</b>', false],
+		['a bidi control', 'Tax‮', false],
+		['not a string', 42, false],
+	])('label: %s', (_name, label, ok) => {
+		expect(fields(withLine({ label }))).toEqual(ok ? [] : [LABEL]);
+	});
+
+	it.each<[string, unknown, boolean]>([
+		['absent', undefined, true],
+		['empty (omitted)', '', true],
+		['200 characters', 'd'.repeat(200), true],
+		['several lines', 'Standard,\n3 to 5 days', true],
+		['201 characters', 'd'.repeat(201), false],
+		['blank', '  ', false],
+		['markup', 'a {b}', false],
+		['a control character', 'nul\u0000x', false],
+	])('description: %s', (_name, description, ok) => {
+		expect(fields(withLine({ description }))).toEqual(ok ? [] : [DESCRIPTION]);
+	});
+
+	it.each<[unknown, boolean]>([
+		[0.01, true],
+		[0.75, true],
+		[19.9, true],
+		[20, true],
+		[1000000, true],
+		['4.99', true],
+		['19.90', true],
+		['0.01', true],
+		['5', true],
+		['1000000', true],
+		['1000000.00', true],
+		[0, false],
+		[-1, false],
+		[-0.01, false],
+		[1.999, false],
+		[0.001, false],
+		[1000000.01, false],
+		[1e7, false],
+		[Number.NaN, false],
+		[Number.POSITIVE_INFINITY, false],
+		[Number.NEGATIVE_INFINITY, false],
+		['0', false],
+		['0.00', false],
+		['1.999', false],
+		['1000000.01', false],
+		['1e2', false],
+		['abc', false],
+		['+1', false],
+		['-1', false],
+		[' 1', false],
+		['1.', false],
+		['.5', false],
+		['', false],
+		[undefined, false],
+		[true, false],
+	])('amountUsd %p', (amountUsd, ok) => {
+		expect(fields(withLine({ amountUsd }))).toEqual(ok ? [] : [AMOUNT]);
+	});
+
+	it('names every failing field of every line', () => {
+		const err = (() => {
+			try {
+				withFees({
+					items: [
+						line({}),
+						{ label: 'x'.repeat(41), description: ' ', amountUsd: '1e2' },
+					],
+				})();
+			} catch (e) {
+				return e as ValidationError;
+			}
+			throw new Error('expected a ValidationError');
+		})();
+		expect(err.fieldErrors).toEqual([
+			{
+				field: 'fees.items[1].label',
+				message: 'fees.items[1].label must be 1 to 40 characters',
+			},
+			{
+				field: 'fees.items[1].description',
+				message:
+					'fees.items[1].description must not be blank nor contain control characters or < > { } [ ] ` \\ | ; " ~ ^',
+			},
+			{
+				field: 'fees.items[1].amountUsd',
+				message:
+					'fees.items[1].amountUsd must be an amount in USD above 0 and at most 1000000, with at most 2 decimals',
+			},
+		]);
+	});
+
+	/** The JSON a create sends, as text: numbers and strings stay apart. */
+	const wire = (fees: any) =>
+		JSON.stringify(P.createPaymentSessionBody({ productUuid: MEMBER, fees }));
+
+	it.each<[string, any, string]>([
+		['absent', undefined, `{"productUuid":"${MEMBER}"}`],
+		['null', null, `{"productUuid":"${MEMBER}"}`],
+		['empty', {}, `{"productUuid":"${MEMBER}","fees":{}}`],
+		[
+			'processingFee true',
+			{ processingFee: true },
+			`{"productUuid":"${MEMBER}","fees":{"processingFee":true}}`,
+		],
+		[
+			'processingFee false',
+			{ processingFee: false },
+			`{"productUuid":"${MEMBER}","fees":{"processingFee":false}}`,
+		],
+		['no lines', { items: [] }, `{"productUuid":"${MEMBER}","fees":{}}`],
+		[
+			'a number',
+			{ items: [{ label: 'Shipping', amountUsd: 0.75 }] },
+			`{"productUuid":"${MEMBER}","fees":{"items":[{"label":"Shipping","amountUsd":0.75}]}}`,
+		],
+		[
+			'a string, as typed',
+			{ items: [{ label: 'VAT', amountUsd: '19.90' }] },
+			`{"productUuid":"${MEMBER}","fees":{"items":[{"label":"VAT","amountUsd":"19.90"}]}}`,
+		],
+		[
+			'an empty description is omitted',
+			{ items: [{ label: 'VAT', description: '', amountUsd: 4 }] },
+			`{"productUuid":"${MEMBER}","fees":{"items":[{"label":"VAT","amountUsd":4}]}}`,
+		],
+		[
+			'everything',
+			{
+				processingFee: true,
+				items: [
+					{ label: 'Shipping', description: 'Standard, 3 to 5 days', amountUsd: 0.75 },
+					{ label: 'VAT (20%)', amountUsd: '4.99' },
+				],
+			},
+			`{"productUuid":"${MEMBER}","fees":{"processingFee":true,"items":[` +
+				'{"label":"Shipping","description":"Standard, 3 to 5 days","amountUsd":0.75},' +
+				'{"label":"VAT (20%)","amountUsd":"4.99"}]}}',
+		],
+	])('body: %s', (_name, fees, want) => {
+		expect(wire(fees)).toBe(want);
+	});
+
+	it('the body keeps only the known fields of a line', () => {
+		expect(
+			wire({ items: [{ label: 'VAT', amountUsd: 1, type: 'custom' }], extra: true } as never)
+		).toBe(`{"productUuid":"${MEMBER}","fees":{"items":[{"label":"VAT","amountUsd":1}]}}`);
+	});
+
+	it('a subscription checkout sends no fees', () => {
+		const body = P.createSubscriptionSessionBody({
+			productUuid: MEMBER,
+			fees: { processingFee: true },
+		} as never);
+		expect(body).toEqual({ productUuid: MEMBER });
+		expect('fees' in body).toBe(false);
+	});
+});

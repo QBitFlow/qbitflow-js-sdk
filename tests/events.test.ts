@@ -66,6 +66,8 @@ describe('typed data', () => {
 		]);
 		expect(p.managementPageLink).toBeTruthy();
 		expect([p.paidMinUnits, p.paidUsd]).toEqual(['10004200', 10.0042]);
+		// No fees: the price is the amount.
+		expect([p.price, p.fees]).toEqual([10, []]);
 		expect(p.currency?.symbol).toBe('USDC');
 		expect(p.currency?.mainCurrency?.mainCurrency).toBeNull();
 		expect(p.currency?.mainCurrencyId).toBe(3);
@@ -194,6 +196,7 @@ describe('typed data', () => {
 			'Example Shop',
 		]);
 		expect(p.expiresAt).toBeTruthy();
+		expect([p.fees, p.amount]).toEqual([[], undefined]);
 
 		const envelope =
 			'"type":"checkout.expired","version":"v2","id":"evt_1","createdAt":"2026-10-01T12:00:00Z"';

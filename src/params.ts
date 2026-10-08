@@ -20,6 +20,7 @@ import {
 	SubscriptionStatus,
 } from './enums.js';
 import type {
+	CheckoutFees,
 	CreatePaymentSessionParams,
 	CreateSubscriptionSessionParams,
 } from './models/checkout.js';
@@ -272,6 +273,57 @@ export function customerListQuery(p: CustomerListParams | undefined): string {
 
 // ── Checkout sessions ───────────────────────────────────────────────────────
 
+/** The most fee lines of a payment checkout's own (`fees.items`). */
+const MAX_FEE_ITEMS = 10;
+/** The largest amount of a fee line, in USD (`usd=1000000`). */
+const MAX_FEE_USD = 1_000_000;
+
+/** Checks a payment checkout's `fees` when given; field errors on their wire paths. */
+function validateFees(v: Validator, fees: unknown): void {
+	if (fees === undefined || fees === null) return;
+	if (typeof fees !== 'object' || Array.isArray(fees)) {
+		v.add('fees', 'must be an object {processingFee, items}');
+		return;
+	}
+	const { processingFee, items } = fees as { processingFee?: unknown; items?: unknown };
+	v.bool('fees.processingFee', processingFee);
+	if (items === undefined || items === null) return;
+	if (!Array.isArray(items)) {
+		v.add('fees.items', 'must be a list of fee lines');
+		return;
+	}
+	// Each line is still checked past the 10th (as the Go reference does).
+	if (items.length > MAX_FEE_ITEMS)
+		v.add('fees.items', `must have at most ${MAX_FEE_ITEMS} lines`);
+	items.forEach((item: unknown, i) => {
+		const path = `fees.items[${i}]`;
+		if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+			v.add(path, 'must be an object {label, description, amountUsd}');
+			return;
+		}
+		const { label, description, amountUsd } = item as Record<string, unknown>;
+		if (v.required(`${path}.label`, label)) v.name(`${path}.label`, label, 1, 40);
+		v.text(`${path}.description`, description, 0, 200);
+		v.usd(`${path}.amountUsd`, amountUsd, MAX_FEE_USD);
+	});
+}
+
+/** A payment checkout's `fees` on the wire: as given, an empty `description` or `items` left out. */
+function feesBody(fees: CheckoutFees | undefined | null): Body | undefined {
+	if (fees === undefined || fees === null) return undefined;
+	const items = fees.items?.map((item) =>
+		compact({
+			label: item.label,
+			description: nonEmpty(item.description),
+			amountUsd: item.amountUsd,
+		})
+	);
+	return compact({
+		processingFee: given(fees.processingFee),
+		items: items && items.length > 0 ? items : undefined,
+	});
+}
+
 function validateSession(v: Validator, p: CreatePaymentSessionParams): void {
 	v.reference('reference', p.reference);
 	v.uuid('productUuid', p.productUuid);
@@ -327,8 +379,9 @@ export function createPaymentSessionBody(p: CreatePaymentSessionParams): Body {
 	requireParams(p);
 	const v = new Validator();
 	validateSession(v, p);
+	validateFees(v, p.fees);
 	v.check();
-	return compact(sessionBody(p));
+	return compact({ ...sessionBody(p), fees: feesBody(p.fees) });
 }
 
 export function createSubscriptionSessionBody(p: CreateSubscriptionSessionParams): Body {
