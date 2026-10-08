@@ -87,6 +87,16 @@ but never published; its changes are part of 3.0.0).
     `client.onBehalfOf(userUuid)`: a client acting in a member's space, sharing the configuration.
 -   `checkoutSessions`: `createPayment`, `createSubscription` (with `expiresInMinutes` and the
     `{{UUID}}` / `{{TRANSACTION_TYPE}}` redirect placeholders), `getStatus`, `expire`.
+-   **Checkout fees**: `createPayment` takes `fees` (`CheckoutFees`): up to 10 lines of your own
+    (`FeeItem`: `label`, `description`, `amountUsd` as a number or a string sent as typed) and
+    `processingFee`, the customer paying QBitFlow's fee (grossed up, so you keep the price and
+    your lines; left out, the dashboard's `checkout.customerPaysProcessingFee` setting decides).
+    The customer pays `price` + fees, plus the network fee on top. Checked client-side (10 lines,
+    `label` 1 to 40 one-line characters, `description` at most 200, `amountUsd` above 0, at most
+    1,000,000, 2 decimals) with field errors on `fees.items[i].<field>`. `Payment.price` and
+    `Payment.fees` (`FeeLine[]`: `type`, `label`, `description`, `amountUsd` as a decimal
+    string; `amount = price + fees`), also in `payment.completed`; `checkout.expired`'s payment
+    session has `fees` and `amount`. New open enum `FeeLineType` (`custom`, `processingFee`).
 -   `payments.list` / `listCombined` with filters (customer, product, dates, `refunded`,
     `includeMembers` / `userUuid`, `source`, `subscriptionUuid`); `payments.get` with
     `{ includeMembers }`. `failures.list`: the failed payment attempts.

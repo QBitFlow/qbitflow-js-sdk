@@ -423,8 +423,54 @@ console.log(`Redirect the customer to ${session.link}`);
   webhook, or on `getStatus`.
 - **Errors to expect:** a `ConflictError` `merchant_not_ready` (`details.reason`) when the space's
   wallets accept no currency; `unique_violation` when another payment or open session holds the
-  `reference`; a `ValidationError` above 5 USD in test mode (`details.max`); a `NotFoundError` for
-  an unknown product or customer.
+  `reference`; a `ValidationError` above 5 USD in test mode, fees included (`details.max`); a
+  `NotFoundError` for an unknown product or customer.
+
+### Fees
+
+A payment checkout can add amounts to its price with `fees`: your own lines (a tax, shipping, a
+service fee) and QBitFlow's processing fee. The customer sees each line on the checkout and pays
+them with the price:
+
+<!-- docs:snippet checkout-create-payment-fees -->
+```ts
+// The customer pays the price plus your lines and, with processingFee, QBitFlow's fee (grossed
+// up, so you keep the price and your lines). Test mode caps the total at $5, fees included; the
+// network fee comes on top.
+const session = await client.checkoutSessions.createPayment({
+	productName: 'T-shirt',
+	description: 'Blue, size M',
+	price: 3.99, // USD
+	reference: 'order-1044',
+	successUrl: `https://shop.example.com/orders/success?uuid=${Placeholders.UUID}`,
+	cancelUrl: 'https://shop.example.com/orders/cancel',
+	fees: {
+		items: [{ label: 'Shipping', description: 'Standard, 3 to 5 days', amountUsd: 0.75 }],
+		processingFee: true, // omitted: your checkout.customerPaysProcessingFee setting decides
+	},
+});
+console.log(`Redirect the customer to ${session.link}`);
+```
+<!-- /docs:snippet -->
+
+- **Your lines** (`fees.items`, at most 10, shown in this order): `label` (1 to 40 characters, one
+  line), `description` (optional, at most 200), `amountUsd` (above 0, at most 1,000,000, at most
+  2 decimals). Give `amountUsd` as a number, or as a string (`'4.99'`) that is sent as typed, so
+  no float rounds it. The SDK checks them before sending: a `ValidationError` names the field
+  (`fees.items[0].amountUsd`, or `fees.items` above 10 lines).
+- **The processing fee** (`fees.processingFee: true`) is a last line, `Processing fee`, computed
+  by QBitFlow on the price and your lines at your platform fee, grossed up and rounded up to the
+  cent: QBitFlow's fee is also taken on that line, so you keep at least the price and your lines,
+  as if no fee were taken ($100 + $20 VAT at 1.5 % → a $1.83 processing fee, $121.83 charged,
+  $120.00 kept). `false`: you pay the fee, as without fees. Left out: your
+  `checkout.customerPaysProcessingFee` setting decides (in the dashboard, off by default; your
+  product links follow it too).
+- **What the customer pays** is the session's `amount`: `price` plus every line. It is what the
+  contracts split and what the payment records as its `amount`, with its `price` and `fees`
+  ([Payments](#payments-and-failures)). The network fee comes on top, in the currency the
+  customer picks. In test mode `amount`, fees included, is at most 5 USD.
+- One-time payments only: `createSubscription` takes no `fees`. A marketplace's organization fee
+  is not passed on: it is taken from the amount as on any payment.
 
 ### Status
 
@@ -572,7 +618,12 @@ console.log(`order-1042 was paid by ${byReference.from}`);
 ```
 <!-- /docs:snippet -->
 
-- **Amounts:** `amount` is in USD; `metadata.txAmounts` splits the transaction (e.g.
+- **Amounts:** `amount` is what the customer paid in USD: the `price` (the product's, at the
+  checkout) plus the checkout's `fees`, the lines the customer saw (`FeeLine`: `type` `custom` or
+  `processingFee`, `label`, `description`, `amountUsd` as a decimal string), so
+  `amount = price + Σ fees[].amountUsd` ([Fees](#fees)). Without fees, `fees` is `[]` and `price`
+  is `amount` (also on payments made before fees existed). The network fee the customer paid on
+  top is not in `amount` (`paidUsd` includes it). `metadata.txAmounts` splits the amount (e.g.
   `metadata.txAmounts.usd.merchant`, what you received), and `amountMinUnits` is exact in the
   token's smallest unit ([Money display](#money-display)).
 - **Filters** (`PaymentListParams`): `customerUuid`, `productUuid`, `createdAfter` / `createdBefore`

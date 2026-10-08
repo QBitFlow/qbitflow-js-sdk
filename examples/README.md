@@ -6,7 +6,7 @@ imports from `'qbitflow'` and reads its configuration from the environment: neve
 | File | Shows |
 |---|---|
 | [`client-setup.ts`](client-setup.ts) | a client from the constructor, checked with `me()`; clients from the environment (`QBitFlow.fromEnv`) |
-| [`checkout.ts`](checkout.ts) | a payment checkout with an inline product, its status (`getStatus`), `waitForCompletion`, its expiry |
+| [`checkout.ts`](checkout.ts) | a payment checkout with an inline product, its status (`getStatus`), `waitForCompletion`, its expiry; a checkout with fees (a shipping line, the processing fee) |
 | [`catalog.ts`](catalog.ts) | a product (`tshirt-blue-m`), the products and one page of customers, a checkout for the product by its reference |
 | [`payments.ts`](payments.ts) | a page of payments with a filter, one by id and by reference, every payment with `for await`, `formatAmount` / `parseAmount` |
 | [`subscriptions.ts`](subscriptions.ts) | a subscription checkout with a trial, a subscription and `hasAccess`, its bills with `for await`, test billing, cancel at period end |
@@ -35,7 +35,7 @@ export QBITFLOW_API_KEY=sk_…      # a test-mode key; QBITFLOW_BASE_URL=… for
 npm run checkout                  # or: npx tsx checkout.ts
 ```
 
-They use the documentation's sample values (order `order-1042`, product `tshirt-blue-m`,
+They use the documentation's sample values (orders `order-1042` and `order-1044`, product `tshirt-blue-m`,
 `https://shop.example.com/…` URLs): run them with a test-mode key. A program that creates
 something with a fixed reference handles the conflict of a second run, or expires its checkout.
 
