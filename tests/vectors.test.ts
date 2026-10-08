@@ -23,12 +23,6 @@ const load = (name: string): any[] =>
 	HAVE ? JSON.parse(readFileSync(join(DIR, `${name}.json`), 'utf8')).cases : [];
 const d = HAVE ? describe : describe.skip;
 
-/**
- * JS deviations: a path segment made only of dots can't be sent through `fetch` (the WHATWG URL
- * parser resolves `%2E%2E` as `..`), so the SDK refuses it with a ValidationError.
- */
-const DOT_SEGMENT_CASES = new Set(['path: reference made of dots']);
-
 const API_KEY = 'sk_test_conformance';
 let server: TestServer;
 let answer: { status: number; body: string } = { status: 200, body: '{}' };
@@ -181,12 +175,8 @@ d('vectors: requests.json', () => {
 	it.each(load('requests').map((c) => [c.name, c]))('%s', async (_name, c: any) => {
 		answer = { status: 200, body: '{}' };
 		const before = server.recorded.length;
-		const { error } = await run(c);
-		if (DOT_SEGMENT_CASES.has(c.name)) {
-			expect(error).toBeInstanceOf(ValidationError);
-			expect(server.recorded.length).toBe(before);
-			return;
-		}
+		// Only the request matters here: the stub's `{}` answer need not decode.
+		await run(c);
 		expect(server.recorded.length - before).toBe(1);
 		const r = server.recorded[before];
 		const want = c.request;
