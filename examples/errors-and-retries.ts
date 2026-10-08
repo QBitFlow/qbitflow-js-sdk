@@ -1,8 +1,11 @@
 /**
- * Shows how the SDK reports errors and retries: the error classes with instanceof, isRetryable,
- * a stable Idempotency-Key across processes, and cancelling a call with an AbortSignal.
+ * Shows how the SDK reports errors and retries: automatic retries with an idempotency key derived
+ * from the order, the error classes with instanceof, isRetryable, a stable Idempotency-Key across
+ * processes, and cancelling a call with an AbortSignal.
  *
  *     QBITFLOW_API_KEY=sk_… [QBITFLOW_BASE_URL=…] npx tsx errors-and-retries.ts
+ *
+ * It opens (then expires) a checkout for order-1042, and creates (then deletes) a customer.
  */
 import {
 	ApiError,
@@ -19,17 +22,49 @@ import {
 	ValidationError,
 } from 'qbitflow';
 
-const apiKey = process.env.QBITFLOW_API_KEY;
-if (!apiKey) throw new Error('set QBITFLOW_API_KEY');
+// docs:start retries-idempotency
+// Reads and the 7 creates are retried on network errors, 5xx and 429, waiting 1 s, 2 s, 4 s…
+// (default: 3 retries; 0 turns them off). timeout bounds each attempt, in milliseconds.
+const client = QBitFlow.fromEnv({ maxRetries: 5, timeout: 15_000 });
 
-// Reads and the 7 idempotent creates are retried on network errors, 5xx and 429 (1 s, 2 s, 4 s…);
-// maxRetries: 0 turns that off. timeout bounds each attempt, in milliseconds.
-const client = new QBitFlow({
-	apiKey,
-	baseUrl: process.env.QBITFLOW_BASE_URL || undefined,
-	maxRetries: 3,
-	timeout: 15_000,
-}); // a ValidationError: a bad key format or option
+// Each create sends an Idempotency-Key, the same on its retries. A key derived from the order
+// also covers a job re-run after a crash: the same key returns the first session instead of
+// opening a second one.
+const orderId = 'order-1042';
+const session = await client.checkoutSessions.createPayment(
+	{ productName: 'T-shirt', description: 'Blue, size M', price: 4.99, reference: orderId },
+	{ idempotencyKey: `checkout-${orderId}` }
+);
+console.log(`Redirect the customer to ${session.link}`);
+// docs:end retries-idempotency
+
+// A demo: expire it, so that order-1042 can be used again (a replayed create answers the same,
+// already expired, session).
+try {
+	await client.checkoutSessions.expire(session.uuid);
+} catch (err) {
+	if (!(err instanceof ConflictError || err instanceof NotFoundError)) throw err;
+}
+
+// docs:start errors-handling
+try {
+	const payment = await client.payments.getByReference('order-1042');
+	console.log(`order-1042 paid: ${payment.amount} USD`);
+} catch (err) {
+	if (err instanceof NotFoundError) {
+		console.log('no payment for order-1042 yet');
+	} else if (err instanceof ValidationError) {
+		// Refused before sending (status undefined) or by the API (400).
+		for (const f of err.fieldErrors) console.log(`${f.field}: ${f.message}`);
+	} else if (err instanceof ApiError) {
+		// Branch on status and code, never on the message. Quote requestId to support.
+		console.log(`QBitFlow error ${err.status} ${err.code} (request ${err.requestId})`);
+		if (isRetryable(err)) console.log('transient: try again later');
+	} else {
+		throw err;
+	}
+}
+// docs:end errors-handling
 
 /** Prints what an error is, the way an application would branch on it. */
 function describe(what: string, err: unknown): void {

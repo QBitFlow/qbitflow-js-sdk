@@ -1,5 +1,4 @@
 
-CONTRIBUTING.md
 PUBLISH.md
 PROJECT_SUMMARY.*
 .coverage
@@ -24,6 +23,9 @@ test-internal/
 
 *.tgz
 
-CLAUDE.md
+# Files the examples write when run
+examples/qbitflow-*.csv
+examples/qbitflow-webhook-secret
+
 
 **/.qbitflow-sync
