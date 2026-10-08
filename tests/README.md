@@ -22,7 +22,7 @@ local throwaway HTTP server (`tests/helpers/`) that records what it receives and
 scripted responses, so the real `fetch` path (headers, timeouts, redirects, dropped connections) is
 exercised. The clients built on it record their back-off sleeps instead of waiting. The suites
 (`client`, `transport`, `retry`, `errors`, `pagination`, `validate`, `webhook`, `events`, `models`,
-`services`, `esmSpecifiers`, and `vectors` below) cover, for the behaviour contract the four
+`services`, `router`, `helpers`, `esmSpecifiers`, and `vectors` below) cover, for the behaviour contract the four
 QBitFlow SDKs share:
 
 - **the client**: key and option checks, defaults, `onBehalfOf` (client and request level),
@@ -41,6 +41,16 @@ QBitFlow SDKs share:
 - **webhooks**: `verify` (the documented vector, secret rotation, tolerance, the header edge
   cases), `constructEvent`, `parseEvent` on the 15 documented event examples (`tests/fixtures/`),
   the type guards, and `verifyRemote`;
+- **the webhook router** (`router`): the status matrix of `handle` (valid → 200 with typed data,
+  bad or stale signature → 400, not JSON or v1 → 400, unknown type → 200 with `onUnknown` and
+  `onAny`, a failing handler → 500 with the later handlers skipped, `onAny` order), and the
+  adapters: `fetchHandler` with Web `Request`/`Response`, `nodeHandler` behind a real `node:http`
+  server (raw body, a `Buffer`/string `req.body`, a parsed `req.body` → 500), 405, 413 and the
+  header's case;
+- **the integration helpers** (`helpers`): the `webhooks.sign` vector and round trip,
+  `waitForCompletion` (completion, expiry, timeout, interval floor, errors, abort), `hasAccess`
+  boundaries, `formatAmount` / `parseAmount`, the 95-day export windows and the CSV header
+  de-duplication, `QBitFlow.fromEnv`, `Placeholders`;
 - **packaging**: relative imports carry their `.js` extension (ESM build), the `exports` map, and
   `VERSION` = `package.json` = the top CHANGELOG entry.
 
@@ -71,7 +81,8 @@ set -a; source ../.local.env; set +a; npm run test:live
 ```
 
 The read-only checks only read. The write checks (they create a product, a customer, a checkout
-session and a webhook endpoint, then delete or expire each of them) also need `QBITFLOW_LIVE_WRITES=1` **and** a test-mode
+session, which `waitForCompletion` waits on with a short timeout, and a webhook endpoint, then
+delete or expire each of them) also need `QBITFLOW_LIVE_WRITES=1` **and** a test-mode
 key (checked with `me()`); `QBITFLOW_ALLOW_LIVE_MODE_WRITES=1` allows a live-mode key, for a
 disposable server only.
 
