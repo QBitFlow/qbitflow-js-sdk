@@ -109,6 +109,15 @@ export const AttemptStatus = {
 } as const;
 export type AttemptStatus = Open<ValuesOf<typeof AttemptStatus>>;
 
+/** Who added a line to a payment checkout's price ({@link FeeLine.type}). */
+export const FeeLineType = {
+	/** The merchant's own line: a tax, shipping, a service fee. */
+	Custom: 'custom',
+	/** QBitFlow's processing fee, which the merchant has the customer pay (computed by QBitFlow). */
+	ProcessingFee: 'processingFee',
+} as const;
+export type FeeLineType = Open<ValuesOf<typeof FeeLineType>>;
+
 /** A refund's status. */
 export const RefundStatus = {
 	Pending: 'pending',

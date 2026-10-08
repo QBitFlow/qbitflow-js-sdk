@@ -9,7 +9,8 @@
  *
  * The read-only group only reads. The write group also needs `QBITFLOW_LIVE_WRITES=1`, and a
  * test-mode key (per `me()`) unless `QBITFLOW_ALLOW_LIVE_MODE_WRITES=1`; it creates a product, a
- * customer, a checkout session and a webhook endpoint, and deletes (or expires) each of them.
+ * customer, two checkout sessions (one with fees) and a webhook endpoint, and deletes (or
+ * expires) each of them.
  *
  *     set -a; source ../.local.env; set +a   # never print it
  *     npm run test:live
@@ -229,6 +230,46 @@ liveWrites('live: writes', () => {
 			expect((await c.checkoutSessions.waitForCompletion(session.uuid)).status).toBe(
 				'expired'
 			);
+		} finally {
+			await c.checkoutSessions.expire(session.uuid).catch((err: unknown) => {
+				if (!(err instanceof ConflictError) && !(err instanceof NotFoundError)) throw err; // already final
+			});
+		}
+	});
+
+	it('checkout session with fees: create, status, expire', async () => {
+		if (!allowed) return;
+		let session;
+		try {
+			// The documentation's fees checkout: $3.99 + $0.75 shipping + the processing fee, under
+			// the test-mode cap of $5 (fees included).
+			session = await c.checkoutSessions.createPayment({
+				productName: 'T-shirt',
+				description: 'Blue, size M',
+				price: 3.99,
+				reference: `order-1044-${suffix()}`,
+				successUrl: 'https://shop.example.com/orders/success?uuid={{UUID}}',
+				cancelUrl: 'https://shop.example.com/orders/cancel',
+				fees: {
+					items: [
+						{
+							label: 'Shipping',
+							description: 'Standard, 3 to 5 days',
+							amountUsd: 0.75,
+						},
+					],
+					processingFee: true,
+				},
+			});
+		} catch (err) {
+			if (err instanceof ConflictError && err.code === 'merchant_not_ready') return; // no currency accepted
+			throw err;
+		}
+		try {
+			expect(session.uuid.startsWith('pay@')).toBe(true);
+			expect(session.link).toBeTruthy();
+			expect((await c.checkoutSessions.getStatus(session.uuid)).status).toBe('created');
+			expect((await c.checkoutSessions.expire(session.uuid)).status).toBe('expired');
 		} finally {
 			await c.checkoutSessions.expire(session.uuid).catch((err: unknown) => {
 				if (!(err instanceof ConflictError) && !(err instanceof NotFoundError)) throw err; // already final

@@ -260,6 +260,42 @@ const ROUTES: RouteCase[] = [
 		check: (v) => expect([v.uuid, !!v.link, !!v.expiresAt]).toEqual(['pay@1', true, true]),
 	},
 	{
+		name: 'checkoutSessions.createPayment with fees',
+		call: (c, o) =>
+			c.checkoutSessions.createPayment(
+				{
+					productUuid: UUID_A,
+					fees: {
+						processingFee: true,
+						items: [
+							{
+								label: 'Shipping',
+								description: 'Standard, 3 to 5 days',
+								amountUsd: 0.75,
+							},
+							{ label: 'VAT (20%)', amountUsd: '19.90' },
+						],
+					},
+				},
+				o
+			),
+		method: 'POST',
+		path: '/transaction/session-checkout/new/payment',
+		idempotent: true,
+		status: 201,
+		body: {
+			productUuid: UUID_A,
+			fees: {
+				processingFee: true,
+				items: [
+					{ label: 'Shipping', description: 'Standard, 3 to 5 days', amountUsd: 0.75 },
+					{ label: 'VAT (20%)', amountUsd: '19.90' },
+				],
+			},
+		},
+		reply: fx('CheckoutSession'),
+	},
+	{
 		name: 'checkoutSessions.createSubscription',
 		call: (c, o) =>
 			c.checkoutSessions.createSubscription(
@@ -928,7 +964,7 @@ describe('retry policy per method', () => {
 				n: 2,
 			});
 			if (rc.idempotent) {
-				idempotent.add(rc.name.replace(/ minimal$/, ''));
+				idempotent.add(rc.name.replace(/ (minimal|with fees)$/, ''));
 				const [k0, k1] = ts.recorded.map((r) => r.headers['idempotency-key']);
 				expect(k0).toBeTruthy();
 				expect(k1).toBe(k0);
