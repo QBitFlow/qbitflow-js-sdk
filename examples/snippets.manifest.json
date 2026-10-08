@@ -1,11 +1,12 @@
 {
   "sdk": "js",
-  "catalog": "24c3d761ef71e3b16c7b550b93bdce05d9636c28",
+  "catalog": "f9eecb0441342a2f962621197a55097b965006da",
   "snippets": {
     "client-init": "examples/client-setup.ts",
     "client-on-behalf-of": "examples/marketplace.ts",
     "config-from-env": "examples/client-setup.ts",
     "checkout-create-payment": "examples/checkout.ts",
+    "checkout-create-payment-fees": "examples/checkout.ts",
     "checkout-create-payment-product": "examples/catalog.ts",
     "checkout-create-subscription": "examples/subscriptions.ts",
     "checkout-status": "examples/checkout.ts",

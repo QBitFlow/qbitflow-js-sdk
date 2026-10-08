@@ -1,6 +1,7 @@
 /**
  * Opens a one-time payment checkout session for order-1042, reads its status, optionally waits for
- * it to finish, and expires it when it is still open.
+ * it to finish, and expires it when it is still open. Also opens (then expires) a checkout with
+ * fees for order-1044: a shipping line and the processing fee on top of the price.
  *
  *     QBITFLOW_API_KEY=sk_… [QBITFLOW_BASE_URL=…] [WAIT=1] npx tsx checkout.ts
  *
@@ -28,6 +29,30 @@ const session = await client.checkoutSessions.createPayment({
 // Redirect the customer to the hosted checkout page.
 console.log(`Redirect the customer to ${session.link}`);
 // docs:end checkout-create-payment
+
+{
+	// docs:start checkout-create-payment-fees
+	// The customer pays the price plus your lines and, with processingFee, QBitFlow's fee (grossed
+	// up, so you keep the price and your lines). Test mode caps the total at $5, fees included; the
+	// network fee comes on top.
+	const session = await client.checkoutSessions.createPayment({
+		productName: 'T-shirt',
+		description: 'Blue, size M',
+		price: 3.99, // USD
+		reference: 'order-1044',
+		successUrl: `https://shop.example.com/orders/success?uuid=${Placeholders.UUID}`,
+		cancelUrl: 'https://shop.example.com/orders/cancel',
+		fees: {
+			items: [{ label: 'Shipping', description: 'Standard, 3 to 5 days', amountUsd: 0.75 }],
+			processingFee: true, // omitted: your checkout.customerPaysProcessingFee setting decides
+		},
+	});
+	console.log(`Redirect the customer to ${session.link}`);
+	// docs:end checkout-create-payment-fees
+
+	// A demo: expire it, so that order-1044 can be used again.
+	await client.checkoutSessions.expire(session.uuid);
+}
 
 const sessionUuid = session.uuid;
 
