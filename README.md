@@ -307,7 +307,7 @@ request them in order and concatenate the result (the CSV header once).
 // requests it in windows of at most 95 days (here 4) and concatenates them.
 const rows = await client.accounting.exportJsonRange('2026-01-01', '2026-12-31');
 for (const row of rows.slice(0, 5)) {
-	console.log(row.type, row.paymentUuid, row.txTimeUtc, row.tokenSymbol, row.netAmount);
+	console.log(row.type, row.paymentUuid, row.txTimeUtc, row.currency, row.netAmount);
 }
 
 // The same as CSV text, its header line once.
@@ -428,9 +428,9 @@ console.log(`Redirect the customer to ${session.link}`);
 
 ### Fees
 
-A payment checkout can add amounts to its price with `fees`: your own lines (a tax, shipping, a
-service fee) and QBitFlow's processing fee. The customer sees each line on the checkout and pays
-them with the price:
+A checkout, a payment's or a subscription's, can add amounts to its price with `fees`: your own
+lines (a tax, shipping, a service fee) and QBitFlow's processing fee. The customer sees each line
+on the checkout and pays them with the price (a subscription: with every bill):
 
 <!-- docs:snippet checkout-create-payment-fees -->
 ```ts
@@ -461,16 +461,25 @@ console.log(`Redirect the customer to ${session.link}`);
 - **The processing fee** (`fees.processingFee: true`) is a last line, `Processing fee`, computed
   by QBitFlow on the price and your lines at your platform fee, grossed up and rounded up to the
   cent: QBitFlow's fee is also taken on that line, so you keep at least the price and your lines,
-  as if no fee were taken ($100 + $20 VAT at 1.5 % → a $1.83 processing fee, $121.83 charged,
-  $120.00 kept). `false`: you pay the fee, as without fees. Left out: your
+  as if no fee were taken ($100 + $20 VAT at 0.99 % → a $1.20 processing fee, $121.20 charged,
+  $120.00 kept). The rate is the checkout's: QBitFlow's fee for your space when the checkout is
+  created (a schedule by volume, unless QBitFlow set you a custom rate). `false`: you pay the
+  fee, as without fees. Left out: your
   `checkout.customerPaysProcessingFee` setting decides (in the dashboard, off by default; your
   product links follow it too).
 - **What the customer pays** is the session's `amount`: `price` plus every line. It is what the
   contracts split and what the payment records as its `amount`, with its `price` and `fees`
   ([Payments](#payments-and-failures)). The network fee comes on top, in the currency the
   customer picks. In test mode `amount`, fees included, is at most 5 USD.
-- One-time payments only: `createSubscription` takes no `fees`. A marketplace's organization fee
-  is not passed on: it is taken from the amount as on any payment.
+- **Subscriptions** take the same `fees` (`createSubscription`, the same rules), locked with the
+  price: every bill, the first one and each next one, charges the price plus every line, whatever
+  the product's price or your fee becomes. The `Subscription` keeps them as `fees` next to
+  `priceUsd` (which stays the price); a bill's `amount` and `subscription.upcomingBill`'s
+  `amountUsd` include them, and the maximum and allowance the subscriber signs are sized on that
+  amount. A trial's upgrade keeps the trial's lines. `checkout.customerPaysProcessingFee` applies
+  to subscription checkouts too.
+- A marketplace's organization fee is not passed on: it is taken from the amount as on any
+  payment.
 
 ### Status
 
@@ -531,7 +540,10 @@ console.log(`checkout ${expired.status}`); // expired
 
 Products are optional (a checkout can name an inline product) and give you a reusable catalog
 with payment links. A subscription product carries its terms
-(`subscription: { frequency: { value: 1, unit: DurationUnit.Months } }`).
+(`subscription: { frequency: { value: 1, unit: DurationUnit.Months } }`). A member's key gives a
+product terms (on `create` or `update`) only while the organization's `members.subscriptions`
+policy allows it (`403 policy_disabled` otherwise); with the policy off, the links of the
+member's subscription products open nothing.
 
 <!-- docs:snippet products-create -->
 ```ts
@@ -919,8 +931,25 @@ Every payment, bill, refund and fee between two dates (`YYYY-MM-DD`, both includ
 consecutive windows of at most 95 days (calendar dates, UTC), request them in order and
 concatenate the result (one list; for CSV the header line once, then every window's rows, line
 endings as sent): see [the yearly export](#a-yearly-accounting-export). Rows are typed `payment`,
-`subscriptionHistory`, `refund`, `organizationFee` or `referralFee`; amounts in a token's smallest
-unit are decimal strings, and the empty fields of a row are left out.
+`subscriptionHistory`, `refund`, `organizationFee` or `referralFee`, and the empty fields of a row
+are left out.
+
+- **Dates** are the transactions' (the day their block was mined, in UTC: `txTimeUtc`), so
+  consecutive exports never miss nor repeat an event. Rows are ordered by `txTimeUtc`, `type`,
+  then `paymentUuid`.
+- **Amounts** are in the currency's units (`"7.5"` USDC, not `"7500000"`), as decimal strings,
+  next to `currencyDecimals`. `currency` names what was paid as markets do (`USDC`, or the
+  chain's native currency: `ETH`, `SOL`), and `currencyPriceUsd` is the USD price the amounts
+  were converted at. `grossAmount = platformFee + organizationFee + netAmount` exactly; a
+  refund's net is the refunded amount, negative.
+- **Network fees are never part of the net.** `networkFeesPaidBy` (`NetworkFeesPayer`) says whose
+  wallet paid them: `payer` (a payment or a bill: on top of the amount, in its currency),
+  `merchant` (a refund your space sent) or `organization` (a refund of a payment the organization
+  held for its member). Book `networkFees` (in `networkFeesCurrency`, the chain's native currency
+  on a refund) apart for `merchant` and `organization`.
+- **CSV columns** follow `AccountingEvent`'s field order (what happened, the USD amounts, the
+  same amounts in the currency, the network fees, the rates, the on-chain proof, the ids): read
+  them by header name, not position.
 
 ## Webhooks
 

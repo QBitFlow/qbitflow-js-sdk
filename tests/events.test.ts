@@ -72,15 +72,16 @@ describe('typed data', () => {
 		expect(p.currency?.mainCurrency?.mainCurrency).toBeNull();
 		expect(p.currency?.mainCurrencyId).toBe(3);
 		const m = p.metadata;
-		expect(m.feePercent).toBe(1.5);
-		expect(m.txAmounts.minUnits.merchant).toBe('9850000');
+		expect(m.feePercent).toBe(0.99);
+		expect(m.txAmounts.minUnits.merchant).toBe('9901000');
 		expect(m.txAmounts.minUnits.networkFee).toBe('4200');
-		expect(m.txAmounts.usd.merchant).toBe(9.85);
+		expect(m.txAmounts.usd.merchant).toBe(9.901);
 		expect(m.txAmounts.usd.organization).toBeUndefined();
 		expect(m.txAmounts.usd.networkFee).toBeDefined();
 		expect(m.txMetadata.blockData.timestamp).toBe(1790855998);
 		expect(m.txMetadata.networkFees.unitsConsumed).toBe(95000);
 		expect(m.organizationFee).toBeUndefined();
+		expect(m.txMetadata.mainCurrencyPriceUsd).toBe(4512.37);
 		// Webhooks never carry the API-only fields.
 		expect([p.customer, p.refund, p.refundable]).toEqual([undefined, undefined, undefined]);
 		expect(p.confirmedAt && p.checkoutOpenedAt).toBeTruthy();
@@ -175,8 +176,8 @@ describe('typed data', () => {
 		const first = released.ledgers[0];
 		expect([first.type, first.owedMinUnits, first.owedUsd]).toEqual([
 			'payment',
-			'98500000',
-			98.5,
+			'99010000',
+			99.01,
 		]);
 		expect(first.metadata).not.toBeNull();
 		for (const l of released.ledgers.filter((x) => x.type === 'refund')) {

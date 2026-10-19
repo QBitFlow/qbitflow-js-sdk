@@ -97,6 +97,17 @@ but never published; its changes are part of 3.0.0).
     `Payment.fees` (`FeeLine[]`: `type`, `label`, `description`, `amountUsd` as a decimal
     string; `amount = price + fees`), also in `payment.completed`; `checkout.expired`'s payment
     session has `fees` and `amount`. New open enum `FeeLineType` (`custom`, `processingFee`).
+-   Checkout fees on subscriptions: `createSubscription` takes the same `fees` (`CheckoutFees`,
+    the same rules, errors on `fees.items[i].<field>` after the terms'), locked with the price:
+    every bill charges the price plus every line. `Subscription.fees` (`FeeLine[]`, next to
+    `priceUsd`, which stays the price; also on every `subscription.*` webhook); the session's
+    `fees` and `amount` on a subscription checkout too.
+-   `AccountingEvent` follows the API's export: amounts in the currency's units (not min units),
+    `currency` (was `tokenSymbol`), `currencyPriceUsd`, and the network fees apart from the net:
+    `networkFeesPaidBy` (the open enum `NetworkFeesPayer`: `payer`, `merchant`, `organization`),
+    `networkFees`, `networkFeesCurrency`, `networkFeesCurrencyDecimals`,
+    `networkFeesCurrencyPriceUsd`, `networkFeesUsd`. Its fields are in the CSV's column order; the
+    always-empty `userName`, `userLastName`, `customerName` and `customerLastName` are gone.
 -   `payments.list` / `listCombined` with filters (customer, product, dates, `refunded`,
     `includeMembers` / `userUuid`, `source`, `subscriptionUuid`); `payments.get` with
     `{ includeMembers }`. `failures.list`: the failed payment attempts.

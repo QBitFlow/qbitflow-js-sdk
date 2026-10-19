@@ -109,7 +109,7 @@ export const AttemptStatus = {
 } as const;
 export type AttemptStatus = Open<ValuesOf<typeof AttemptStatus>>;
 
-/** Who added a line to a payment checkout's price ({@link FeeLine.type}). */
+/** Who added a line to a checkout's price ({@link FeeLine.type}). */
 export const FeeLineType = {
 	/** The merchant's own line: a tax, shipping, a service fee. */
 	Custom: 'custom',
@@ -241,6 +241,20 @@ export const AccountingEventType = {
 	ReferralFee: 'referralFee',
 } as const;
 export type AccountingEventType = Open<ValuesOf<typeof AccountingEventType>>;
+
+/** Whose wallet paid an accounting event's network fees ({@link AccountingEvent.networkFeesPaidBy}). */
+export const NetworkFeesPayer = {
+	/** A payment or a bill: the payer, on top of the amount. */
+	Payer: 'payer',
+	/** A refund the space sent from its wallet. */
+	Merchant: 'merchant',
+	/**
+	 * A refund of a payment the organization held for its member, sent from the organization's
+	 * wallet.
+	 */
+	Organization: 'organization',
+} as const;
+export type NetworkFeesPayer = Open<ValuesOf<typeof NetworkFeesPayer>>;
 
 /** An invitation's status (computed when read). */
 export const InvitationStatus = {

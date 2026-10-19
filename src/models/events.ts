@@ -86,7 +86,10 @@ export interface SubscriptionBillingFailed extends Subscription {
 export interface SubscriptionUpcomingBill extends Subscription {
 	/** When it is billed (for a trial: when the trial ends). */
 	billingDate: string;
-	/** The bill, in USD (a **number**, unlike `subscription.billingFailed`'s). */
+	/**
+	 * The bill, in USD (a **number**, unlike `subscription.billingFailed`'s): its `priceUsd` plus
+	 * its `fees` lines.
+	 */
 	amountUsd: number;
 	/** True when the trial ends then: the customer must confirm it to be billed. */
 	trialEnding: boolean;

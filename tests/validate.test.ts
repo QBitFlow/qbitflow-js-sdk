@@ -862,12 +862,56 @@ describe('checkout fees', () => {
 		).toBe(`{"productUuid":"${MEMBER}","fees":{"items":[{"label":"VAT","amountUsd":1}]}}`);
 	});
 
-	it('a subscription checkout sends no fees', () => {
-		const body = P.createSubscriptionSessionBody({
-			productUuid: MEMBER,
-			fees: { processingFee: true },
-		} as never);
-		expect(body).toEqual({ productUuid: MEMBER });
-		expect('fees' in body).toBe(false);
+	describe('a subscription checkout', () => {
+		const sub = (fees: any) => () =>
+			P.createSubscriptionSessionBody({ productUuid: MEMBER, fees });
+		const lines = (n: number) => Array.from({ length: n }, () => line({}));
+
+		it('takes the same fees, by the same rules', () => {
+			expect(fields(sub(undefined))).toEqual([]);
+			expect(fields(sub({ processingFee: true }))).toEqual([]);
+			expect(fields(sub({ processingFee: false, items: lines(10) }))).toEqual([]);
+			expect(fields(sub({ items: lines(11) }))).toEqual(['fees.items']);
+			expect(
+				fields(sub({ items: [{ label: 'a|b', description: ' ', amountUsd: 0.001 }] }))
+			).toEqual([LABEL, DESCRIPTION, AMOUNT]);
+		});
+
+		it("reports the fees' errors with the terms', after them", () => {
+			expect(
+				fields(() =>
+					P.createSubscriptionSessionBody({
+						productUuid: MEMBER,
+						frequency: { value: 1 },
+						fees: { items: [{ label: 'Tax', amountUsd: -1 }] },
+					})
+				)
+			).toEqual(['frequency.unit', AMOUNT]);
+		});
+
+		it('sends them only when given, after the terms', () => {
+			expect(JSON.stringify(sub(undefined)())).toBe(`{"productUuid":"${MEMBER}"}`);
+			expect(JSON.stringify(sub({ processingFee: false })())).toBe(
+				`{"productUuid":"${MEMBER}","fees":{"processingFee":false}}`
+			);
+			expect(
+				JSON.stringify(
+					P.createSubscriptionSessionBody({
+						productName: 'Pro',
+						price: 9.99,
+						frequency: { value: 1, unit: 'months' },
+						fees: {
+							processingFee: true,
+							items: [
+								{ label: 'VAT (20%)', description: 'French VAT', amountUsd: 2 },
+							],
+						},
+					})
+				)
+			).toBe(
+				'{"productName":"Pro","price":9.99,"frequency":{"value":1,"unit":"months"},' +
+					'"fees":{"processingFee":true,"items":[{"label":"VAT (20%)","description":"French VAT","amountUsd":2}]}}'
+			);
+		});
 	});
 });

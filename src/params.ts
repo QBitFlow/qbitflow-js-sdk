@@ -273,12 +273,12 @@ export function customerListQuery(p: CustomerListParams | undefined): string {
 
 // ── Checkout sessions ───────────────────────────────────────────────────────
 
-/** The most fee lines of a payment checkout's own (`fees.items`). */
+/** The most fee lines of a checkout's own (`fees.items`). */
 const MAX_FEE_ITEMS = 10;
 /** The largest amount of a fee line, in USD (`usd=1000000`). */
 const MAX_FEE_USD = 1_000_000;
 
-/** Checks a payment checkout's `fees` when given; field errors on their wire paths. */
+/** Checks a checkout's `fees` when given; field errors on their wire paths. */
 function validateFees(v: Validator, fees: unknown): void {
 	if (fees === undefined || fees === null) return;
 	if (typeof fees !== 'object' || Array.isArray(fees)) {
@@ -308,7 +308,7 @@ function validateFees(v: Validator, fees: unknown): void {
 	});
 }
 
-/** A payment checkout's `fees` on the wire: as given, an empty `description` or `items` left out. */
+/** A checkout's `fees` on the wire: as given, an empty `description` or `items` left out. */
 function feesBody(fees: CheckoutFees | undefined | null): Body | undefined {
 	if (fees === undefined || fees === null) return undefined;
 	const items = fees.items?.map((item) =>
@@ -389,12 +389,15 @@ export function createSubscriptionSessionBody(p: CreateSubscriptionSessionParams
 	const v = new Validator();
 	validateSession(v, p);
 	validateTerms(v, p, '', false);
+	// The fees' errors come after the terms' (the request's order).
+	validateFees(v, p.fees);
 	v.check();
 	return compact({
 		...sessionBody(p),
 		frequency: durationBody(p.frequency),
 		trialPeriod: durationBody(p.trialPeriod),
 		minPeriods: given(p.minPeriods),
+		fees: feesBody(p.fees),
 	});
 }
 

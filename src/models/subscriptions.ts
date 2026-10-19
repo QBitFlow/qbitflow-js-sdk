@@ -12,6 +12,7 @@ import type {
 	SubscriptionStatus,
 } from '../enums.js';
 import type { Currency, CustomerSummary, Duration, TransactionListFilters } from './common.js';
+import type { FeeLine } from './payments.js';
 
 /** A subscription. Grant access while `now < currentPeriodEnd`. */
 export interface Subscription {
@@ -45,8 +46,17 @@ export interface Subscription {
 	actionRequired?: ActionRequired;
 	/** The end of the period paid for (or of the trial): grant access while `now < currentPeriodEnd`. */
 	currentPeriodEnd?: string;
-	/** The price per period the customer subscribed at, in USD (a decimal string; `"0"` for old v1 subscriptions). */
+	/**
+	 * The price per period the customer subscribed at, in USD (a decimal string; `"0"` for old v1
+	 * subscriptions). Every bill charges it plus `fees`.
+	 */
 	priceUsd: string;
+	/**
+	 * What its checkout added to the price, line by line, as the customer saw them (a tax,
+	 * shipping, the processing fee when the customer pays it), locked at signup with the price:
+	 * every bill charges `priceUsd` plus these lines. `[]` without any.
+	 */
+	fees: FeeLine[];
 	/** The customer's maximum per period, in min units (a decimal string); absent on trials and old subscriptions. */
 	maxAmountPerPeriod?: string;
 	/** The date of the last bill. */
