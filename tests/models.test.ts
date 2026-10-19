@@ -133,7 +133,7 @@ describe('model values', () => {
 		expect([p.metadata.orderId, p.paid, p.paidUsd]).toEqual(['order-1', '10.0042', '10.0042']);
 		expect([p.customer?.deleted, p.customer?.firstName]).toEqual([true, 'Ada']);
 		expect([p.refund?.status, p.refund?.refundPercent, p.refund?.amount]).toEqual([
-			RefundStatus.Cancelled,
+			RefundStatus.Approved,
 			'50',
 			'5.0021',
 		]);

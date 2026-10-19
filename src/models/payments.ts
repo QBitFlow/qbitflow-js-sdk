@@ -112,8 +112,8 @@ export interface Payment {
 	paidUsd?: string;
 
 	/**
-	 * Its refund (one per transaction), if any (API reads only). A merchant's refund not sent yet
-	 * is shown, and doesn't make it unrefundable: a new refund replaces it.
+	 * Its refund (one per transaction), if any (API reads only). The merchant's own refund appears
+	 * once its transfer confirmed (approved).
 	 */
 	refund?: RefundSummary;
 	/** Whether it can be refunded now (API reads only). */

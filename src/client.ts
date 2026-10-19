@@ -34,7 +34,7 @@ export interface ClientOptions {
 	/** Bounds each HTTP attempt, in milliseconds (default 30000); a retried call may take longer in total. */
 	timeout?: number;
 	/**
-	 * How many times a retryable call (a read, or one of the 7 idempotent creates) is re-sent
+	 * How many times a retryable call (a read, or one of the 6 idempotent creates) is re-sent
 	 * after a transient failure (default 3); 0 disables retries.
 	 */
 	maxRetries?: number;

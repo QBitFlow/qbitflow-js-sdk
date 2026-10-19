@@ -123,18 +123,19 @@ export type FeeLineType = Open<ValuesOf<typeof FeeLineType>>;
 
 /**
  * Where a refund stands. An approval and a rejection are final: the transaction never gets
- * another refund. A cancelled one never moved money and blocks nothing.
+ * another refund.
  */
 export const RefundStatus = {
-	/** Requested, or started by the merchant and not sent yet. */
+	/** A customer's request not answered yet. */
 	Pending: 'pending',
-	/** The refund transfer is confirmed (`refund.approved`). */
+	/**
+	 * The refund transfer is confirmed (`refund.approved`); the merchant's own refund is recorded
+	 * only then.
+	 */
 	Approved: 'approved',
 	/** Rejected by whoever decides it (`refund.rejected`). */
 	Rejected: 'rejected',
-	/** A merchant's refund dropped before it was sent (announced by nothing). */
-	Cancelled: 'cancelled',
-	/** Declared, never set: a failed approval leaves the refund pending. */
+	/** Declared, never set: a failed approval leaves the request pending. */
 	Failed: 'failed',
 } as const;
 export type RefundStatus = Open<ValuesOf<typeof RefundStatus>>;

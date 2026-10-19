@@ -43,7 +43,7 @@ but never published; its changes are part of 3.0.0).
     `paid`, `owed`, next to their `…MinUnits`) and fee rates in percent (`feePercent`,
     `organizationFeePercent`, `refundPercent`: `'1.5'` is 1.5 %). `CreateProductParams.price` →
     `priceUsd: string`, the session params' inline `price` → `priceUsd: string`, and
-    `FeeItem.amountUsd`, `CreateRefundParams.refundPercent`,
+    `FeeItem.amountUsd`,
     `CreateInvitationParams.organizationFeePercent` and `UpdateMemberParams.organizationFeePercent`
     are strings (no number inputs: a float can't carry `'0.1'` exactly). No `number` is left for
     money in a model or a params type.
@@ -110,10 +110,9 @@ but never published; its changes are part of 3.0.0).
     `SubscriptionStatus.PastDue`), replacing the TypeScript `enum`s with UPPER_CASE members; values
     follow the API's lowerCamelCase (`pastDue`, `trialExpired`, `createPaygSubscription`).
     `LedgerEntryType` and `AccountingEventType` `subscriptionHistory` → `bill`.
-    `RefundStatus.REFUSED` → `RefundStatus.Rejected` (`rejected`); `RefundStatus` adds
-    `Cancelled` (a merchant's draft dropped before it was sent) and keeps `Failed` (declared,
-    never set). `TransactionShortType` and `WebhookPayloadVersion.V1` are removed: v2 is the only
-    payload.
+    `RefundStatus.REFUSED` → `RefundStatus.Rejected` (`rejected`); `RefundStatus` keeps `Failed`
+    (declared, never set). `TransactionShortType` and `WebhookPayloadVersion.V1` are removed: v2
+    is the only payload.
 -   **Errors.** `NotFoundException`, `UnauthorizedException`, `ForbiddenException`,
     `ValidationException`, `RateLimitException`, `ServerException`, `NetworkException` →
     `NotFoundError`, `AuthenticationError`, `PermissionDeniedError`, `ValidationError`,
@@ -159,9 +158,9 @@ but never published; its changes are part of 3.0.0).
     `checkoutSessions.getStatus` → `get`; `payments.listCombined` / `iterateCombined` →
     `transactions.list` / `iterate` (`CombinedPayment` → `Transaction`, `CombinedPaymentSource`
     → `TransactionKind` with `payment` / `bill`, the `source` filter → `type`);
-    `subscriptions.executeTestBilling` → `testBill`; `refunds.initiate` → `create`
-    (`InitiateRefundParams` → `CreateRefundParams`); `refunds.list` (active) and `listInactive` /
-    `iterateInactive` → one `refunds.list` / `iterate` with a `status` filter;
+    `subscriptions.executeTestBilling` → `testBill`; `refunds.initiate` is removed
+    (`InitiateRefundParams` with it: refunds are read only, below); `refunds.list` (active) and
+    `listInactive` / `iterateInactive` → one `refunds.list` / `iterate` with a `status` filter;
     `wallets.listSupportedCurrencies` → `listAcceptedCurrencies` (`SupportedCurrenciesParams` →
     `AcceptedCurrenciesParams`); `currencies.listAvailable` / `listMain` → `currencies.list` with
     `main`; `products.list` and `webhooks.endpoints.list` are paginated (`Page<T>`, with
@@ -206,9 +205,10 @@ but never published; its changes are part of 3.0.0).
     before it), `actionRequired`, `priceUsd`, `cancellationReason`, `dunning`, `metadata`,
     `managementPageLink`; `Allowance`.
 -   `refunds.list` / `iterate` (`status` (repeatable), `txUuid`, `held`, `includeMembers`,
-    `userUuid`), `refunds.get` (`GET /refunds/:uuid`) and `refunds.create` (`POST /refunds`): a
-    merchant's refund of a payment or a bill, signed in the dashboard. A `Refund` carries `paid`,
-    `amount`, its `currency` and, once approved, its `settlement`.
+    `userUuid`), and `refunds.get` (`GET /refunds/:uuid`), read only: a customer's request is
+    answered, and a merchant's own refund sent, from the dashboard (the merchant's is recorded only
+    once its transfer confirmed, `approved`: `refund.approved` is its only event). A `Refund`
+    carries `paid`, `amount`, its `currency` and, once approved, its `settlement`.
 -   `members` (`list`, `get`, `update`, `remove`, `trust`, `listHeldFunds`, `getHeldFunds`,
     `getOwnHeldFunds`) and `invitations` (`create`, `list`, `revoke`) for marketplaces.
 -   `wallets` (`list` with balances, `listForMember`, `listAcceptedCurrencies`),
@@ -227,7 +227,7 @@ but never published; its changes are part of 3.0.0).
     `SubscriptionBilledEvent`, `RefundApprovedEvent`, `MemberJoinedEvent`,
     `CheckoutExpiredEvent`… 15 types) and `UnknownEvent` for the others; `EventType` constants.
 -   An async iterator next to every paginated list (`for await`): `iterate`, `iterateBills`.
--   Retries: reads and the 7 creates are retried on network errors, timeouts, 5xx, 429 (after
+-   Retries: reads and the 6 creates are retried on network errors, timeouts, 5xx, 429 (after
     `Retry-After`, at most 60 s) and `409 idempotency_key_in_use`, 3 times by default with a
     1 s · 2ⁿ back-off; `maxRetries: 0` disables them; `isRetryable(err)`. Other writes are never
     retried (2.1.0 retried every method, POSTs included).
@@ -241,8 +241,8 @@ but never published; its changes are part of 3.0.0).
     is sent on failure): names, texts, references (also on the `reference` filters and
     `getByReference`), emails (also the customers' `email` filter), phones, URLs, USD amounts as
     strings (at most 2 decimals, above 0, at most 1,000,000), percents as strings (at most 2
-    decimals and 16 characters; `refundPercent` above 0 up to 100, `organizationFeePercent` 0 to
-    50, required on `UpdateMemberParams`), metadata (at most 50 keys of 1 to 40 of
+    decimals and 16 characters; `organizationFeePercent` 0 to 50, required on
+    `UpdateMemberParams`), metadata (at most 50 keys of 1 to 40 of
     `A-Z a-z 0-9 _ - . :`, values of at most 500 characters without control or bidirectional
     characters), durations, cursors (at most 200 characters), the refunds' `status` filter (at
     most 5 known statuses), the transactions' `type`, the `release@` transaction prefix, and a
@@ -279,7 +279,8 @@ but never published; its changes are part of 3.0.0).
     the webhook router), `errors-and-retries.ts`; `MIGRATION-v3.md`; README "Integration
     recipes" (Next.js, Express, Hono and Workers, plain Node).
 -   Website snippets `transactions-list`, `subscriptions-update` and `refunds-get` (new ids; none
-    renamed or retired).
+    renamed). `refunds-create` is listed as unsupported (refunds are read only; the id stays in the
+    website's catalog, marked retired).
 
 ### Changed
 

@@ -28,7 +28,7 @@ QBitFlow SDKs share:
 - **the client**: key and option checks, defaults, `onBehalfOf` (client and request level),
   `me()`;
 - **request building for every method**: verb, path and path escaping, query, body, and the
-  headers (`X-API-Key`, `User-Agent`, `On-Behalf-Of`, `X-Request-Id`, `Idempotency-Key` on the 7
+  headers (`X-API-Key`, `User-Agent`, `On-Behalf-Of`, `X-Request-Id`, `Idempotency-Key` on the 6
   creates only, stable across a retried 503);
 - **the retry matrix**: which methods are retried, on what, the back-off, `Retry-After` and its
   60-second cap, `maxRetries: 0`, cancellation with an `AbortSignal`;

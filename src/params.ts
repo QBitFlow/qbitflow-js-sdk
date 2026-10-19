@@ -47,7 +47,7 @@ import type {
 	SubscriptionTermsParams,
 	UpdateProductParams,
 } from './models/products.js';
-import type { CreateRefundParams, RefundListParams } from './models/refunds.js';
+import type { RefundListParams } from './models/refunds.js';
 import type {
 	CancelSubscriptionParams,
 	SubscriptionListParams,
@@ -544,24 +544,6 @@ export function cancelSubscriptionQuery(p: CancelSubscriptionParams | undefined)
 
 // ── Refunds ─────────────────────────────────────────────────────────────────
 
-export function createRefundBody(p: CreateRefundParams): Body {
-	requireParams(p);
-	const v = new Validator();
-	if (v.required('txUuid', p.txUuid)) v.txId('txUuid', p.txUuid);
-	if (p.refundPercent !== undefined && p.refundPercent !== null && p.refundPercent !== '') {
-		v.percent('refundPercent', p.refundPercent, 100, true);
-	}
-	v.text('reason', p.reason, 0, 500);
-	v.text('merchantMessage', p.merchantMessage, 0, 500);
-	v.check();
-	return compact({
-		txUuid: p.txUuid,
-		refundPercent: nonEmpty(p.refundPercent),
-		reason: nonEmpty(p.reason),
-		merchantMessage: nonEmpty(p.merchantMessage),
-	});
-}
-
 export function refundListQuery(p: RefundListParams | undefined): string {
 	optionalParams(p);
 	if (!p) return '';
@@ -603,7 +585,7 @@ export function updateMemberBody(p: UpdateMemberParams): Body {
 	requireParams(p);
 	const v = new Validator();
 	if (v.required('organizationFeePercent', p.organizationFeePercent))
-		v.percent('organizationFeePercent', p.organizationFeePercent, 50, false);
+		v.percent('organizationFeePercent', p.organizationFeePercent, 50);
 	v.check();
 	return { organizationFeePercent: p.organizationFeePercent };
 }
@@ -618,7 +600,7 @@ export function createInvitationBody(p: CreateInvitationParams): Body {
 		p.organizationFeePercent !== null &&
 		p.organizationFeePercent !== ''
 	) {
-		v.percent('organizationFeePercent', p.organizationFeePercent, 50, false);
+		v.percent('organizationFeePercent', p.organizationFeePercent, 50);
 	}
 	v.url('redirectUrl', p.redirectUrl);
 	v.check();

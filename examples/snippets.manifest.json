@@ -23,7 +23,6 @@
     "subscriptions-cancel": "examples/subscriptions.ts",
     "subscriptions-test-bill": "examples/subscriptions.ts",
     "has-access": "examples/subscriptions.ts",
-    "refunds-create": "examples/refunds.ts",
     "refunds-list": "examples/refunds.ts",
     "members-invite": "examples/marketplace.ts",
     "members-list": "examples/marketplace.ts",
@@ -48,5 +47,7 @@
     "subscriptions-update": "examples/subscriptions.ts",
     "refunds-get": "examples/refunds.ts"
   },
-  "unsupported": {}
+  "unsupported": {
+    "refunds-create": "API v2 has no refund create for API keys: a merchant's refund is sent from the dashboard (POST /refunds/intent, then POST /refunds, frontend only). Refunds are read only in the SDK."
+  }
 }

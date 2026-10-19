@@ -111,9 +111,9 @@ describe('query encoding', () => {
 		const q = new Query()
 			.add('status', 'pending')
 			.set('limit', '5')
-			.add('status', 'cancelled')
+			.add('status', 'rejected')
 			.add('a', 'x');
-		expect(q.encode()).toBe('a=x&limit=5&status=pending&status=cancelled');
+		expect(q.encode()).toBe('a=x&limit=5&status=pending&status=rejected');
 		expect(new Query().add('k', '1').set('k', '2').encode()).toBe('k=2');
 	});
 

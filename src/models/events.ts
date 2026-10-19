@@ -242,14 +242,14 @@ export type SubscriptionUpcomingBillEvent = EventEnvelope<
 	SubscriptionUpcomingBill
 >;
 /**
- * `refund.requested`: a new pending refund, a customer's request (`initiatedBy` `customer`) or a
- * merchant's own (`refunds.create`).
+ * `refund.requested`: a new pending refund, always a customer's request (`initiatedBy`
+ * `customer`). A merchant's own refund is announced only by `refund.approved`.
  */
 export type RefundRequestedEvent = EventEnvelope<'refund.requested', Refund>;
 /**
  * `refund.approved` (was `refund.completed`): the refund, approved, its transfer confirmed
  * (`txHash`, `settlement.transaction`); `refundPercent` and `amount` are the share actually paid
- * back.
+ * back. For a merchant's own refund (`initiatedBy` `merchant`) it is the first and only event.
  */
 export type RefundApprovedEvent = EventEnvelope<'refund.approved', Refund>;
 /**

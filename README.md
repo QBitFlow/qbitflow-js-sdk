@@ -864,43 +864,30 @@ for await (const r of client.refunds.iterate({
 }
 ```
 
-`refunds.get` reads one refund by its `refund@…` id, cancelled ones included:
+`refunds.get` reads one refund by its `refund@…` id:
 
 <!-- docs:snippet refunds-get -->
 ```ts
 const refund = await client.refunds.get(refundUuid); // refund@…
-// pending, approved, rejected or cancelled (a merchant's draft dropped before it was sent).
+// pending (a customer's request), approved or rejected.
 const { uuid, status, refundPercent, amount, currency } = refund;
 console.log(`${uuid}: ${status}, ${refundPercent}% = ${amount} ${currency.symbol}`);
 ```
 <!-- /docs:snippet -->
 
-`refunds.create` starts a refund of a payment (`pay@…`) or a bill (`sub-hist@…`) of the space.
-**It creates a pending refund: no money moves until you sign the transfer in the dashboard**,
-from the wallet that was paid. `refund.approved` tells you when it is sent.
+Refunds are read only here: there is no create. A refund is **requested by the customer** (the
+refund page; you approve or reject it in the dashboard) or **sent by you from the dashboard**,
+signed from the wallet that was paid. Yours exists only once its transfer confirmed: it is recorded
+`approved`, and `refund.approved` (with `initiatedBy` `merchant`) is the first and only event about
+it. `refund.requested` is always a customer's request.
 
-<!-- docs:snippet refunds-create -->
-```ts
-// A pending refund: no money moves until you sign the transfer in the dashboard, from the
-// wallet that was paid. refund.approved tells you when it is sent.
-const refund = await client.refunds.create({
-	txUuid: paymentUuid, // a payment (pay@…) or a bill (sub-hist@…)
-	refundPercent: '50', // a percent string, of what the customer paid; left out: '100'
-	reason: 'Damaged item',
-});
-console.log(`refund ${refund.uuid}: ${refund.status}`); // pending
-```
-<!-- /docs:snippet -->
+`refundPercent` is a percent string (`'100'`: all of it) of everything the customer paid (`paid`,
+network fee included); `amount` / `amountMinUnits` / `amountUsd` is what it sends back. There is
+one refund per transaction, whatever it became: `payment.refundable` / `notRefundableReason` say
+whether one would be accepted now.
 
-`refundPercent` is a percent string (`'50'`: above 0, at most `'100'`, the default) of everything
-the customer paid (`paid`, network fee included); `amount` / `amountMinUnits` / `amountUsd` is what
-it sends back. `merchantMessage` adds a note for the customer. One refund per transaction: a
-second is a `ConflictError` `refund_already_exists` (`details.refundUuid`; only your own unsent
-draft gives way). A refund is `pending`, `approved`, `rejected` or `cancelled` (your draft dropped
-before it was sent; `failed` is declared but never set); `initiatedBy` is `customer` (a request you
-answer in the dashboard) or `merchant`.
-A held seller's payment already released to them can no longer be refunded
-(`409 held_funds_released`).
+A refund is `pending` (a customer's request waiting for your answer), `approved` or `rejected`
+(both final); `failed` is declared but never set. `initiatedBy` is `customer` or `merchant`.
 
 ## Marketplaces
 
@@ -1388,7 +1375,7 @@ builds, even with two copies of the package installed):
 | `AuthenticationError` | 401 | a missing, unknown, expired or revoked key (a removed member's keys too) |
 | `PermissionDeniedError` | 403 | `forbidden`, `policy_disabled` (`details.policy`), `plan_required` |
 | `NotFoundError` | 404 | unknown, deleted, or outside the request's space; also a `getByReference` that found nothing (code `not_found`, the list's `requestId`) |
-| `ConflictError` | 409 | `unique_violation` (`details.field`), `tx_already_sent`, `merchant_not_ready` (`details.reason`), `refund_already_exists` (`details.refundUuid`), `held_funds_released`, `held_funds_pending`, `already_joined`, `payment_not_due`, `subscription_already_stopped_or_inactive`, `idempotency_key_in_use`, `conflict` |
+| `ConflictError` | 409 | `unique_violation` (`details.field`), `tx_already_sent`, `merchant_not_ready` (`details.reason`), `held_funds_pending`, `already_joined`, `payment_not_due`, `subscription_already_stopped_or_inactive`, `idempotency_key_in_use`, `conflict` |
 | `GoneError` | 410 | `merchant_closed`: a removed member's or a closed organization's space |
 | `IdempotencyError` | 422 `idempotency_key_reused` | an `Idempotency-Key` reused for another request: a bug, never retried |
 | `RateLimitError` | 429 | `retryAfter` (seconds), `limit`, `periodSeconds` |
@@ -1431,9 +1418,9 @@ try {
 markup characters), references (`A-Z a-z 0-9 . _ : @ -`, 1 to 100, on creates and on the
 `reference` filters and `getByReference`), emails (the customers' `email` filter too), phone
 numbers, absolute `http(s)` URLs, USD amounts (decimal strings with at most 2 decimals, above 0, at
-most 1,000,000), percents (decimal strings, at most 2 decimals: `refundPercent` above 0 up to 100,
-`organizationFeePercent` 0 to 50), metadata (keys, values, at most 50 keys), durations (a frequency
-between 1 unit and 1 year), UUIDs and transaction ids, dates, cursors (at most 200 characters), the
+most 1,000,000), percents (decimal strings, at most 2 decimals: `organizationFeePercent` 0 to 50),
+metadata (keys, values, at most 50 keys), durations (a frequency between 1 unit and 1 year), UUIDs
+and transaction ids, dates, cursors (at most 200 characters), the
 checkout's product choice, the enum filters (refund `status`, transaction `type`, failure `kind`
 and `category`, invitation `status`), and exclusive filters. A failure is a `ValidationError` with
 `status` `undefined`, `code` `''`, its message `validation failed` followed by the field list, and
@@ -1446,7 +1433,7 @@ uniqueness.
 
 | | |
 |---|---|
-| Retried methods | every read (GET), and the 7 creates: `checkoutSessions.createPayment`, `checkoutSessions.createSubscription`, `products.create`, `customers.create`, `webhooks.endpoints.create`, `invitations.create`, `refunds.create` |
+| Retried methods | every read (GET), and the 6 creates: `checkoutSessions.createPayment`, `checkoutSessions.createSubscription`, `products.create`, `customers.create`, `webhooks.endpoints.create`, `invitations.create` |
 | Never retried | every other write: updates (`subscriptions.update` included), deletes, `checkoutSessions.expire`, `subscriptions.cancel`, `subscriptions.testBill`, `members.trust`, `members.remove`, `invitations.revoke`, `webhooks.verifyRemote`; a 429 on them is thrown, not retried |
 | Retried on | a network error or timeout, a 5xx, a 429, a 409 `idempotency_key_in_use` |
 | Not retried on | any other 4xx (422 `idempotency_key_reused` included), a 3xx, an unusable response |
@@ -1474,7 +1461,7 @@ pass your own stable key, derived from the order:
 
 <!-- docs:snippet retries-idempotency -->
 ```ts
-// Reads and the 7 creates are retried on network errors, 5xx and 429, waiting 1 s, 2 s, 4 s…
+// Reads and the 6 creates are retried on network errors, 5xx and 429, waiting 1 s, 2 s, 4 s…
 // (default: 3 retries; 0 turns them off). timeout bounds each attempt, in milliseconds.
 const client = QBitFlow.fromEnv({ maxRetries: 5, timeout: 15_000 });
 
@@ -1529,7 +1516,7 @@ naming it), `QBITFLOW_BASE_URL` and `QBITFLOW_ON_BEHALF_OF` (an empty variable c
 | Request option (any method, last argument) | |
 |---|---|
 | `onBehalfOf` | acts in that member's space for this call; `''` forces the organization's (no header) |
-| `idempotencyKey` | the 7 creates only: your own `Idempotency-Key` |
+| `idempotencyKey` | the 6 creates only: your own `Idempotency-Key` |
 | `requestId` | sends `X-Request-Id` (1 to 128 of `A-Z a-z 0-9 - _ . :`) |
 | `signal` | an `AbortSignal` cancelling the call, its retries and its waits |
 
