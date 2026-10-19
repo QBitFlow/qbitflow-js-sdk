@@ -322,6 +322,50 @@ const ROUTES: RouteCase[] = [
 		reply: fx('CheckoutSession'),
 	},
 	{
+		name: 'checkoutSessions.createSubscription with fees',
+		call: (c, o) =>
+			c.checkoutSessions.createSubscription(
+				{
+					productName: 'Pro',
+					price: 9.99,
+					frequency: { value: 1, unit: 'months' },
+					fees: {
+						processingFee: true,
+						items: [{ label: 'VAT (20%)', description: 'French VAT', amountUsd: 2 }],
+					},
+				},
+				o
+			),
+		method: 'POST',
+		path: '/transaction/session-checkout/new/subscription',
+		idempotent: true,
+		status: 201,
+		body: {
+			productName: 'Pro',
+			price: 9.99,
+			frequency: { value: 1, unit: 'months' },
+			fees: {
+				processingFee: true,
+				items: [{ label: 'VAT (20%)', description: 'French VAT', amountUsd: 2 }],
+			},
+		},
+		reply: fx('CheckoutSession'),
+	},
+	{
+		name: 'checkoutSessions.createSubscription processing fee off',
+		call: (c, o) =>
+			c.checkoutSessions.createSubscription(
+				{ productUuid: UUID_A, fees: { processingFee: false } },
+				o
+			),
+		method: 'POST',
+		path: '/transaction/session-checkout/new/subscription',
+		idempotent: true,
+		status: 201,
+		body: { productUuid: UUID_A, fees: { processingFee: false } },
+		reply: fx('CheckoutSession'),
+	},
+	{
 		name: 'checkoutSessions.getStatus',
 		call: (c, o) => c.checkoutSessions.getStatus(PAY_ID, o),
 		method: 'GET',
@@ -964,7 +1008,7 @@ describe('retry policy per method', () => {
 				n: 2,
 			});
 			if (rc.idempotent) {
-				idempotent.add(rc.name.replace(/ (minimal|with fees)$/, ''));
+				idempotent.add(rc.name.replace(/ (minimal|with fees|processing fee off)$/, ''));
 				const [k0, k1] = ts.recorded.map((r) => r.headers['idempotency-key']);
 				expect(k0).toBeTruthy();
 				expect(k1).toBe(k0);
@@ -1147,6 +1191,15 @@ describe('validation before the request', () => {
 				c.checkoutSessions.createSubscription({
 					productUuid: UUID_A,
 					frequency: { value: 1 },
+				}),
+		],
+		[
+			'checkoutSessions.createSubscription fee label',
+			'fees.items[0].label',
+			(c) =>
+				c.checkoutSessions.createSubscription({
+					productUuid: UUID_A,
+					fees: { items: [{ label: '', amountUsd: 2 }] },
 				}),
 		],
 		[

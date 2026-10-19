@@ -98,8 +98,9 @@ export interface Payment {
 }
 
 /**
- * An amount a one-time payment's checkout adds to its product's price, shown to the customer and
- * paid with it (`Payment.fees`, and the session's `fees` in `checkout.expired`).
+ * An amount a checkout adds to its product's price, shown to the customer and paid with it, a
+ * subscription's with every bill (`Payment.fees`, `Subscription.fees`, and the session's `fees` in
+ * `checkout.expired`).
  */
 export interface FeeLine {
 	/**

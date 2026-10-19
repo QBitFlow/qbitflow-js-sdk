@@ -9,15 +9,15 @@
  *
  * The read-only group only reads. The write group also needs `QBITFLOW_LIVE_WRITES=1`, and a
  * test-mode key (per `me()`) unless `QBITFLOW_ALLOW_LIVE_MODE_WRITES=1`; it creates a product, a
- * customer, two checkout sessions (one with fees) and a webhook endpoint, and deletes (or
- * expires) each of them.
+ * customer, three checkout sessions (a payment's and a subscription's with fees) and a webhook
+ * endpoint, and deletes (or expires) each of them.
  *
  *     set -a; source ../.local.env; set +a   # never print it
  *     npm run test:live
  */
 
 import { QBitFlow } from '../src/client';
-import { ConflictError, NotFoundError } from '../src/errors';
+import { ConflictError, NotFoundError, PermissionDeniedError } from '../src/errors';
 import type { Me } from '../src/models/members';
 
 const KEY = process.env.QBITFLOW_API_KEY ?? '';
@@ -237,9 +237,13 @@ liveWrites('live: writes', () => {
 		}
 	});
 
-	it('checkout session with fees: create, status, expire', async () => {
+	it('checkout sessions with fees: create, status, expire', async () => {
 		if (!allowed) return;
 		let session;
+		const fees = {
+			items: [{ label: 'Shipping', description: 'Standard, 3 to 5 days', amountUsd: 0.75 }],
+			processingFee: true,
+		};
 		try {
 			// The documentation's fees checkout: $3.99 + $0.75 shipping + the processing fee, under
 			// the test-mode cap of $5 (fees included).
@@ -250,16 +254,7 @@ liveWrites('live: writes', () => {
 				reference: `order-1044-${suffix()}`,
 				successUrl: 'https://shop.example.com/orders/success?uuid={{UUID}}',
 				cancelUrl: 'https://shop.example.com/orders/cancel',
-				fees: {
-					items: [
-						{
-							label: 'Shipping',
-							description: 'Standard, 3 to 5 days',
-							amountUsd: 0.75,
-						},
-					],
-					processingFee: true,
-				},
+				fees,
 			});
 		} catch (err) {
 			if (err instanceof ConflictError && err.code === 'merchant_not_ready') return; // no currency accepted
@@ -272,6 +267,35 @@ liveWrites('live: writes', () => {
 			expect((await c.checkoutSessions.expire(session.uuid)).status).toBe('expired');
 		} finally {
 			await c.checkoutSessions.expire(session.uuid).catch((err: unknown) => {
+				if (!(err instanceof ConflictError) && !(err instanceof NotFoundError)) throw err; // already final
+			});
+		}
+
+		// A subscription checkout takes the same fees, charged with every bill.
+		let sub;
+		try {
+			sub = await c.checkoutSessions.createSubscription({
+				productName: 'Pro',
+				description: 'Monthly plan',
+				price: 3.99,
+				reference: `sub-1044-${suffix()}`,
+				frequency: { value: 1, unit: 'months' },
+				successUrl: 'https://shop.example.com/orders/success?uuid={{UUID}}',
+				cancelUrl: 'https://shop.example.com/orders/cancel',
+				fees,
+			});
+		} catch (err) {
+			if (err instanceof PermissionDeniedError && err.code === 'policy_disabled') {
+				console.warn('subscriptions are off for this member (members.subscriptions)');
+				return;
+			}
+			throw err;
+		}
+		try {
+			expect(sub.uuid.startsWith('sub@')).toBe(true);
+			expect(sub.link).toBeTruthy();
+		} finally {
+			await c.checkoutSessions.expire(sub.uuid).catch((err: unknown) => {
 				if (!(err instanceof ConflictError) && !(err instanceof NotFoundError)) throw err; // already final
 			});
 		}

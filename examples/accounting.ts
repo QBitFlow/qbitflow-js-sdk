@@ -16,7 +16,7 @@ const client = QBitFlow.fromEnv();
 // requests it in windows of at most 95 days (here 4) and concatenates them.
 const rows = await client.accounting.exportJsonRange('2026-01-01', '2026-12-31');
 for (const row of rows.slice(0, 5)) {
-	console.log(row.type, row.paymentUuid, row.txTimeUtc, row.tokenSymbol, row.netAmount);
+	console.log(row.type, row.paymentUuid, row.txTimeUtc, row.currency, row.netAmount);
 }
 
 // The same as CSV text, its header line once.

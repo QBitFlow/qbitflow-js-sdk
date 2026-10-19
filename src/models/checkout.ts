@@ -52,15 +52,15 @@ export interface PaymentSessionData {
 	/** The product's price in USD. */
 	price?: number;
 	/**
-	 * A payment checkout's fees, in the order the checkout shows them: the merchant's lines, then
-	 * the processing fee when the customer pays it. `[]` without any (always, on a subscription
-	 * session).
+	 * What the checkout adds to the price, line by line, in the order the checkout shows them: the
+	 * merchant's lines, then the processing fee when the customer pays it. A subscription's are
+	 * charged with every bill. `[]` without any.
 	 */
 	fees: FeeLine[];
 	/**
 	 * What the customer pays in USD before the network fee: the price plus every line of `fees`
-	 * (the payment's `amount`). The network fee comes on top, once the customer picks a currency.
-	 * Absent on a subscription session.
+	 * (the payment's `amount`, or each bill's of a subscription). The network fee comes on top,
+	 * once the customer picks a currency.
 	 */
 	amount?: number;
 	/** Where the customer goes after paying (placeholders filled). */
@@ -139,25 +139,29 @@ export interface CreatePaymentSessionParams {
 }
 
 /**
- * What a payment checkout adds to its price (`CreatePaymentSessionParams.fees`). The customer
- * sees your lines in this order, then the processing fee, and pays them with the price; the
- * network fee still comes on top of the total.
+ * What a checkout adds to its price: a one-time payment's (`CreatePaymentSessionParams.fees`), or
+ * a subscription's (`CreateSubscriptionSessionParams.fees`, each of its bills then charging the
+ * price and the same lines). The customer sees your lines in this order, then the processing fee,
+ * and pays them with the price; the network fee still comes on top of the total.
  */
 export interface CheckoutFees {
 	/**
 	 * `true`: the customer pays QBitFlow's processing fee, a last line `Processing fee` computed
 	 * on the price and your lines at your platform fee, grossed up (the fee is also taken on the
 	 * line itself) and rounded up to the cent, so you keep at least the price and your lines, as
-	 * if no fee were taken ($100 + $20 VAT at 1.5 % → a $1.83 processing fee, $121.83 charged,
-	 * $120.00 kept). `false`: you pay it, as without fees. Omitted: your
-	 * `checkout.customerPaysProcessingFee` setting decides (set in the dashboard; off by default).
+	 * if no fee were taken ($100 + $20 VAT at 0.99 % → a $1.20 processing fee, $121.20 charged,
+	 * $120.00 kept). Your platform fee is the checkout's rate: QBitFlow's fee for your space when
+	 * the checkout is created (a volume schedule unless QBitFlow set you a custom rate). A
+	 * marketplace's organization fee is not passed on. `false`: you pay it, as without fees.
+	 * Omitted: your `checkout.customerPaysProcessingFee` setting decides (set in the dashboard;
+	 * off by default).
 	 */
 	processingFee?: boolean;
 	/** Up to 10 lines of your own, shown in this order before the processing fee. */
 	items?: FeeItem[];
 }
 
-/** A line of your own on a payment checkout (`CheckoutFees.items`). */
+/** A line of your own on a checkout (`CheckoutFees.items`). */
 export interface FeeItem {
 	/**
 	 * The line's name, as the checkout shows it (`VAT (20%)`, `Shipping`): 1 to 40 characters on
@@ -176,8 +180,7 @@ export interface FeeItem {
 
 /**
  * Opens a subscription checkout session (`checkoutSessions.createSubscription`): the payment
- * session's fields (but `fees`: a subscription checkout takes none), plus the terms, each optional
- * over a subscription product's.
+ * session's fields, plus the terms, each optional over a subscription product's.
  */
 export interface CreateSubscriptionSessionParams extends Omit<CreatePaymentSessionParams, 'fees'> {
 	/**
@@ -189,4 +192,14 @@ export interface CreateSubscriptionSessionParams extends Omit<CreatePaymentSessi
 	trialPeriod?: Duration;
 	/** The periods the customer commits to before cancelling, at most 1000 (0: none). */
 	minPeriods?: number;
+	/**
+	 * Amounts the customer pays on top of the price (a tax, shipping, QBitFlow's processing fee),
+	 * shown line by line and locked with the price: every bill (the first one, at creation, and
+	 * each next one) charges the price plus every line. The subscription keeps them as
+	 * `Subscription.fees`, its `priceUsd` staying the price. The maximum per period and the
+	 * allowance the subscriber signs are sized on that amount, and QBitFlow's fee is taken on it.
+	 * In test mode that amount, fees included, is at most $5. Omitted: no lines of your own, and
+	 * the processing fee follows your `checkout.customerPaysProcessingFee` setting.
+	 */
+	fees?: CheckoutFees;
 }

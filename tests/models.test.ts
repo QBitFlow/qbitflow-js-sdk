@@ -1,5 +1,8 @@
 import type { Schema } from '../src/decode';
+import { NetworkFeesPayer } from '../src/enums';
+import type { AccountingEvent } from '../src/models/accounting';
 import type { Payment } from '../src/models/payments';
+import type { Subscription } from '../src/models/subscriptions';
 import * as S from '../src/schemas';
 import { MODEL_FIXTURES } from './fixtures/models';
 
@@ -180,5 +183,86 @@ describe('checkout fees in the models', () => {
 			ctx
 		);
 		expect([plain.fees, plain.amount, 'amount' in plain]).toEqual([[], undefined, false]);
+	});
+
+	it("a subscription's price and fees", () => {
+		const sb = decodeStrict('Subscription').value as Subscription;
+		expect(sb.priceUsd).toBe('9.99');
+		expect(sb.fees).toEqual([
+			{ type: 'custom', label: 'VAT (20%)', description: 'French VAT', amountUsd: '2.00' },
+			{ type: 'processingFee', label: 'Processing fee', amountUsd: '0.13' },
+		]);
+		const plain = S.SubscriptionSchema.decode(
+			JSON.parse('{"uuid":"sub@1","priceUsd":"9.99","fees":null}'),
+			'',
+			ctx
+		);
+		expect(plain.fees).toEqual([]);
+		expect(S.SubscriptionSchema.decode(JSON.parse('{"uuid":"sub@1"}'), '', ctx).fees).toEqual(
+			[]
+		);
+	});
+});
+
+describe('accounting events', () => {
+	const ctx = {
+		fail: (path: string, expected: string) => new Error(`${path} should be ${expected}`),
+	};
+
+	it('a refund row: amounts in units, the network fees apart', () => {
+		const ae = decodeStrict('AccountingEvent').value as AccountingEvent;
+		expect(ae.currency).toBe('USDC');
+		expect(ae.currencyPriceUsd).toBe(1);
+		expect(ae.networkFeesPaidBy).toBe(NetworkFeesPayer.Merchant);
+		expect([
+			ae.networkFeesCurrency,
+			ae.networkFeesCurrencyDecimals,
+			ae.networkFeesCurrencyPriceUsd,
+		]).toEqual(['ETH', 18, 4512.37]);
+		expect([ae.grossAmount, ae.netAmount, ae.networkFees]).toEqual([
+			'-10.0042',
+			'-10.0042',
+			'0.0000012',
+		]);
+		expect(ae.txTimeUtc).toBe('2026-09-13T19:23:26.620071Z');
+		for (const gone of [
+			'tokenSymbol',
+			'userName',
+			'userLastName',
+			'customerName',
+			'customerLastName',
+		]) {
+			expect(gone in ae).toBe(false);
+		}
+		// The fields come in the CSV's column order (the fixture's).
+		expect(Object.keys(ae)).toEqual(Object.keys(JSON.parse(MODEL_FIXTURES.AccountingEvent)));
+	});
+
+	it('a referralFee row: only what the referrer earned; no network fees, no payer', () => {
+		const rf = S.AccountingEventSchema.decode(
+			JSON.parse(
+				'{"txTimeUtc":"2026-09-13T19:23:26Z","type":"referralFee","referralFeeUsd":0.02,"chain":"SOL",' +
+					'"currency":"SOL","currencyDecimals":9,"currencyPriceUsd":150.5,"referralFee":"0.000132","referralFeePercent":20,' +
+					'"blockNumberOrSlot":"1","tokenContractOrMint":""}'
+			),
+			'',
+			ctx
+		);
+		expect([rf.type, rf.currency, rf.referralFee]).toEqual(['referralFee', 'SOL', '0.000132']);
+		expect([
+			rf.networkFeesPaidBy,
+			rf.networkFeesCurrencyDecimals,
+			rf.networkFees,
+			rf.grossAmountUsd,
+		]).toEqual([undefined, undefined, undefined, undefined]);
+	});
+
+	it('keeps an unknown payer', () => {
+		const ev = S.AccountingEventSchema.decode(
+			JSON.parse('{"type":"refund","networkFeesPaidBy":"relayer"}'),
+			'',
+			ctx
+		);
+		expect(ev.networkFeesPaidBy).toBe('relayer');
 	});
 });

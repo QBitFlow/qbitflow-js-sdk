@@ -29,9 +29,12 @@ export interface WebhookEndpoint {
 	rotatedAt?: string;
 	/** When it was disabled; absent while enabled. */
 	disabledAt?: string;
-	/** Why: `failing`, `owner` or `closed`. */
+	/**
+	 * Why: `failing` (live mode only: a test-mode endpoint is never disabled for failing), `owner`
+	 * or `closed`.
+	 */
 	disabledReason?: EndpointDisabledReason;
-	/** When its deliveries started failing. */
+	/** When its deliveries started failing (live mode: failing for 3 days, it is disabled). */
 	failingSince?: string;
 	/** Its last successful delivery. */
 	lastDeliveredAt?: string;

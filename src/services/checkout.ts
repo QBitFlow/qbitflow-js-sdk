@@ -79,6 +79,10 @@ export class CheckoutSessionsService {
 	 * 201): its `link`, its `sub@…` id and its expiry. Sends an `Idempotency-Key` and is retried
 	 * on transient failures. The subscription exists once the customer signed (a free trial) or
 	 * paid: act on `subscription.created`. Terms left out come from a subscription product.
+	 *
+	 * `fees` (optional) adds lines to the price, as for {@link createPayment}, locked with it:
+	 * every bill charges the price plus every line (the session's `amount`, the subscription's
+	 * `priceUsd` plus `fees`), and the network fee on top of that.
 	 */
 	async createSubscription(
 		params: CreateSubscriptionSessionParams,
