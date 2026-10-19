@@ -30,7 +30,7 @@ export const SIGNATURE_HEADER = 'QBitFlow-Signature';
 export const EVENT_ID_HEADER = 'QBitFlow-Event-Id';
 /** The header carrying the event's type. */
 export const EVENT_TYPE_HEADER = 'QBitFlow-Event-Type';
-/** The header carrying the payload version (`v1` or `v2`). */
+/** The header carrying the payload version (`v2`, the only one). */
 export const WEBHOOK_VERSION_HEADER = 'QBitFlow-Webhook-Version';
 /** How far a signature's timestamp may be from now by default, in seconds. */
 export const DEFAULT_TOLERANCE = 300;
@@ -217,10 +217,7 @@ export function parseEvent(rawBody: RawBody): Event {
 	}
 	const envelope = EnvelopeSchema.decode(value, '', eventContext('body', ''));
 	if (envelope.version !== 'v2') {
-		throw fieldError(
-			'version',
-			'must be v2: the endpoint is still on v1, move it to v2 in the dashboard'
-		);
+		throw fieldError('version', 'must be v2 (unsupported payload version)');
 	}
 	const schema = Object.prototype.hasOwnProperty.call(EVENT_DATA_SCHEMAS, envelope.type)
 		? EVENT_DATA_SCHEMAS[envelope.type]

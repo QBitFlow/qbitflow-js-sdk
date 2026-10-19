@@ -1,8 +1,21 @@
-import type { Schema } from '../src/decode';
-import { NetworkFeesPayer } from '../src/enums';
+import type { DecodeContext, Schema } from '../src/decode';
+import {
+	Chain,
+	FeeLineType,
+	LedgerEntryType,
+	NetworkFeesPayer,
+	RefundStatus,
+	Role,
+	TransactionKind,
+} from '../src/enums';
 import type { AccountingEvent } from '../src/models/accounting';
-import type { Payment } from '../src/models/payments';
-import type { Subscription } from '../src/models/subscriptions';
+import type { SubscriptionSessionData } from '../src/models/checkout';
+import type { Currency, CustomerSummary, Page } from '../src/models/common';
+import type { CreatedInvitation, HeldFunds, Invitation, Me, Member } from '../src/models/members';
+import type { Payment, Transaction } from '../src/models/payments';
+import type { Refund } from '../src/models/refunds';
+import type { Subscription, TestBill } from '../src/models/subscriptions';
+import type { Wallet } from '../src/models/wallets';
 import * as S from '../src/schemas';
 import { MODEL_FIXTURES } from './fixtures/models';
 
@@ -10,28 +23,41 @@ import { MODEL_FIXTURES } from './fixtures/models';
 
 const SCHEMAS: Record<string, Schema<any>> = {
 	Currency: S.CurrencySchema,
+	'Currency/native': S.CurrencySchema,
 	Payment: S.PaymentSchema,
+	PaymentCompleted: S.EVENT_DATA_SCHEMAS['payment.completed'],
+	SubscriptionSessionData: S.SubscriptionSessionDataSchema,
 	Bill: S.BillSchema,
-	CombinedPayment: S.CombinedPaymentSchema,
+	Transaction: S.TransactionSchema,
 	Failure: S.FailureSchema,
-	CheckoutSession: S.CheckoutSessionSchema,
+	CreatedCheckoutSession: S.CreatedCheckoutSessionSchema,
 	CheckoutSessionStatus: S.CheckoutSessionStatusSchema,
 	Subscription: S.SubscriptionSchema,
-	BillingState: S.BillingStateSchema,
+	TestBill: S.TestBillSchema,
 	Refund: S.RefundSchema,
 	Customer: S.CustomerSchema,
 	Product: S.ProductSchema,
 	Member: S.MemberSchema,
+	MemberJoined: S.EVENT_DATA_SCHEMAS['member.joined'],
 	HeldFunds: S.HeldFundsSchema,
-	MemberHeldFundsSummary: S.MemberHeldFundsSummarySchema,
+	MemberHeldFunds: S.MemberHeldFundsSchema,
+	HeldFundsReleased: S.EVENT_DATA_SCHEMAS['heldFunds.released'],
 	Wallet: S.WalletSchema,
 	Invitation: S.InvitationSchema,
-	InvitationCreated: S.InvitationCreatedSchema,
+	CreatedInvitation: S.CreatedInvitationSchema,
 	AccountingEvent: S.AccountingEventSchema,
 	WebhookEndpointCreated: S.WebhookEndpointCreatedSchema,
+	EventDetail: S.EventDetailSchema,
 	Me: S.MeSchema,
 	Page: S.page(S.CustomerSummarySchema),
 };
+
+const ctx: DecodeContext = {
+	fail: (path, expected) => new Error(`${path} should be ${expected}`),
+};
+
+/** Decodes `json` with `schema`, a wrong type throwing `"<path> should be <expected>"`. */
+const decode = <T>(schema: Schema<T>, json: string): T => schema.decode(JSON.parse(json), '', ctx);
 
 function decodeStrict(name: string): { value: any; unknown: string[] } {
 	const unknown: string[] = [];
@@ -41,6 +67,8 @@ function decodeStrict(name: string): { value: any; unknown: string[] } {
 	});
 	return { value, unknown };
 }
+
+const fixture = <T>(name: string): T => decodeStrict(name).value as T;
 
 /** The object keys of two JSON trees differ at the returned path ('' when equal). */
 function keysDiffer(a: any, b: any, path: string): string {
@@ -53,9 +81,7 @@ function keysDiffer(a: any, b: any, path: string): string {
 	} else if (a !== null && typeof a === 'object') {
 		if (b === null || typeof b !== 'object') return path;
 		const ka = Object.keys(a).sort();
-		const kb = Object.keys(b)
-			.sort()
-			.filter((k) => k !== 'hasMore');
+		const kb = Object.keys(b).sort();
 		if (ka.join() !== kb.join())
 			return `${path} ${JSON.stringify(ka)} vs ${JSON.stringify(kb)}`;
 		for (const k of ka) {
@@ -73,164 +99,172 @@ describe('models match the wire', () => {
 
 	it.each(Object.keys(MODEL_FIXTURES))('%s: every wire key is modelled, none is lost', (name) => {
 		const { value, unknown } = decodeStrict(name);
-		expect(unknown).toEqual([]);
-		expect(keysDiffer(JSON.parse(MODEL_FIXTURES[name]), value, name)).toBe('');
-	});
-
-	it('decodes the values', () => {
-		const p = decodeStrict('Payment').value as Payment;
-		expect(p.customer?.deleted).toBe(true);
-		expect(p.refund?.respondedAt).toBeNull();
-		expect(p.refundable).toBe(false);
-		expect(p.notRefundableReason).toBe('refundExists');
-		expect(p.metadata.organizationFee?.feePercent).toBe(10);
-		expect(p.metadata.txAmounts.usd.organization).toBe(0.98);
-
-		const inv = decodeStrict('InvitationCreated').value;
-		expect([inv.invitation.test, inv.invitation.trustLayer, inv.invitation.role]).toEqual([
-			null,
-			null,
-			'admin',
-		]);
-		expect(inv.link).toBeTruthy();
-
-		const hf = decodeStrict('HeldFunds').value;
-		expect(hf.totalAmount).toBeLessThan(0);
-		expect(hf.ledgers[0].metadata).toBeNull();
-		expect(hf.ledgers[0].owedMinUnits).toBe('-10004200');
-
-		const page = decodeStrict('Page').value;
-		expect([page.nextCursor, page.hasMore]).toEqual(['c-1', true]);
-
-		// Integral floats into integer fields; integers into percent floats.
-		const m = S.MemberSchema.decode(
-			JSON.parse('{"organizationFeePercent":2,"acceptedCurrencyIds":[8.0]}'),
-			'',
-			{
-				fail: () => new Error('bad'),
-			}
-		);
-		expect([m.organizationFeePercent, m.acceptedCurrencyIds[0]]).toEqual([2, 8]);
+		const wire = JSON.parse(MODEL_FIXTURES[name]);
+		if (name === 'EventDetail') {
+			// The envelope's decoder leaves `data` and `deliveries` to the event's own decoders,
+			// and `data` is decoded eagerly by the event's type (behaviour §10.2: Go keeps it raw),
+			// so its absent fields come back at their zero values: compare the rest.
+			expect(unknown).toEqual(['data', 'deliveries']);
+			expect(value.data.uuid).toBe('pay@1');
+			delete wire.data;
+			delete value.data;
+		} else {
+			expect(unknown).toEqual([]);
+		}
+		expect(keysDiffer(wire, value, name)).toBe('');
 	});
 });
 
-describe('checkout fees in the models', () => {
-	const ctx = {
-		fail: (path: string, expected: string) => new Error(`${path} should be ${expected}`),
-	};
-	const payment = (extra: string): Payment =>
-		S.PaymentSchema.decode(
-			JSON.parse(`{"uuid":"pay@1","amount":10,"metadata":null${extra}}`),
-			'',
-			ctx
-		);
+describe('model values', () => {
+	it('a payment: token amount, USD amounts, settlement, refund state', () => {
+		const p = fixture<Payment>('Payment');
+		expect([p.amount, p.amountMinUnits, p.amountUsd, p.priceUsd, p.productName]).toEqual([
+			'10',
+			'10000000',
+			'10',
+			'8.5',
+			'Pro',
+		]);
+		expect([p.currency.code, p.currency.chain, p.currency.mainCurrencyId]).toEqual([
+			'BASE:USDC',
+			Chain.BASE,
+			3,
+		]);
+		expect([p.metadata.orderId, p.paid, p.paidUsd]).toEqual(['order-1', '10.0042', '10.0042']);
+		expect([p.customer?.deleted, p.customer?.firstName]).toEqual([true, 'Ada']);
+		expect([p.refund?.status, p.refund?.refundPercent, p.refund?.amount]).toEqual([
+			RefundStatus.Cancelled,
+			'50',
+			'5.0021',
+		]);
+		expect(p.refund?.respondedAt).toBe('2026-10-01T13:00:00Z');
+		expect([p.refundable, p.notRefundableReason]).toEqual([false, 'refundExists']);
 
-	it('a payment with its price and fees', () => {
-		const p = decodeStrict('Payment').value as Payment;
-		expect([p.amount, p.price]).toEqual([10, 8.5]);
+		const st = p.settlement;
+		expect([st.feePercent, st.organizationFee, st.referralFee?.feePercent]).toEqual([
+			'0.99',
+			{ address: '0xorg', feePercent: '10' },
+			'20',
+		]);
+		expect([
+			st.split?.merchant.amount,
+			st.split?.platform.amountMinUnits,
+			st.split?.networkFee?.amountUsd,
+		]).toEqual(['8.9109', '79200', '0.0042']);
+		const tx = st.transaction;
+		expect([tx?.blockNumber, tx?.gasUsed, tx?.fee.amountMinUnits, tx?.nativePriceUsd]).toEqual([
+			'52468103',
+			95000,
+			'1140000000000',
+			'4512.37',
+		]);
+		expect(tx?.l1Fee?.amount).toBe('0.0000001');
+		expect(Date.parse(tx?.blockTime ?? '')).toBe(Date.UTC(2026, 9, 1, 11, 59, 58));
 		expect(p.fees).toEqual([
-			{ type: 'custom', label: 'VAT (20%)', description: 'France', amountUsd: '1.35' },
-			{ type: 'processingFee', label: 'Processing fee', amountUsd: '0.15' },
+			{
+				type: FeeLineType.Custom,
+				label: 'VAT (20%)',
+				description: 'French VAT',
+				amountUsd: '1.30',
+			},
+			{ type: FeeLineType.ProcessingFee, label: 'Processing fee', amountUsd: '0.20' },
 		]);
 		expect('description' in p.fees[1]).toBe(false);
-		// amount = price + Σ fees, the decimal strings untouched.
-		const cents = p.fees.reduce((sum, f) => sum + Math.round(Number(f.amountUsd) * 100), 0);
-		expect(Math.round(p.price * 100) + cents).toBe(Math.round(p.amount * 100));
 	});
 
-	it('a payment without fees (or recorded before them)', () => {
-		const withPrice = payment(',"price":10');
-		expect([withPrice.price, withPrice.fees]).toEqual([10, []]);
-		const before = payment('');
-		expect([before.price, before.fees]).toEqual([0, []]);
-		expect(payment(',"price":10,"fees":null').fees).toEqual([]);
+	it('a native coin has no address nor main currency', () => {
+		const native = fixture<Currency>('Currency/native');
+		expect(['address' in native, 'mainCurrencyId' in native]).toEqual([false, false]);
+		expect([native.code, native.decimals]).toEqual(['ETH', 18]);
 	});
 
-	it('keeps an unknown line type; refuses a wrong JSON type', () => {
-		const p = payment(
-			',"price":9,"fees":[{"type":"giftWrap","label":"Gift wrap","amountUsd":"1"}]'
-		);
-		expect(p.fees[0].type).toBe('giftWrap');
-		expect(() => payment(',"fees":[{"type":"custom","label":"VAT","amountUsd":1.5}]')).toThrow(
-			'fees[0].amountUsd should be a string'
-		);
-		expect(() => payment(',"fees":{}')).toThrow('fees should be an array');
-		expect(() => payment(',"price":"10"')).toThrow('price should be a number');
-	});
-
-	it("a payment session's fees and amount", () => {
-		const s = S.PaymentSessionDataSchema.decode(
-			JSON.parse(
-				'{"uuid":"pay@1","txType":"payment","price":4.99,"amount":6,"organizationName":"Shop","test":true,' +
-					'"availableCurrencyIds":[8],"fees":[{"type":"custom","label":"Shipping","description":"Standard, 3 to 5 days","amountUsd":"0.75"},' +
-					'{"type":"processingFee","label":"Processing fee","amountUsd":"0.26"}]}'
-			),
-			'',
-			ctx
-		);
-		expect([s.price, s.amount, s.fees.length]).toEqual([4.99, 6, 2]);
-		expect(s.fees[0]).toEqual({
-			type: 'custom',
-			label: 'Shipping',
-			description: 'Standard, 3 to 5 days',
-			amountUsd: '0.75',
-		});
-		expect(s.fees[1].type).toBe('processingFee');
-
-		const plain = S.PaymentSessionDataSchema.decode(
-			JSON.parse('{"uuid":"pay@1","txType":"payment","price":4.99}'),
-			'',
-			ctx
-		);
-		expect([plain.fees, plain.amount, 'amount' in plain]).toEqual([[], undefined, false]);
-	});
-
-	it("a subscription's price and fees", () => {
-		const sb = decodeStrict('Subscription').value as Subscription;
-		expect(sb.priceUsd).toBe('9.99');
-		expect(sb.fees).toEqual([
-			{ type: 'custom', label: 'VAT (20%)', description: 'French VAT', amountUsd: '2.00' },
-			{ type: 'processingFee', label: 'Processing fee', amountUsd: '0.13' },
+	it("a subscription session's amounts, currencies, metadata and terms", () => {
+		const ss = fixture<SubscriptionSessionData>('SubscriptionSessionData');
+		expect([ss.amountUsd, ss.priceUsd, ss.fees.length, ss.txType]).toEqual([
+			'4.81',
+			'3.99',
+			2,
+			'createSubscription',
 		]);
-		const plain = S.SubscriptionSchema.decode(
-			JSON.parse('{"uuid":"sub@1","priceUsd":"9.99","fees":null}'),
-			'',
-			ctx
-		);
-		expect(plain.fees).toEqual([]);
-		expect(S.SubscriptionSchema.decode(JSON.parse('{"uuid":"sub@1"}'), '', ctx).fees).toEqual(
-			[]
-		);
+		expect(ss.availableCurrencies.map((c) => c.code)).toEqual(['BASE:USDC', 'ETH']);
+		expect([ss.metadata.orderId, ss.frequency, ss.minPeriods, ss.upgradingFromTrial]).toEqual([
+			'order-1044',
+			{ value: 1, unit: 'months' },
+			3,
+			true,
+		]);
 	});
-});
 
-describe('accounting events', () => {
-	const ctx = {
-		fail: (path: string, expected: string) => new Error(`${path} should be ${expected}`),
-	};
+	it('a subscription: price, allowance, billing dates, metadata, dunning', () => {
+		const sb = fixture<Subscription>('Subscription');
+		expect(sb.priceUsd).toBe('9.99');
+		expect(sb.allowance).toEqual({
+			amount: '110',
+			amountMinUnits: '110000000',
+			amountUsd: '110',
+			remainingPeriods: 0,
+			maxPerPeriod: '30',
+			maxPerPeriodMinUnits: '30000000',
+		});
+		expect([sb.lastBilledAt, sb.nextBillingAt, sb.cancellableAt]).toEqual([
+			'2026-10-01T12:00:00Z',
+			'2026-10-31T12:00:00Z',
+			'2026-12-01T12:00:00Z',
+		]);
+		expect(sb.metadata).toEqual({ plan: 'pro', 'crm:account': 'A-1042' });
+		expect(sb.managementPageLink).toContain('manage?uuid=sub@1');
+		expect([sb.dunning?.remainingAttempts, sb.currency.symbol]).toEqual([3, 'USDC']);
+	});
 
-	it('a refund row: amounts in units, the network fees apart', () => {
-		const ae = decodeStrict('AccountingEvent').value as AccountingEvent;
-		expect(ae.currency).toBe('USDC');
-		expect(ae.currencyPriceUsd).toBe(1);
-		expect(ae.networkFeesPaidBy).toBe(NetworkFeesPayer.Merchant);
+	it('a transactions feed row, a test bill, a refund', () => {
+		const tx = fixture<Transaction>('Transaction');
+		expect([tx.type, tx.priceUsd, tx.periodEnd, tx.metadata.k]).toEqual([
+			TransactionKind.Bill,
+			'8.5',
+			'2026-10-31T12:00:00Z',
+			'v',
+		]);
+		expect(tx.settlement.split).toBeDefined();
+
+		const tb = fixture<TestBill>('TestBill');
+		expect(tb.billUuid.startsWith('sub-hist@')).toBe(true);
+		expect([tb.stage, tb.nextAttemptAt]).toEqual(['waiting', '2026-10-02T12:00:00Z']);
+
+		const r = fixture<Refund>('Refund');
+		expect([r.paid, r.refundPercent, r.amount, r.currency.id, r.customerUuid]).toEqual([
+			'10.0042',
+			'50',
+			'5.0021',
+			8,
+			'c-1',
+		]);
+		expect(r.settlement?.transaction?.blockNumber).toBe('52468103');
+	});
+
+	it('an accounting refund row: decimal strings, the network fees apart, CSV order', () => {
+		const ae = fixture<AccountingEvent>('AccountingEvent');
+		expect([ae.currency, ae.currencyPriceUsd, ae.networkFeesPaidBy]).toEqual([
+			'USDC',
+			'1.00002',
+			NetworkFeesPayer.Merchant,
+		]);
 		expect([
 			ae.networkFeesCurrency,
 			ae.networkFeesCurrencyDecimals,
 			ae.networkFeesCurrencyPriceUsd,
-		]).toEqual(['ETH', 18, 4512.37]);
-		expect([ae.grossAmount, ae.netAmount, ae.networkFees]).toEqual([
+		]).toEqual(['ETH', 18, '4512.37']);
+		expect([ae.netAmount, ae.grossAmountMinUnits, ae.txUuid, ae.relatedTxUuid]).toEqual([
 			'-10.0042',
-			'-10.0042',
-			'0.0000012',
+			'-10004200',
+			'refund@1',
+			'pay@0',
 		]);
-		expect(ae.txTimeUtc).toBe('2026-09-13T19:23:26.620071Z');
+		expect([ae.platformFeePercent, ae.txTimeUtc]).toEqual(['0.99', '2026-09-13T19:23:26.62Z']);
 		for (const gone of [
+			'paymentUuid',
+			'relatedPaymentUuid',
+			'paymentReference',
 			'tokenSymbol',
-			'userName',
-			'userLastName',
-			'customerName',
-			'customerLastName',
 		]) {
 			expect(gone in ae).toBe(false);
 		}
@@ -238,31 +272,287 @@ describe('accounting events', () => {
 		expect(Object.keys(ae)).toEqual(Object.keys(JSON.parse(MODEL_FIXTURES.AccountingEvent)));
 	});
 
-	it('a referralFee row: only what the referrer earned; no network fees, no payer', () => {
-		const rf = S.AccountingEventSchema.decode(
-			JSON.parse(
-				'{"txTimeUtc":"2026-09-13T19:23:26Z","type":"referralFee","referralFeeUsd":0.02,"chain":"SOL",' +
-					'"currency":"SOL","currencyDecimals":9,"currencyPriceUsd":150.5,"referralFee":"0.000132","referralFeePercent":20,' +
-					'"blockNumberOrSlot":"1","tokenContractOrMint":""}'
-			),
-			'',
-			ctx
+	it('a referralFee row: only what the referrer earned; an absent fee is absent, never "0"', () => {
+		const rf = decode(
+			S.AccountingEventSchema,
+			'{"txTimeUtc":"2026-09-13T19:23:26Z","type":"referralFee","referralFeeUsd":"0.02",' +
+				'"chain":"SOL","currency":"SOL","currencyDecimals":9,"currencyPriceUsd":"150.5",' +
+				'"referralFee":"0.000132","referralFeeMinUnits":"132000","referralFeePercent":"20",' +
+				'"blockNumberOrSlot":"1"}'
 		);
 		expect([rf.type, rf.currency, rf.referralFee]).toEqual(['referralFee', 'SOL', '0.000132']);
-		expect([
-			rf.networkFeesPaidBy,
-			rf.networkFeesCurrencyDecimals,
-			rf.networkFees,
-			rf.grossAmountUsd,
-		]).toEqual([undefined, undefined, undefined, undefined]);
+		for (const absent of [
+			'networkFeesPaidBy',
+			'networkFeesCurrencyDecimals',
+			'networkFees',
+			'grossAmountUsd',
+			'organizationFee',
+			'tokenContractOrMint',
+			'txUuid',
+		]) {
+			expect(absent in rf).toBe(false);
+		}
 	});
 
 	it('keeps an unknown payer', () => {
-		const ev = S.AccountingEventSchema.decode(
-			JSON.parse('{"type":"refund","networkFeesPaidBy":"relayer"}'),
-			'',
-			ctx
+		const ev = decode(
+			S.AccountingEventSchema,
+			'{"type":"refund","networkFeesPaidBy":"relayer"}'
 		);
 		expect(ev.networkFeesPaidBy).toBe('relayer');
+	});
+
+	it('a created invitation is flat; a team invitation is mode-free', () => {
+		const inv = fixture<CreatedInvitation>('CreatedInvitation');
+		expect([inv.uuid, inv.test, inv.holdFunds, inv.organizationFeePercent]).toEqual([
+			'i-1',
+			true,
+			false,
+			'0',
+		]);
+		expect(inv.link).toBeTruthy();
+
+		const team = decode<Invitation>(
+			S.InvitationSchema,
+			'{"uuid":"i-2","email":"a@b.co","role":"admin","expiresAt":"2026-10-08T12:00:00Z",' +
+				'"createdAt":"2026-10-01T12:00:00Z","status":"pending"}'
+		);
+		expect(team.role).toBe(Role.Admin);
+		for (const absent of ['test', 'holdFunds', 'organizationFeePercent', 'acceptedAt']) {
+			expect(absent in team).toBe(false);
+		}
+	});
+
+	it('held funds, a wallet, a member, me, a page', () => {
+		const hf = fixture<HeldFunds>('HeldFunds');
+		expect(hf.totalUsd).toBe('-1.0933');
+		expect(hf.ledgers[0].settlement).toBeDefined();
+		expect('settlement' in hf.ledgers[1]).toBe(false);
+		expect([hf.ledgers[1].type, hf.ledgers[1].owed, hf.ledgers[1].refundedTxUuid]).toEqual([
+			LedgerEntryType.Refund,
+			'-10.0042',
+			'pay@1',
+		]);
+
+		const w = fixture<Wallet>('Wallet');
+		expect([w.address, w.currency.code, w.tokenWallets[0].currency.code]).toEqual([
+			'0xpk',
+			'ETH',
+			'BASE:USDC',
+		]);
+		expect([w.tokenWallets[0].balance?.amount, w.tokenWallets[0].balance?.currency.id]).toEqual(
+			['12.5', 8]
+		);
+
+		const m = fixture<Member>('Member');
+		expect([m.firstName, m.organizationFeePercent]).toEqual(['Ada', '7.5']);
+		expect(m.acceptedCurrencies.map((c) => c.code)).toEqual(['BASE:USDC']);
+
+		const me = fixture<Me>('Me');
+		expect([me.onBehalfOfUserUuid, me.space?.role, me.space?.organizationFeePercent]).toEqual([
+			'm-1',
+			Role.Admin,
+			'7.5',
+		]);
+		expect([me.space?.member?.firstName, me.space?.trustedAt]).toEqual([
+			'Ada',
+			'2026-10-01T12:00:00Z',
+		]);
+		// The session-only fields (user, spaces, reauthenticatedUntil) are not modelled: kept raw.
+		const me2 = decode<Me>(
+			S.MeSchema,
+			'{"credential":"apiKey","spaces":[],"user":{"uuid":"u"}}'
+		);
+		expect(me2.credential).toBe('apiKey');
+
+		const page = fixture<Page<CustomerSummary>>('Page');
+		expect([page.hasMore, page.nextCursor, page.items.length]).toEqual([
+			true,
+			'djF8MDE5Y2FkZmQ',
+			1,
+		]);
+	});
+});
+
+describe('optional fields', () => {
+	it('every optional field absent decodes as absent, every list as []', () => {
+		const sub = decode<Subscription>(
+			S.SubscriptionSchema,
+			'{"uuid":"sub@1","to":"0xt","status":"trial","priceUsd":"9.99","fees":[],"metadata":{},' +
+				`"currency":${'{"id":8,"code":"BASE:USDC"}'},"frequency":{"value":1,"unit":"months"},` +
+				'"currentPeriodEnd":"2026-10-15T12:00:00Z"}'
+		);
+		for (const absent of [
+			'from',
+			'productUuid',
+			'subscriptionHash',
+			'allowance',
+			'lastBilledAt',
+			'nextBillingAt',
+			'cancellableAt',
+			'dunning',
+			'actionRequired',
+		]) {
+			expect(absent in sub).toBe(false);
+		}
+		expect(sub.currentPeriodEnd).toBe('2026-10-15T12:00:00Z');
+
+		const pay = decode<Payment>(
+			S.PaymentSchema,
+			'{"uuid":"pay@1","amount":"10","priceUsd":"10","fees":[],"metadata":{},' +
+				'"settlement":{"feePercent":"0.99"}}'
+		);
+		expect(['split' in pay.settlement, 'transaction' in pay.settlement]).toEqual([
+			false,
+			false,
+		]);
+		for (const absent of [
+			'confirmedAt',
+			'paid',
+			'refund',
+			'refundable',
+			'customer',
+			'productDescription',
+		]) {
+			expect(absent in pay).toBe(false);
+		}
+
+		const ref = decode<Refund>(
+			S.RefundSchema,
+			'{"uuid":"refund@1","txUuid":"pay@1","status":"pending","paid":"10","paidMinUnits":"10000000",' +
+				'"refundPercent":"100","amount":"10","amountMinUnits":"10000000"}'
+		);
+		for (const absent of [
+			'reason',
+			'merchantMessage',
+			'respondedAt',
+			'txHash',
+			'paidUsd',
+			'amountUsd',
+			'settlement',
+			'approval',
+		]) {
+			expect(absent in ref).toBe(false);
+		}
+	});
+
+	it('lenient on absence and null: zero values, never an error', () => {
+		const nulls = decode(
+			S.ProductSchema,
+			'{"uuid":"p-1","description":null,"metadata":null,"subscription":null,"priceUsd":null}'
+		);
+		expect([nulls.priceUsd, nulls.metadata, 'description' in nulls]).toEqual(['', {}, false]);
+		expect('subscription' in nulls).toBe(false);
+		// A required object absent: its zero value (a payment's currency, its settlement).
+		const bare = decode(S.PaymentSchema, '{"uuid":"pay@1"}');
+		expect([bare.currency.code, bare.settlement.feePercent, bare.metadata]).toEqual([
+			'',
+			'',
+			{},
+		]);
+	});
+});
+
+describe('strict types', () => {
+	it.each([
+		['payment amount as a number', S.PaymentSchema, '{"amount":10}', 'amount'],
+		['payment priceUsd as a number', S.PaymentSchema, '{"priceUsd":8.5}', 'priceUsd'],
+		[
+			'fee amountUsd as a number',
+			S.PaymentSchema,
+			'{"fees":[{"amountUsd":2}]}',
+			'fees[0].amountUsd',
+		],
+		['fees as an object', S.PaymentSchema, '{"fees":{"type":"custom"}}', 'fees'],
+		[
+			'settlement feePercent as a number',
+			S.PaymentSchema,
+			'{"settlement":{"feePercent":0.99}}',
+			'settlement.feePercent',
+		],
+		['product priceUsd as a number', S.ProductSchema, '{"priceUsd":1e2}', 'priceUsd'],
+		[
+			'member fee percent as a number',
+			S.MemberSchema,
+			'{"organizationFeePercent":5}',
+			'organizationFeePercent',
+		],
+		['refund percent as a number', S.RefundSchema, '{"refundPercent":100}', 'refundPercent'],
+		['held funds total as a number', S.HeldFundsSchema, '{"totalUsd":-10}', 'totalUsd'],
+		[
+			'balance amount as a number',
+			S.WalletSchema,
+			'{"tokenWallets":[{"balance":{"amount":12.5}}]}',
+			'tokenWallets[0].balance.amount',
+		],
+		[
+			'accounting gross as a number',
+			S.AccountingEventSchema,
+			'{"grossAmount":-10.0042}',
+			'grossAmount',
+		],
+		['currency as an id', S.PaymentSchema, '{"currency":8}', 'currency'],
+		['allowance as a string', S.SubscriptionSchema, '{"allowance":"110000000"}', 'allowance'],
+		[
+			'page hasMore as a string',
+			S.page(S.ProductSchema),
+			'{"items":[],"hasMore":"false"}',
+			'hasMore',
+		],
+		['metadata value as a number', S.CustomerSchema, '{"metadata":{"k":1}}', 'metadata.k'],
+		['metadata as a list', S.CustomerSchema, '{"metadata":[]}', 'metadata'],
+	] as Array<[string, Schema<unknown>, string, string]>)('%s', (_name, schema, json, path) => {
+		expect(() => decode(schema, json)).toThrow(`${path} should be`);
+	});
+
+	it('integral floats into integer fields', () => {
+		const f = decode(S.FailureSchema, '{"attempt":2.0,"currency":{"id":8.0,"decimals":6.0}}');
+		expect([f.attempt, f.currency.id, f.currency.decimals]).toEqual([2, 8, 6]);
+		const s = decode(
+			S.SubscriptionSchema,
+			'{"allowance":{"amount":"1","amountMinUnits":"1","remainingPeriods":11.0}}'
+		);
+		expect(s.allowance?.remainingPeriods).toBe(11);
+	});
+
+	it('a null metadata value decodes to an empty string', () => {
+		expect(decode(S.CustomerSchema, '{"metadata":{"k":null,"v":"x"}}').metadata).toEqual({
+			k: '',
+			v: 'x',
+		});
+	});
+});
+
+describe('checkout fees in the models', () => {
+	it('an empty list, a null list, a line without description, an unknown line type kept', () => {
+		const none = decode(
+			S.PaymentSchema,
+			'{"uuid":"pay@1","amount":"10","priceUsd":"10","fees":[]}'
+		);
+		expect([none.priceUsd, none.fees]).toEqual(['10', []]);
+		const absent = decode(S.PaymentSchema, '{"uuid":"pay@1","fees":null}');
+		expect([absent.priceUsd, absent.fees]).toEqual(['', []]);
+
+		const p = decode(
+			S.PaymentSchema,
+			'{"amountUsd":"12.03","priceUsd":"10","fees":[{"type":"tip","label":"Tip","amountUsd":"2"},' +
+				'{"type":"processingFee","label":"Processing fee","description":null,"amountUsd":"0.03"}]}'
+		);
+		expect([p.fees[0].type, p.fees[0].amountUsd, p.fees[1].type]).toEqual([
+			'tip',
+			'2',
+			FeeLineType.ProcessingFee,
+		]);
+		expect('description' in p.fees[1]).toBe(false);
+	});
+
+	it("a subscription's price and fees", () => {
+		const sb = fixture<Subscription>('Subscription');
+		expect(sb.fees).toEqual([
+			{ type: 'custom', label: 'VAT (20%)', description: 'French VAT', amountUsd: '1.30' },
+			{ type: 'processingFee', label: 'Processing fee', amountUsd: '0.20' },
+		]);
+		expect(decode(S.SubscriptionSchema, '{"uuid":"sub@1","fees":null}').fees).toEqual([]);
+		expect(decode(S.SubscriptionSchema, '{"uuid":"sub@1"}').fees).toEqual([]);
 	});
 });

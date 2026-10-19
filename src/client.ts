@@ -12,7 +12,7 @@ import { CheckoutSessionsService } from './services/checkout.js';
 import { CustomersService } from './services/customers.js';
 import { InvitationsService, MembersService } from './services/members.js';
 import { AccountingService, CurrenciesService, WalletsService } from './services/misc.js';
-import { FailuresService, PaymentsService } from './services/payments.js';
+import { FailuresService, PaymentsService, TransactionsService } from './services/payments.js';
 import { ProductsService } from './services/products.js';
 import { RefundsService } from './services/refunds.js';
 import { SubscriptionsService } from './services/subscriptions.js';
@@ -103,38 +103,43 @@ function buildTransport(config: ClientConfig): Transport {
  * ```ts
  * const client = new QBitFlow(process.env.QBITFLOW_API_KEY!);
  * const me = await client.me();
- * const session = await client.checkoutSessions.createPayment({ productName: 'T-shirt', price: 25 });
+ * const session = await client.checkoutSessions.createPayment({
+ * 	productName: 'T-shirt',
+ * 	priceUsd: '25.00',
+ * });
  * ```
  *
  * The constructor sends nothing: call {@link QBitFlow.me} to check the key online. A bad key or
  * option throws a `ValidationError`.
  */
 export class QBitFlow {
-	/** Manages the products (`/product…`). */
+	/** Manages the products (`/products…`). */
 	readonly products: ProductsService;
-	/** Manages the customers (`/customer…`). */
+	/** Manages the customers (`/customers…`). */
 	readonly customers: CustomersService;
-	/** Creates checkout sessions and reads or expires them (`/transaction/session-checkout…`). */
+	/** Creates checkout sessions and reads or expires them (`/checkout-sessions…`). */
 	readonly checkoutSessions: CheckoutSessionsService;
-	/** Reads the one-time payments and the combined payment feed. */
+	/** Reads the one-time payments (`/payments…`). */
 	readonly payments: PaymentsService;
-	/** Reads the failed payment attempts. */
+	/** Reads the feed of payments and bills together (`/transactions`). */
+	readonly transactions: TransactionsService;
+	/** Reads the failed payment attempts (`/payment-failures`). */
 	readonly failures: FailuresService;
-	/** Reads, bills and cancels subscriptions. */
+	/** Reads, updates, bills and cancels subscriptions (`/subscriptions…`, `/bills…`). */
 	readonly subscriptions: SubscriptionsService;
-	/** Lists and initiates refunds. */
+	/** Lists, reads and creates refunds (`/refunds…`). */
 	readonly refunds: RefundsService;
 	/** Manages the organization's members and their held funds (organization key). */
 	readonly members: MembersService;
 	/** Invites members (organization key). */
 	readonly invitations: InvitationsService;
-	/** Reads the wallets and the currencies they accept. */
+	/** Reads the wallets and the currencies they accept (`/wallets…`). */
 	readonly wallets: WalletsService;
-	/** Exports the accounting events. */
+	/** Exports the accounting events (`/accounting/export`). */
 	readonly accounting: AccountingService;
 	/** Verifies webhooks and manages the endpoints (`endpoints`) and the event log (`events`). */
 	readonly webhooks: WebhooksService;
-	/** Reads the currency catalog (public). */
+	/** Reads the currency catalog (`/currencies…`, public). */
 	readonly currencies: CurrenciesService;
 
 	readonly #core: Core;
@@ -171,6 +176,7 @@ export class QBitFlow {
 		this.customers = new CustomersService(core);
 		this.checkoutSessions = new CheckoutSessionsService(core);
 		this.payments = new PaymentsService(core);
+		this.transactions = new TransactionsService(core);
 		this.failures = new FailuresService(core);
 		this.subscriptions = new SubscriptionsService(core);
 		this.refunds = new RefundsService(core);
@@ -222,7 +228,9 @@ export class QBitFlow {
 	/**
 	 * A client that acts in a member's space: every request sends `On-Behalf-Of: userUuid` (a
 	 * member's `userUuid`; organization key only). It shares this client's configuration; `''`
-	 * returns one at the organization level. An invalid UUID (or the nil UUID) throws a
+	 * returns one at the organization level (the header is then omitted: it is never sent blank).
+	 * Acting for a member, the role is `user`: the admin methods (`members`, `invitations`,
+	 * `wallets.listForMember`) answer 403. An invalid UUID (or the nil UUID) throws a
 	 * `ValidationError` at once.
 	 */
 	onBehalfOf(userUuid: string): QBitFlow {

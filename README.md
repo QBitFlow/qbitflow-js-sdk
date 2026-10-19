@@ -9,7 +9,7 @@ payments: hosted checkouts, one-time payments, subscriptions, refunds, marketpla
 commissions and held funds, accounting exports and signed webhooks. Customers pay from their own
 wallets, on Ethereum, Base and Solana, straight to yours.
 
-- **API v2**, every integrator route: 13 services, 60 routes, one `QBitFlow` client.
+- **API v2**, every integrator route: 14 services, 54 routes, one `QBitFlow` client.
 - **No runtime dependencies**: Node.js 20+, the global `fetch` (or one you inject), CommonJS and
   ES modules, TypeScript types included.
 - **Typed errors** matched with `instanceof`, each carrying the API's code, request id and field
@@ -24,7 +24,7 @@ wallets, on Ethereum, Base and Solana, straight to yours.
   accounting exports over any range, `QBitFlow.fromEnv()`.
 
 > Coming from 2.x? Read [MIGRATION-v3.md](MIGRATION-v3.md): 3.0.0 targets API v2 and changes the
-> services, the ids, the errors and the webhooks.
+> services, the routes, the ids, the money types, the errors and the webhooks.
 
 ## Contents
 
@@ -93,7 +93,7 @@ Then open a hosted checkout and send the customer to it:
 const session = await client.checkoutSessions.createPayment({
 	productName: 'T-shirt',
 	description: 'Blue, size M',
-	price: 4.99, // USD
+	priceUsd: '4.99', // USD, a decimal string, never a float
 	reference: 'order-1042', // your order id: unique per space
 	successUrl: `https://shop.example.com/orders/success?uuid=${Placeholders.UUID}`,
 	cancelUrl: 'https://shop.example.com/orders/cancel',
@@ -115,19 +115,30 @@ never on the customer's redirect to your success page.
 - **Ids are strings.** Resources are named by UUIDs; transactions by prefixed ids (`pay@…` a
   payment, `sub@…` a subscription, `sub-hist@…` a bill, `refund@…` a refund) that you pass back
   verbatim. Only currencies keep numeric ids.
-- **Optional response fields** are typed `field?: T` (absent: `undefined`); a field typed
-  `T | null` is always present. A required field the API leaves out decodes to its zero value
-  (`''`, `0`, `false`, `[]`), never to an error; a value of the wrong JSON type is a `ServerError`.
-- **Amounts:** USD amounts are numbers (`amount`, `amountUsd`); exact amounts in a token's smallest
-  unit, and a few USD prices, are decimal **strings** (`amountMinUnits`, `priceUsd`, `allowance`),
-  never parsed or rounded. Fee rates are percents: `feePercent: 1.5` is 1.5 %.
+- **Optional response fields** are typed `field?: T` (absent: `undefined`). The API never sends
+  `null`: an optional field without a value is absent. A required field the API leaves out decodes
+  to its zero value (`''`, `0`, `false`, `[]`, `{}`), never to an error; a value of the wrong JSON
+  type is a `ServerError`.
+- **Money is a decimal string, never a number**, in requests and responses alike: USD amounts
+  (`priceUsd: '4.99'`, `amountUsd`, `totalUsd`), token amounts (`amount: '10'` in the token's
+  units, next to `amountMinUnits: '10000000'` on-chain and the `currency` object) and fee rates in
+  percent (`feePercent: '0.99'` is 0.99 %, `refundPercent: '50'`). Inputs are checked before
+  sending: at most 2 decimals, no sign or exponent (`'12.50'` is fine; a JSON number would be
+  refused by the API). Compare or add them with a decimal library, or `formatAmount` /
+  `parseAmount`.
+- **Metadata:** products, customers, checkouts and subscriptions carry `metadata`, your own
+  `Record<string, string>` (an order id, a CRM key): at most 50 keys of 1 to 40 characters among
+  `A-Z a-z 0-9 _ - . :`, values of at most 500 characters without control or bidirectional
+  characters. A checkout's is copied onto its payment or subscription and into their webhooks. On
+  an update it is **merged**: a key set to a value sets it, a key set to `''` deletes it, keys not
+  named are kept. Never put secrets or personal data in it.
 - **Enums** are string-literal unions with a `const` object listing the known values
   (`SubscriptionStatus.PastDue === 'pastDue'`). A value this SDK does not know yet is kept as is:
   give every `switch` a `default` branch.
-- **Times** are ISO 8601 strings, exactly as the API sent them (its offset, e.g. `+02:00`, and its
-  microseconds included): use `Date.parse(value)` to compare. Date filters (`createdAfter`,
+- **Times** are ISO 8601 strings, exactly as the API sent them (RFC 3339 in UTC; any offset is
+  accepted): use `Date.parse(value)` to compare. Date filters (`createdAfter`,
   `createdBefore`) take a `Date` or an RFC 3339 string.
-- **Path segments** you pass (references, emails, ids) are percent-encoded. A value that is
+- **Path segments** you pass (ids, event ids) are percent-encoded. A value that is
   exactly `.` or `..` is refused with a `ValidationError`: `fetch` would normalise it away.
 
 ## Integration recipes
@@ -238,7 +249,7 @@ createServer((req, res) => {
 
 Open the checkout as in the [Quick start](#quick-start): QBitFlow fills the placeholders of
 `successUrl` and `cancelUrl` in on the redirect (`Placeholders.UUID`, never URL-encoded by the
-SDK). The success page may show the [status](#status), but never fulfils: the `payment.completed`
+SDK). The success page may show the [status](#status) (`checkoutSessions.get`), but never fulfils: the `payment.completed`
 webhook does (anyone can open the success URL).
 
 In a script, a test or a back-office job, `waitForCompletion` polls the status until the session
@@ -247,7 +258,7 @@ returns the last status seen: check it.
 
 <!-- docs:snippet wait-for-completion -->
 ```ts
-// Polls getStatus until the session is completed or expired. When the timeout comes first,
+// Polls get until the session is completed or expired. When the timeout comes first,
 // it returns the last status seen: check it.
 const final = await client.checkoutSessions.waitForCompletion(sessionUuid, {
 	timeout: 10 * 60_000, // ms
@@ -282,14 +293,16 @@ if (hasAccess(subscription)) {
 
 ### Money display
 
-Exact amounts in a token's smallest unit are decimal strings: convert them with `formatAmount` and
+Token amounts come both ways: `amount` in the token's units (`'4.99'`) and `amountMinUnits`, its
+on-chain integer (`'4990000'`). Convert between the two exactly with `formatAmount` and
 `parseAmount` (string arithmetic, never floats). For a payment:
-`formatAmount(payment.amountMinUnits, payment.currency.decimals)`.
+`formatAmount(payment.amountMinUnits, payment.currency.decimals)` equals `payment.amount`.
 
 <!-- docs:snippet amounts-display -->
 ```ts
-// Exact amounts in a token's smallest unit are decimal strings (payment.amountMinUnits, with
-// payment.currency.decimals): convert them with string arithmetic, never floats.
+// Token amounts come both ways, as decimal strings: payment.amount ('4.99') and
+// payment.amountMinUnits ('4990000', with payment.currency.decimals). Convert between them with
+// string arithmetic, never floats.
 const shown = formatAmount('4990000', 6); // '4.99' (USDC has 6 decimals)
 const minUnits = parseAmount('4.99', 6); // '4990000'
 console.log(`${shown} USDC = ${minUnits} minimal units`);
@@ -298,16 +311,16 @@ console.log(`${shown} USDC = ${minUnits} minimal units`);
 
 ### A yearly accounting export
 
-The API exports at most 95 days at a time; the range helpers split any range into windows,
-request them in order and concatenate the result (the CSV header once).
+The API exports at most 92 days at a time (both included); the range helpers split any range into
+windows, request them in order and concatenate the result (the CSV header once).
 
 <!-- docs:snippet accounting-export -->
 ```ts
 // Every payment, bill, refund and fee between two dates (both included). Any range: the SDK
-// requests it in windows of at most 95 days (here 4) and concatenates them.
+// requests it in windows of at most 92 days, both included (here 4), and concatenates them.
 const rows = await client.accounting.exportJsonRange('2026-01-01', '2026-12-31');
 for (const row of rows.slice(0, 5)) {
-	console.log(row.type, row.paymentUuid, row.txTimeUtc, row.currency, row.netAmount);
+	console.log(row.type, row.txUuid, row.txTimeUtc, row.grossAmountUsd, row.productName);
 }
 
 // The same as CSV text, its header line once.
@@ -337,15 +350,18 @@ nothing: call `me()` to check it online ([Quick start](#quick-start)). It return
 (`admin`: an organization key) and its `space` (`organizationName`, `test`): a job meant for test
 mode can refuse to run when `me.space?.test` is not `true`.
 
-Keep the key in a secret store or an environment variable, never in code. Keys issued before API v2
-(`sk_<digits>_…`) still work; rotate them in the dashboard to the `sk_<uuid>_…` format.
+Keep the key in a secret store or an environment variable, never in code. The SDK only checks the
+`sk_` prefix; keys issued before API v2 (`sk_<digits>_…`) are refused by the API (`401`): create a
+new one in the dashboard.
 
 ### `On-Behalf-Of`: acting in a member's space
 
 A marketplace's **organization key** can act in any of its members' spaces: create their products
 and checkouts, read their payments. Name the member by their **user UUID** (`Member.userUuid`,
 also in the `member.joined` webhook). A non-member, an owner or admin of the team, or a member of
-the other mode answers 404.
+the other mode answers 404. Acting for a member, the request's role is `user`: the admin methods
+(`members`, `invitations`, `wallets.listForMember`, `listAcceptedCurrencies` with a `userUuid`)
+answer 403.
 
 <!-- docs:snippet client-on-behalf-of -->
 ```ts
@@ -353,7 +369,7 @@ the other mode answers 404.
 // On-Behalf-Of. It shares client's configuration.
 const seller = client.onBehalfOf(memberUuid);
 const products = await seller.products.list();
-console.log(`${products.length} products in the seller's space`);
+console.log(`${products.items.length} products on the first page of the seller's space`);
 ```
 <!-- /docs:snippet -->
 
@@ -363,12 +379,14 @@ own space:
 ```ts
 const page = await client.payments.list({}, { onBehalfOf: memberUuid });
 const own = await seller.products.list({}, { onBehalfOf: '' }); // the organization's products
-console.log(page.items.length, own.length);
+console.log(page.items.length, own.items.length);
 ```
 
 `onBehalfOf` is also a client option: `new QBitFlow(key, { onBehalfOf: memberUuid })`. A value
-that is not a UUID (or the nil UUID) throws a `ValidationError` at once, from `client.onBehalfOf()`
-and from the constructor; as a request option it fails that call before anything is sent.
+that is not a UUID (or the nil UUID, or blank) throws a `ValidationError` at once, from
+`client.onBehalfOf()` and from the constructor; as a request option it fails that call before
+anything is sent. `''` means the organization level and the header is then **omitted** (never sent
+blank: the API answers 403 to a blank one).
 
 ## Checkout sessions
 
@@ -377,7 +395,7 @@ on the webhook. The session's id (`pay@…` or `sub@…`) is also the id of the 
 subscription it creates once the customer's transaction is confirmed.
 
 Name the product with **exactly one** of `productUuid`, `productReference`, or an inline product
-(`productName` + `price`, `description` optional: see the [Quick start](#quick-start)). For a
+(`productName` + `priceUsd`, `description` optional: see the [Quick start](#quick-start)). For a
 product of your catalog:
 
 <!-- docs:snippet checkout-create-payment-product -->
@@ -402,7 +420,7 @@ A subscription checkout takes the same fields plus its terms (`frequency`, `tria
 const session = await client.checkoutSessions.createSubscription({
 	productName: 'T-shirt',
 	description: 'Blue, size M',
-	price: 4.99, // USD per period
+	priceUsd: '4.99', // USD per period, a decimal string
 	frequency: { value: 1, unit: DurationUnit.Months },
 	trialPeriod: { value: 7, unit: DurationUnit.Days },
 	reference: 'order-1043',
@@ -415,16 +433,19 @@ console.log(`Redirect the customer to ${session.link}`);
 
 - **Other fields:** `reference` (your order id, unique per space), `customerUuid` or
   `customerReference` (kept on the payment), `expiresInMinutes` (10 to 1440; left out: the
-  default).
+  default), `metadata` (copied onto the payment or the subscription and into their webhooks:
+  `payment.completed`, `subscription.*`, `checkout.expired`).
+- **The answer** is a `CreatedCheckoutSession`: `link`, `uuid` and `expiresAt`, always set.
 - **Redirect placeholders.** In `successUrl` and `cancelUrl`, QBitFlow replaces `{{UUID}}` with the
   session's id and `{{TRANSACTION_TYPE}}` with `payment` or `createSubscription`
   (`Placeholders.UUID`, `Placeholders.TRANSACTION_TYPE`; the SDK sends them as they are). In live mode both
   URLs must be `https`. A redirect proves nothing (anyone can open the URL): fulfil on the
-  webhook, or on `getStatus`.
+  webhook, or on `checkoutSessions.get`.
 - **Errors to expect:** a `ConflictError` `merchant_not_ready` (`details.reason`) when the space's
   wallets accept no currency; `unique_violation` when another payment or open session holds the
-  `reference`; a `ValidationError` above 5 USD in test mode, fees included (`details.max`); a
-  `NotFoundError` for an unknown product or customer.
+  `reference`; a `ValidationError` above `'5'` USD in test mode, fees included (`details.max`, a
+  string), and at `'0.25'` or less for a live subscription (`details.min`); a `NotFoundError` for
+  an unknown product or customer; a `GoneError` `merchant_closed` for a removed member's space.
 
 ### Fees
 
@@ -440,12 +461,12 @@ on the checkout and pays them with the price (a subscription: with every bill):
 const session = await client.checkoutSessions.createPayment({
 	productName: 'T-shirt',
 	description: 'Blue, size M',
-	price: 3.99, // USD
+	priceUsd: '3.99', // USD
 	reference: 'order-1044',
 	successUrl: `https://shop.example.com/orders/success?uuid=${Placeholders.UUID}`,
 	cancelUrl: 'https://shop.example.com/orders/cancel',
 	fees: {
-		items: [{ label: 'Shipping', description: 'Standard, 3 to 5 days', amountUsd: 0.75 }],
+		items: [{ label: 'Shipping', description: 'Standard, 3 to 5 days', amountUsd: '0.75' }],
 		processingFee: true, // omitted: your checkout.customerPaysProcessingFee setting decides
 	},
 });
@@ -454,10 +475,10 @@ console.log(`Redirect the customer to ${session.link}`);
 <!-- /docs:snippet -->
 
 - **Your lines** (`fees.items`, at most 10, shown in this order): `label` (1 to 40 characters, one
-  line), `description` (optional, at most 200), `amountUsd` (above 0, at most 1,000,000, at most
-  2 decimals). Give `amountUsd` as a number, or as a string (`'4.99'`) that is sent as typed, so
-  no float rounds it. The SDK checks them before sending: a `ValidationError` names the field
-  (`fees.items[0].amountUsd`, or `fees.items` above 10 lines).
+  line), `description` (optional, at most 200), `amountUsd` (a decimal string, `'4.99'`: above 0,
+  at most 1,000,000, at most 2 decimals; sent as typed, so no float rounds it). The SDK checks them
+  before sending: a `ValidationError` names the field (`fees.items[0].amountUsd`, or `fees.items`
+  above 10 lines).
 - **The processing fee** (`fees.processingFee: true`) is a last line, `Processing fee`, computed
   by QBitFlow on the price and your lines at your platform fee, grossed up and rounded up to the
   cent: QBitFlow's fee is also taken on that line, so you keep at least the price and your lines,
@@ -467,14 +488,19 @@ console.log(`Redirect the customer to ${session.link}`);
   fee, as without fees. Left out: your
   `checkout.customerPaysProcessingFee` setting decides (in the dashboard, off by default; your
   product links follow it too).
-- **What the customer pays** is the session's `amount`: `price` plus every line. It is what the
-  contracts split and what the payment records as its `amount`, with its `price` and `fees`
-  ([Payments](#payments-and-failures)). The network fee comes on top, in the currency the
-  customer picks. In test mode `amount`, fees included, is at most 5 USD.
+- **What the customer pays** is the session's and the payment's `amountUsd`: `priceUsd` plus every
+  line. It is what the contracts split (QBitFlow's fee, and a marketplace's organization fee, are
+  taken on it); the payment records it with its `priceUsd` and `fees`
+  ([Payments](#payments-and-failures)). The network fee comes on top, in the currency the customer
+  picks (`settlement.split.networkFee`). Test mode caps the total, fees included, at `'5'` USD
+  (a `ValidationError` on `fees`).
+- **Afterwards**, the `Payment` has `priceUsd`, `fees` (the lines as the customer saw them:
+  `type` `custom` or `processingFee`, `label`, `description`, `amountUsd`) and `amountUsd`;
+  `checkout.expired` sends the session with `priceUsd`, `fees` and `amountUsd`.
 - **Subscriptions** take the same `fees` (`createSubscription`, the same rules), locked with the
   price: every bill, the first one and each next one, charges the price plus every line, whatever
   the product's price or your fee becomes. The `Subscription` keeps them as `fees` next to
-  `priceUsd` (which stays the price); a bill's `amount` and `subscription.upcomingBill`'s
+  `priceUsd` (which stays the price); a bill's `amountUsd` and `subscription.upcomingBill`'s
   `amountUsd` include them, and the maximum and allowance the subscriber signs are sized on that
   amount. A trial's upgrade keeps the trial's lines. `checkout.customerPaysProcessingFee` applies
   to subscription checkouts too.
@@ -485,7 +511,7 @@ console.log(`Redirect the customer to ${session.link}`);
 
 <!-- docs:snippet checkout-status -->
 ```ts
-const status = await client.checkoutSessions.getStatus(sessionUuid);
+const status = await client.checkoutSessions.get(sessionUuid);
 switch (status.status) {
 	case CheckoutSessionStatusValue.Completed:
 		console.log(`paid, tx ${status.txHash}`);
@@ -509,22 +535,23 @@ switch (status.status) {
 | `created` | Waiting for the customer. With `lastAttempt` set, their last attempt failed (`lastAttempt.code` says why) | no |
 | `waitingConfirmation` | A transaction was sent; waiting for the network. It may last: the transaction can still land | no |
 | `completed` | Confirmed and recorded: the `Payment` or `Subscription` exists, with the session's id | yes |
-| `expired` | Expired unpaid (`checkout.expired` was sent). Read some days later, an expired session is a 404 | yes |
+| `expired` | Expired unpaid (`checkout.expired` was sent). Once QBitFlow no longer keeps the record, a 404 | yes |
 
 **Never cancel an order on `lastAttempt`:** a failed attempt is not final, and the customer can pay
 from the same checkout until it expires. Release what the order holds on `checkout.expired`.
 
-`checkoutSessions.waitForCompletion(uuid, { timeout?, interval?, signal? })` polls `getStatus`
+`expiresAt` is set while the session is open.
+`checkoutSessions.waitForCompletion(uuid, { timeout?, interval?, signal? })` polls `get`
 until `completed` or `expired` and returns that status; when `timeout` (ms, default 10 minutes; 0
 or less: the default) elapses first, it returns the last status seen, after one final poll at the
 deadline. `interval` is in ms (default 3000, at least 1000); the request options (`onBehalfOf`,
-`requestId`) apply to each poll; `getStatus`'s errors propagate (a 404 included). It is meant for scripts, tests and back-office
-jobs: [fulfil orders on the webhook](#integration-recipes).
+`requestId`) apply to each poll; `get`'s errors propagate (a 404 included). It is meant for
+scripts, tests and back-office jobs: [fulfil orders on the webhook](#integration-recipes).
 
 ### Expire
 
-End a session early (an order cancelled on your side). It answers its status, and
-`checkout.expired` follows. Once the customer paid or is paying it is a `ConflictError`
+End a session early (an order cancelled on your side). It answers its status (`expired`,
+`expiresAt` the time you expired it), and `checkout.expired` follows. Once the customer paid or is paying it is a `ConflictError`
 `tx_already_sent`.
 
 <!-- docs:snippet checkout-expire -->
@@ -550,7 +577,7 @@ member's subscription products open nothing.
 const product = await client.products.create({
 	name: 'T-shirt',
 	description: 'Blue, size M',
-	price: 4.99, // USD
+	priceUsd: '4.99', // USD, a decimal string, never a float
 	reference: 'tshirt-blue-m', // your own id: unique per space
 });
 console.log(`product ${product.uuid}, payment link ${product.paymentLink}`);
@@ -559,44 +586,57 @@ console.log(`product ${product.uuid}, payment link ${product.paymentLink}`);
 
 <!-- docs:snippet products-list -->
 ```ts
-// The active products; includeHidden: true adds the inactive ones.
-const products = await client.products.list();
-for (const product of products) {
-	console.log(`${product.reference}: ${product.name}, ${product.price} USD`);
+// iterate walks every page (list returns one); hidden products only with includeHidden.
+for await (const product of client.products.iterate()) {
+	console.log(`${product.reference}: ${product.name}, ${product.priceUsd} USD`);
 }
 ```
 <!-- /docs:snippet -->
 
-`products.update` changes only the fields given. A new price applies to new checkouts and
-subscribers only:
+`products.update` (`PATCH`) changes only the fields given. A new price applies to new checkouts
+and subscribers only:
 
 ```ts
 const updated = await client.products.update(product.uuid, {
-	price: 5.99,
+	priceUsd: '5.99',
 	isActive: false, // hidden from products.list
+	description: '', // '' clears it
+	metadata: { sku: 'TS-BLUE-M', legacy: '' }, // merged: '' deletes a key
 });
+console.log(updated.priceUsd, updated.metadata);
 ```
 
-`products.get`, `getByReference` and `delete` complete the set. Deleting a product does not stop
-its subscriptions: cancel them with `subscriptions.cancel` if the product is gone for good.
+`products.get` and `delete` (`204`, resolves to `void`) complete the set.
+`products.getByReference('tshirt-blue-m')` runs the list's reference filter
+(`GET /products?reference=`, hidden products included) and returns its one product, or throws a
+`NotFoundError` (status 404, code `not_found`) when there is none, exactly like an unknown UUID.
+Deleting a product does not stop its subscriptions: cancel them with `subscriptions.cancel` if the
+product is gone for good.
 
 ```ts
 let customer = await client.customers.create({
-	name: 'Ada',
+	firstName: 'Ada',
 	lastName: 'Lovelace',
 	email: 'ada@example.com',
 	reference: 'crm-42',
+	metadata: { plan: 'pro' },
 });
 
-// '' clears phoneNumber or address; a field left out is unchanged.
+// '' clears lastName, phoneNumber or address; a field left out is unchanged.
 customer = await client.customers.update(customer.uuid, { phoneNumber: '' });
 
-const byEmail = await client.customers.getByEmail('ada@example.com');
-console.log(customer.uuid === byEmail.uuid);
+// An email is not unique: several customers of a space may share one.
+const page = await client.customers.list({ email: 'ada@example.com' });
+console.log(`${page.items.length} customers with this email`);
+
+const byReference = await client.customers.getByReference('crm-42'); // a NotFoundError when none
+console.log(customer.uuid === byReference.uuid);
 ```
 
-`customers.get`, `getByReference`, `list` / `iterate` (by `email` or `verified`) and `delete`
-complete the set. A checkout given `customerUuid` or `customerReference` asks the customer
+`customers.get`, `list` / `iterate` (by `email`, `reference` or `verified`) and `delete` (`204`)
+complete the set. A customer you create is `verified`; one QBitFlow created from the email a payer
+typed at checkout is not, and a checkout never links a typed email to a verified customer. A
+checkout given `customerUuid` or `customerReference` asks the customer
 nothing (`customerReference` is kept on the payment, and links your customer with that reference
 if there is one); without either, the checkout asks what your `checkout.customerDetails` setting
 says (the full details by default).
@@ -612,42 +652,67 @@ const page = await client.payments.list({
 	limit: 10,
 });
 for (const payment of page.items) {
-	console.log(`${payment.uuid} "${payment.reference ?? ''}": ${payment.amount} USD`);
+	// Amounts are decimal strings: the token's (amount, in currency) and USD (amountUsd).
+	const { uuid, reference, amount, currency, amountUsd } = payment;
+	console.log(`${uuid} "${reference ?? ''}": ${amount} ${currency.symbol} (${amountUsd} USD)`);
 }
-// null on the last page; else pass it back as cursor to read the next one.
-console.log(`next cursor: ${page.nextCursor}`);
+if (page.hasMore) {
+	// Pass it back, verbatim, as the cursor param for the next page.
+	console.log(`next cursor: ${page.nextCursor}`);
+}
 ```
 <!-- /docs:snippet -->
 
 <!-- docs:snippet payments-get -->
 ```ts
 const payment = await client.payments.get(paymentUuid); // pay@…, the checkout session's id
-console.log(`${payment.uuid}: ${payment.amount} USD, tx ${payment.txHash}`);
+console.log(payment.uuid, payment.reference, payment.amountUsd, 'USD', payment.metadata);
 
-// By your order reference: a NotFoundError until the customer paid.
+// Runs GET /payments?reference= and returns its one payment: a NotFoundError (404,
+// not_found) until the customer paid.
 const byReference = await client.payments.getByReference('order-1042');
 console.log(`order-1042 was paid by ${byReference.from}`);
 ```
 <!-- /docs:snippet -->
 
-- **Amounts:** `amount` is what the customer paid in USD: the `price` (the product's, at the
-  checkout) plus the checkout's `fees`, the lines the customer saw (`FeeLine`: `type` `custom` or
-  `processingFee`, `label`, `description`, `amountUsd` as a decimal string), so
-  `amount = price + Σ fees[].amountUsd` ([Fees](#fees)). Without fees, `fees` is `[]` and `price`
-  is `amount` (also on payments made before fees existed). The network fee the customer paid on
-  top is not in `amount` (`paidUsd` includes it). `metadata.txAmounts` splits the amount (e.g.
-  `metadata.txAmounts.usd.merchant`, what you received), and `amountMinUnits` is exact in the
-  token's smallest unit ([Money display](#money-display)).
+A payment carries its transaction (`txHash`, `explorerUrl`, `confirmedAt`), your `metadata`
+(copied from its checkout, read-only), how it settled (`settlement`), and whether it can be
+refunded (`refundable`, `refund`).
+
+- **The amounts:** `amount` is what the customer paid **in the token's units** (`'10'` for 10 USDC,
+  with `amountMinUnits` and the `currency` object), `amountUsd` the same in USD: `priceUsd` (the
+  product's price at the checkout) plus every line of `fees` (the [checkout's fees](#fees), each a
+  `FeeLine`: `type` `custom` or `processingFee`, `label`, `description`, `amountUsd`). It is what
+  the contracts split; the network fee the customer paid on top is not in it (`paid`,
+  `paidMinUnits` and `paidUsd` include it: a refund's base). Every amount is a decimal string
+  ([Money display](#money-display)).
+- **The settlement** (`settlement`): QBitFlow's `feePercent`, the `organizationFee` and
+  `referralFee` when they apply, the `split` (`platform`, `organization`, `referral`, `merchant`,
+  `networkFee`, each a `TokenAmount`: `amount`, `amountMinUnits`, `amountUsd`) and the
+  `transaction` that paid it (`blockNumber`, `blockTime`, `gasUsed`, its `fee` in the native coin).
 - **Filters** (`PaymentListParams`): `customerUuid`, `productUuid`, `createdAfter` / `createdBefore`
-  (both excluded), `refunded`, and, with an organization key acting for itself, `includeMembers`
-  (every member's rows, each naming its `userUuid`) or `userUuid` (one member's). The last two
-  exclude each other.
+  (both excluded), `reference`, `refunded`, and, with an organization key acting for itself,
+  `includeMembers` (every member's rows, each naming its `userUuid`) or `userUuid` (one member's).
+  The last two exclude each other. `payments.getByReference` runs the `reference` filter and throws
+  a `NotFoundError` (404, `not_found`) when no payment has it.
 - **Reading a member's row** from the organization's space: `payments.get(id, { includeMembers:
   true })`, or `onBehalfOf` the member.
-- **The combined feed** of one-time payments and subscription bills, newest first:
-  `payments.listCombined` / `iterateCombined`, with the same filters plus `source`
-  (`CombinedPaymentSource.Payment`, `CombinedPaymentSource.SubscriptionHistory`) and
-  `subscriptionUuid`.
+- **The transactions feed** of one-time payments and subscription bills, newest first:
+  `transactions.list` / `iterate`, with the same filters plus `type` (`TransactionKind.Payment`,
+  `TransactionKind.Bill`), `subscriptionUuid` and `refunded`. Each `Transaction` reads like its
+  resource (a `Payment` or a `Bill`); open it with `payments.get` or `subscriptions.getBill`.
+
+<!-- docs:snippet transactions-list -->
+```ts
+// One feed of one-time payments and subscription bills, newest first; each row reads like its
+// resource. `type` filters it to one kind (TransactionKind.Payment or TransactionKind.Bill).
+const feed = await client.transactions.list({ limit: 20 });
+for (const tx of feed.items) {
+	console.log(tx.type, tx.uuid, tx.amountUsd, 'USD');
+}
+```
+<!-- /docs:snippet -->
+
 - **Failures** are the failed attempts to pay a checkout or a bill. They never moved money and
   are not final: the customer can try again.
 
@@ -669,7 +734,7 @@ the free trial. It keeps the checkout's `sub@…` id for life.
 | `active` | Billed on its due dates |
 | `pastDue` | A bill failed; retried for up to 7 days (`dunning` on reads), then cancelled |
 | `paused` | Paused by its customer: not billed until resumed |
-| `stopped` | Cancelled during its period: never billed again, `cancelled` at `nextBillingDate` |
+| `stopped` | Cancelled during its period: never billed again, `cancelled` at `nextBillingAt` |
 | `cancelled` | Over (`cancellationReason` says why). Final |
 
 **Access rule: grant access while `now < currentPeriodEnd`, whatever the status.** A `stopped` or
@@ -677,8 +742,13 @@ the free trial. It keeps the checkout's `sub@…` id for life.
 `hasAccess(sub, at?)` (exported by `qbitflow`) applies it: see [Access control](#access-control).
 
 `actionRequired` says what the customer must do (`topUpAllowance`, `raiseMaximum`,
-`confirmTrial`; absent: nothing): point them to the `managementPageLink` the subscription
-webhooks carry.
+`confirmTrial`; absent: nothing): point them to the subscription's `managementPageLink`.
+
+A subscription's price is locked at signup: `priceUsd` plus its `fees` lines, every bill. Its
+`allowance` (absent during a trial) is what the subscriber's wallet still lets QBitFlow bill
+(`amount`, `amountMinUnits`, `amountUsd`), how many bills that covers (`remainingPeriods`) and the
+most one bill may charge (`maxPerPeriod`). `lastBilledAt`, `nextBillingAt` and `cancellableAt` are
+absent when they don't apply; `metadata` is your own data, copied from its checkout.
 
 <!-- docs:snippet subscriptions-get -->
 ```ts
@@ -699,16 +769,27 @@ for (const s of page.items) {
 
 // Every bill, newest first: the iterator fetches the pages lazily.
 for await (const bill of client.subscriptions.iterateBills(subscriptionUuid)) {
-	if (bill.periodEnd) console.log(`${bill.uuid}: ${bill.amount} USD, paid until ${bill.periodEnd}`);
+	if (bill.periodEnd) console.log(`${bill.uuid}: ${bill.amountUsd} USD, paid until ${bill.periodEnd}`);
 }
 ```
 
-- `subscriptions.getByReference` reads one by your checkout's `reference`; `getBill` one bill
-  (`sub-hist@…`).
-- `subscriptions.getPublicHistory` returns the 10 latest bills as the customer's page shows them.
-  It is a public route: the fields only the merchant sees (`metadata`, `customerUuid`,
-  `customerReference`, `userUuid`, `paidMinUnits`, `refund`, …) are empty there. Use `listBills`
-  for full bills.
+- `subscriptions.getByReference` reads one by your checkout's `reference` (the list's
+  `?reference=` filter; a `NotFoundError` when none); `getBill` one bill (`sub-hist@…`). Bills
+  carry no metadata: read the subscription's.
+- `subscriptions.update` (`PATCH`) changes its `metadata` only, merged (a key set to `''` deletes
+  it), and resolves to the subscription. It is never retried automatically:
+
+<!-- docs:snippet subscriptions-update -->
+```ts
+// Metadata is merged into the subscription's: '' deletes a key, keys not named are kept. It
+// is the only thing a merchant edits on a subscription; webhooks carry it.
+const updated = await client.subscriptions.update(subscriptionUuid, {
+	metadata: { plan: 'pro', coupon: '' },
+});
+console.log(updated.metadata.plan);
+```
+<!-- /docs:snippet -->
+
 - Before its checkout completes, `subscriptions.get` is a 404: read the checkout session instead.
 
 ### Cancel
@@ -734,20 +815,23 @@ if (pending) {
 <!-- /docs:snippet -->
 
 `cancel` answers 200 when done and 202 (`pending: true`) while confirming on-chain. A
-`ConflictError` `subscription_already_stopped_or_inactive`, or a 404 once cancelled. It is never
-retried automatically.
+`ConflictError` `subscription_already_stopped_or_inactive`, or a 404 once cancelled. A trial is
+cancelled immediately only (`immediate: false`: a 400). It is never retried automatically.
 
 ### Test billing
 
-In test mode a subscription is billed only when you ask, with live's statuses and webhooks (a 400
-for a live subscription):
+In test mode a subscription is billed only when you ask, with live's statuses and webhooks.
+`testBill` resolves once the attempt settled: a `TestBill` with the bill's `sub-hist@…` id
+(`billUuid`), its `stage` and, once done, its `outcome` (a live subscription: a `BadRequestError`
+`test_mode_only`; a bill not due: a `ConflictError` `payment_not_due`):
 
 <!-- docs:snippet subscriptions-test-bill -->
 ```ts
 // Test mode only: runs the next billing now, with live's statuses and webhooks. A ConflictError
-// payment_not_due before nextBillingDate.
-const state = await client.subscriptions.executeTestBilling(subscriptionUuid);
-console.log(`billing ${state.stage}: ${state.outcome ?? 'running'} ${state.failureCode ?? ''}`);
+// payment_not_due before nextBillingAt; a BadRequestError test_mode_only for a live one.
+const bill = await client.subscriptions.testBill(subscriptionUuid);
+// billUuid is sub-hist@…: the id its subscription.billed carries once paid.
+console.log(bill.billUuid, bill.stage, bill.outcome ?? 'running', bill.failureCode ?? '');
 ```
 <!-- /docs:snippet -->
 
@@ -759,45 +843,62 @@ bill, then empty the wallet and trigger it again to see `subscription.billingFai
 
 <!-- docs:snippet refunds-list -->
 ```ts
-// The refunds waiting for an answer (listInactive / iterateInactive: the answered ones).
-const refunds = await client.refunds.list();
-for (const refund of refunds) {
-	console.log(`${refund.uuid} of ${refund.txUuid}: ${refund.amountUsd} USD, ${refund.reason}`);
+// The active ones: pending, waiting for an answer (no status: every status).
+const page = await client.refunds.list({ status: [RefundStatus.Pending] });
+for (const refund of page.items) {
+	const { uuid, txUuid, initiatedBy, reason, amount, currency } = refund;
+	console.log(`${uuid} of ${txUuid} (${initiatedBy}): ${amount} ${currency.symbol}, ${reason}`);
 }
 ```
 <!-- /docs:snippet -->
 
-From the organization's space the members' refunds are included by default:
-`{ includeMembers: false }` leaves them out. The answered ones (approved or rejected), page by
-page:
+`status` takes up to 5 statuses (left out: every status); `txUuid` finds the refund of one
+transaction. From the organization's space the members' refunds are included by default:
+`{ includeMembers: false }` leaves them out. The answered ones come page by page:
 
 ```ts
-for await (const r of client.refunds.iterateInactive()) {
+for await (const r of client.refunds.iterate({
+	status: [RefundStatus.Approved, RefundStatus.Rejected],
+})) {
 	console.log(r.uuid, r.status, r.explorerUrl);
 }
 ```
 
-`refunds.initiate` starts a refund of a payment (`pay@…`) or a bill (`sub-hist@…`) of the space.
+`refunds.get` reads one refund by its `refund@…` id, cancelled ones included:
+
+<!-- docs:snippet refunds-get -->
+```ts
+const refund = await client.refunds.get(refundUuid); // refund@…
+// pending, approved, rejected or cancelled (a merchant's draft dropped before it was sent).
+const { uuid, status, refundPercent, amount, currency } = refund;
+console.log(`${uuid}: ${status}, ${refundPercent}% = ${amount} ${currency.symbol}`);
+```
+<!-- /docs:snippet -->
+
+`refunds.create` starts a refund of a payment (`pay@…`) or a bill (`sub-hist@…`) of the space.
 **It creates a pending refund: no money moves until you sign the transfer in the dashboard**,
-from the wallet that was paid. `refund.completed` tells you when it is sent.
+from the wallet that was paid. `refund.approved` tells you when it is sent.
 
 <!-- docs:snippet refunds-create -->
 ```ts
 // A pending refund: no money moves until you sign the transfer in the dashboard, from the
-// wallet that was paid. refund.completed tells you when it is sent.
-const refund = await client.refunds.initiate({
+// wallet that was paid. refund.approved tells you when it is sent.
+const refund = await client.refunds.create({
 	txUuid: paymentUuid, // a payment (pay@…) or a bill (sub-hist@…)
-	refundPercent: 50, // of what the customer paid; left out: 100
+	refundPercent: '50', // a percent string, of what the customer paid; left out: '100'
 	reason: 'Damaged item',
 });
 console.log(`refund ${refund.uuid}: ${refund.status}`); // pending
 ```
 <!-- /docs:snippet -->
 
-`refundPercent` is a percent of everything the customer paid, network fee included (left out:
-100); `merchantMessage` adds a note for the customer. One refund per transaction: a second is a
-`ConflictError` `refund_already_exists` (`details.refundUuid`). A refund is `pending`, `approved`
-or `rejected`; `initiatedBy` is `customer` (a request you answer in the dashboard) or `merchant`.
+`refundPercent` is a percent string (`'50'`: above 0, at most `'100'`, the default) of everything
+the customer paid (`paid`, network fee included); `amount` / `amountMinUnits` / `amountUsd` is what
+it sends back. `merchantMessage` adds a note for the customer. One refund per transaction: a
+second is a `ConflictError` `refund_already_exists` (`details.refundUuid`; only your own unsent
+draft gives way). A refund is `pending`, `approved`, `rejected` or `cancelled` (your draft dropped
+before it was sent; `failed` is declared but never set); `initiatedBy` is `customer` (a request you
+answer in the dashboard) or `merchant`.
 A held seller's payment already released to them can no longer be refunded
 (`409 held_funds_released`).
 
@@ -809,22 +910,25 @@ hold their funds until you trust them. QBitFlow stays non-custodial: money goes 
 wallet to the seller's (and your commission to yours) in one transaction.
 
 **1. Invite the seller.** The SDK always invites members (`role: user`); the team is invited from
-the dashboard. The commission is 0 to 50 %, at most 2 decimals.
+the dashboard. `holdFunds` is required (always sent); the commission is a percent string, `'0'` to
+`'50'`, at most 2 decimals.
 
 <!-- docs:snippet members-invite -->
 ```ts
 const created = await client.invitations.create({
 	email: 'seller@example.com',
-	trustLayer: true, // hold their payments until you trust them
-	organizationFeePercent: 10, // your commission on their payments
+	holdFunds: true, // hold their payments until you trust them (always sent)
+	organizationFeePercent: '10', // your commission on their payments: '0' to '50' %
 	redirectUrl: 'https://shop.example.com/sellers/welcome',
 });
 // The link is also emailed. They are a member once they accepted (the member.joined webhook).
-console.log(`invitation ${created.invitation.uuid}: ${created.link}`);
+console.log(`invitation ${created.uuid}: ${created.link}`);
 ```
 <!-- /docs:snippet -->
 
-A `ConflictError` `already_joined` for a member; a `RateLimitError` beyond 50 invitations an hour.
+The answer is a `CreatedInvitation`: the invitation's fields and its `link` (only here). A
+`ConflictError` `already_joined` for a member; a `RateLimitError` beyond 50 invitations an hour
+(raised at once: the wait is over the SDK's 60 s retry cap).
 
 **2. Wait for `member.joined`.** The seller exists once they accepted: store the event's
 `userUuid` and match `invitationUuid` to your invitation. Never trust the redirect's
@@ -840,7 +944,7 @@ if (event.type === 'member.joined') {
 they can, not needed while you hold their funds). Check they can be paid:
 
 ```ts
-const currencies = await client.wallets.listSupportedCurrencies({ userUuid: memberUuid });
+const currencies = await client.wallets.listAcceptedCurrencies({ userUuid: memberUuid });
 if (currencies.length === 0) {
 	throw new Error('the seller cannot be paid yet: their checkouts would answer 409 merchant_not_ready');
 }
@@ -853,23 +957,29 @@ Then act in their space with [`client.onBehalfOf(memberUuid)`](#on-behalf-of-act
 **4. Hear of every sale.** An organization webhook endpoint receives every seller's events by
 default; the event's `userUuid` names the seller. Use it as `onBehalfOf` for follow-up reads.
 
-**5. Commission and held funds.** Each payment records your fee in `metadata.organizationFee` and
-`metadata.txAmounts`. While you hold a seller's funds (`trustLayer` true, `Member.trustedAt`
-`null`), their payments go to your wallet and the net is owed to them:
+**5. Commission and held funds.** Each payment records your fee in `settlement.organizationFee`
+and `settlement.split.organization`. While you hold a seller's funds (`holdFunds` true,
+`Member.trustedAt` absent), their payments go to your wallet and the net is owed to them
+(`HeldFunds.totalUsd`, each `LedgerEntry` with what it counts for: `owed`, `owedMinUnits`,
+`owedUsd`, negative on a refund line):
 
 <!-- docs:snippet members-held-funds -->
 ```ts
-// What the organization holds for its members (their payments while untrusted).
+// What the organization holds for its members (their payments while untrusted), the longest
+// held first.
 const all = await client.members.listHeldFunds();
-for (const summary of all) {
-	console.log(`${summary.userUuid}: ${summary.totalAmount} USD owed`);
+for (const owed of all) {
+	console.log(`${owed.userUuid}: ${owed.totalUsd} USD owed over ${owed.count} lines`);
 }
 
 const held = await client.members.getHeldFunds(memberUuid);
 for (const ledger of held.ledgers) {
-	console.log(`  ${ledger.type} ${ledger.amount} USD`);
+	// owed: what the line counts for in a release (negative for a refund).
+	console.log(
+		`  ${ledger.type} ${ledger.owed} ${ledger.currency.symbol} (${ledger.owedUsd} USD)`
+	);
 }
-console.log(`held for this member: ${held.totalAmount} USD`);
+console.log(`held for this member: ${held.totalUsd} USD`);
 ```
 <!-- /docs:snippet -->
 
@@ -889,56 +999,67 @@ Change the commission (a checkout already created keeps its fee):
 
 <!-- docs:snippet members-update -->
 ```ts
-// Applies to their new checkouts: one already created keeps its fee.
-const updated = await client.members.update(memberUuid, { organizationFeePercent: 10 });
+// A percent string ('0' to '50'). Applies to their new checkouts: one already created keeps
+// its fee.
+const updated = await client.members.update(memberUuid, { organizationFeePercent: '10' });
 console.log(`fee now ${updated.organizationFeePercent} %`);
 ```
 <!-- /docs:snippet -->
 
-- `members.list` / `iterate` / `get`, `members.listHeldFunds` (every member owed), and
-  `seller.members.getOwnHeldFunds()` (the seller's side) complete the reads.
+- `members.list` / `iterate` / `get` (`firstName`, `lastName`, `organizationFeePercent`, the
+  `acceptedCurrencies` their checkouts take now), `members.listHeldFunds` (every member owed, the
+  longest held first, an array), and `seller.members.getOwnHeldFunds()` (the seller's side)
+  complete the reads.
 - `members.remove` ends a seller's membership in the key's mode: their keys stop working and their
-  checkouts close. It is a `409 held_funds_pending` while you hold their live funds: release them
-  first.
-- `invitations.list` / `iterate` (by `status`) and `invitations.revoke` manage the invitations.
+  checkouts close (`204`). It is a `409 held_funds_pending` while you hold their live funds:
+  release them first.
+- `invitations.list` / `iterate` (by `status`; your team's invitations are listed too, with `role`
+  `admin` and no `test`, `holdFunds` or fee) and `invitations.revoke` (`204`, resolves to `void`)
+  manage the invitations.
 - Today a seller whose account already belongs to another organization cannot accept (no
   `member.joined` comes), and test-mode sellers are real accounts that accept from a real inbox.
 
 ## Wallets
 
-Wallets are added and removed in the dashboard, by their owner only. The SDK reads them.
+Wallets are added and removed in the dashboard, by their owner only. The SDK reads them; every
+wallet list is short and returned as an array.
 
 ```ts
 const wallets = await client.wallets.list({ withBalances: true });
 for (const w of wallets) {
-	console.log(w.currency.symbol, w.publicKey);
+	console.log(w.currency.chain, w.address);
 	for (const tw of w.tokenWallets) {
-		if (tw.balance) console.log(`  ${tw.token.symbol}: ${tw.balance.balance} (${tw.balance.balanceUsd} USD)`);
+		// balance is absent when the chain couldn't be read
+		if (tw.balance) console.log(`  ${tw.currency.code}: ${tw.balance.amount} (${tw.balance.amountUsd ?? '?'} USD)`);
 	}
 }
 ```
 
 `wallets.listForMember(userUuid)` reads a member's wallets (organization key), and
-`wallets.listSupportedCurrencies` the currencies a space's checkouts accept: none means its
-checkouts answer `409 merchant_not_ready`.
+`wallets.listAcceptedCurrencies` the currencies a space's checkouts accept now (`userUuid`: a
+member's, organization key): none means its checkouts answer `409 merchant_not_ready`.
 
 ## Accounting export
 
 Every payment, bill, refund and fee between two dates (`YYYY-MM-DD`, both included), as JSON rows
 (`accounting.exportJson(from, to)`) or as CSV text (`exportCsv`). The SDK checks the dates and
-`from <= to` before sending. **The API allows at most 95 days per export** and answers 400 beyond:
-`exportJsonRange(from, to)` and `exportCsvRange(from, to)` take any range, split it into
-consecutive windows of at most 95 days (calendar dates, UTC), request them in order and
-concatenate the result (one list; for CSV the header line once, then every window's rows, line
-endings as sent): see [the yearly export](#a-yearly-accounting-export). Rows are typed `payment`,
-`subscriptionHistory`, `refund`, `organizationFee` or `referralFee`, and the empty fields of a row
-are left out.
+`from <= to` before sending. **The API allows at most 92 days per export, both days included**
+(a `ValidationError` `validation_failed` on `to` beyond, `details.max` 92): `exportJsonRange(from,
+to)` and `exportCsvRange(from, to)` take any range, split it into consecutive windows of at most 92
+days (`[from, from + 91 d]`, the next one starting the day after, on calendar dates in UTC), request
+them in order and concatenate the result (one list; for CSV the header line once, then every
+window's rows, line endings as sent): see [the yearly export](#a-yearly-accounting-export). A range
+of 92 days or less is one request; `2026-01-01` to `2026-12-31` is four: `[01-01, 04-02]`,
+`[04-03, 07-03]`, `[07-04, 10-03]`, `[10-04, 12-31]`. Rows are typed `payment`, `bill`, `refund`,
+`organizationFee` or `referralFee`; a value a row doesn't have (a fee that doesn't apply) is
+absent, never `'0'`.
 
 - **Dates** are the transactions' (the day their block was mined, in UTC: `txTimeUtc`), so
   consecutive exports never miss nor repeat an event. Rows are ordered by `txTimeUtc`, `type`,
-  then `paymentUuid`.
-- **Amounts** are in the currency's units (`"7.5"` USDC, not `"7500000"`), as decimal strings,
-  next to `currencyDecimals`. `currency` names what was paid as markets do (`USDC`, or the
+  then `txUuid`; a refund names what it refunds in `relatedTxUuid` and `relatedReference`.
+- **Amounts** are in the currency's units (`'7.5'` USDC, not `'7500000'`), as decimal strings,
+  next to `currencyDecimals`, each with its on-chain twin (`grossAmountMinUnits`, …). USD amounts
+  (`grossAmountUsd`, …) and rates (`platformFeePercent`, …) are decimal strings too. `currency` names what was paid as markets do (`USDC`, or the
   chain's native currency: `ETH`, `SOL`), and `currencyPriceUsd` is the USD price the amounts
   were converted at. `grossAmount = platformFee + organizationFee + netAmount` exactly; a
   refund's net is the refunded amount, negative.
@@ -947,9 +1068,12 @@ are left out.
   `merchant` (a refund your space sent) or `organization` (a refund of a payment the organization
   held for its member). Book `networkFees` (in `networkFeesCurrency`, the chain's native currency
   on a refund) apart for `merchant` and `organization`.
-- **CSV columns** follow `AccountingEvent`'s field order (what happened, the USD amounts, the
-  same amounts in the currency, the network fees, the rates, the on-chain proof, the ids): read
-  them by header name, not position.
+- **CSV columns** are `AccountingEvent`'s JSON keys in its field order (what happened, the USD
+  amounts, the same amounts in the currency, the network fees, the rates, the on-chain proof, the
+  ids): read them by header name, not position. Amounts are plain numbers there, an absent value
+  an empty cell, and a cell starting with `=`, `+`, `-`, `@`, a tab or a CR gets a leading `'`.
+- A `referralFee` row only has what the referrer earned (its type, time, chain, block, currency
+  and the referral fee): every other field is absent.
 
 ## Webhooks
 
@@ -978,9 +1102,11 @@ console.log(`endpoint ${endpoint.uuid} created`);
 
 Up to 10 endpoints per space and mode; live endpoints need `https` and a public host. An
 organization endpoint also receives its members' events unless created with
-`includeMembers: false`. `endpoints.list`, `get`, `update` (`{ enabled: false }` pauses it,
-`{ enabled: true }` enables it again) and `delete` manage them. An endpoint's secret is shown and
-rotated in the dashboard only.
+`includeMembers: false`. `endpoints.list` / `iterate` (paginated), `get`, `update` (`PATCH`:
+`{ enabled: false }` pauses it, `{ enabled: true }` enables it again, `{ description: '' }` clears
+it, `{ events: [] }` receives every type) and `delete` (`204`) manage them. An endpoint's secret is
+shown and rotated in the dashboard only. A replay of the create's `Idempotency-Key` within 24 hours
+returns the same endpoint and secret.
 
 ### 2. Handle the deliveries with the router
 
@@ -1003,7 +1129,7 @@ const router = webhooks
 	})
 	.on('payment.completed', async (payment, event) => {
 		if (processed.has(event.id)) return; // a retry of an event already handled
-		console.log(`fulfil order "${payment.reference ?? ''}": ${payment.amount} USD`);
+		console.log(`fulfil order "${payment.reference ?? ''}": ${payment.amountUsd} USD`, payment.metadata);
 		processed.add(event.id);
 	})
 	.on('checkout.expired', (session) => {
@@ -1051,7 +1177,7 @@ const body = JSON.stringify({
 	version: 'v2',
 	createdAt: new Date().toISOString(),
 	test: true,
-	data: { uuid: 'pay@0192f1c2-2222-7c4d-9e5f-6a7b8c9d0e1f', reference: 'order-1', amount: 4.99 },
+	data: { uuid: 'pay@0192f1c2-2222-7c4d-9e5f-6a7b8c9d0e1f', reference: 'order-1', amountUsd: '4.99' },
 });
 const result = await router.handle(body, webhooks.sign(body, secret));
 console.log(result.status, result.event?.type); // 200 payment.completed
@@ -1108,9 +1234,10 @@ QBitFlow itself: 2xx for every event it accepts, the ignored types included.
 - **Members' events** carry the member in `event.userUuid`: read their resources with
   `client.onBehalfOf(event.userUuid)`.
 - **No fixed source IPs**: verify the signature, never allow-list addresses.
-- **v2 only.** An endpoint migrated from API v1 receives v1 bodies, which `parseEvent` refuses
-  (a `ValidationError`): move it to v2 in the dashboard, or with
-  `client.webhooks.endpoints.update(uuid, { payloadVersion: WebhookPayloadVersion.V2 })`.
+- **v2 only.** Every endpoint receives the v2 envelope (`QBitFlow-Webhook-Version: v2`); a body of
+  another version is refused by `parseEvent` (a `ValidationError`).
+- **Headers:** `QBitFlow-Signature`, `QBitFlow-Event-Id` and `QBitFlow-Event-Type`
+  (`webhooks.SIGNATURE_HEADER`, `EVENT_ID_HEADER`, `EVENT_TYPE_HEADER`).
 - Not holding the secret? `await client.webhooks.verifyRemote(endpointUuid, rawBody, header)` has
   the API check it (a `WebhookSignatureError` with reason `invalidSignature` when it does not
   match), then `webhooks.parseEvent` parses the body.
@@ -1126,33 +1253,39 @@ like a comparison, and `webhooks.eventData(event, type)` returns the typed data 
 | `event.type` | `event.data` |
 |---|---|
 | `payment.completed` | the `Payment` + `managementPageLink` |
-| `subscription.created` | the `Subscription` (`active` or `trial`) + `managementPageLink` |
-| `subscription.billed` | the `Bill` (paid until `periodEnd`) + `subscriptionReference`, `subscriptionStatus` |
+| `subscription.created` | the `Subscription` (`active` or `trial`, its `managementPageLink` included) |
+| `subscription.billed` | `{ bill, subscription }`: the `Bill` paid (until `bill.periodEnd`) and the `Subscription` as it leaves it (`subscription.status`, `.reference`, `.metadata`) |
 | `subscription.statusChanged` | the `Subscription` + `previousStatus` |
 | `subscription.actionRequiredChanged` | the `Subscription` + `previousActionRequired` |
 | `subscription.billingFailed` | the `Subscription` + `reason`, `billUuid`, `amountUsd` (a string), `attempt`, `remainingAttempts`, `nextAttemptAt` |
-| `subscription.upcomingBill` | the `Subscription` + `billingDate`, `amountUsd` (a number), `trialEnding`, `balanceSufficient`, `allowanceSufficient` |
-| `refund.requested` / `.completed` / `.denied` | the `Refund` |
+| `subscription.upcomingBill` | the `Subscription` + `billingAt`, `amountUsd` (a string), `trialEnding`, `balanceSufficient`, `allowanceSufficient` |
+| `refund.requested` / `.approved` / `.rejected` | the `Refund` (`refund.approved` and `refund.rejected` were `refund.completed` and `refund.denied`) |
 | `member.joined` | the `Member` + `invitationUuid` |
 | `member.removed` | the `Member` |
-| `heldFunds.released` | the transfer paid to the member + the `ledgers` it settled |
+| `heldFunds.released` | the transfer paid to the member (`amount`, `amountUsd`, `settlement.transaction`) + the `ledgers` it settled |
 | `checkout.expired` | the session: `PaymentSessionData`, or `SubscriptionSessionData` (`webhooks.isSubscriptionSession`) |
 | `webhook.test` | `endpointUuid`, `message` (the dashboard's test) |
 | any other | `unknown` (the raw JSON value) |
 
-Webhook data never carries what only API reads return (`customer`, `refund`/`refundable`,
-`dunning`, `approval`, `productName`).
+Webhook data never carries what only API reads return (`customer`,
+`refund`/`refundable`/`notRefundableReason`, a subscription's `dunning`, a refund's `approval`,
+`customerUuid` and `productName`); it carries your `metadata` and the `settlement`.
 
 ### The event log
 
-Every event of the space, newest first:
+Every event of the space, newest first, each exactly as it was delivered (kept at least 90 days;
+`webhooks.events.iterate` walks every page). `type` is sent as is, not checked against this SDK's
+types (newer ones appear), and the cursor is opaque (never an event id):
 
 <!-- docs:snippet events-list -->
 ```ts
-// Newest first; one page (iterate walks them all).
+// Newest first, each exactly as delivered; one page (iterate walks them all).
 const page = await client.webhooks.events.list({ type: EventType.PaymentCompleted, limit: 10 });
 for (const event of page.items) {
 	console.log(`${event.id} ${event.type} at ${event.createdAt}`);
+}
+if (page.hasMore) {
+	console.log(`more: pass ${page.nextCursor} as cursor`); // opaque, never an event id
 }
 ```
 <!-- /docs:snippet -->
@@ -1170,24 +1303,29 @@ for (const d of detail.deliveries) {
 
 <!-- docs:snippet currencies-list -->
 ```ts
-// A public route limited to 60 requests a minute per IP: cache the list at start-up.
-const currencies = await client.currencies.listAvailable();
-for (const currency of currencies) {
-	console.log(`${currency.id}: ${currency.symbol}, ${currency.decimals} decimals`);
+// A public route limited to 60 requests a minute per IP: cache the list at start-up. One bounded
+// list (an array): the live currencies; test: true, the test networks'; main: true, the chains'
+// native coins only.
+const currencies = await client.currencies.list();
+for (const { id, code, name, chain, decimals } of currencies) {
+	console.log(`${id}: ${code} (${name} on ${chain}), ${decimals} decimals`);
 }
 ```
 <!-- /docs:snippet -->
 
-`listAvailable` lists every currency checkouts can take, `listMain` the chains' native coins, and
-`get` one by id, to resolve the `currencyId`, `availableCurrencyIds` and `acceptedCurrencyIds`
-fields. These routes are public and **limited to 60 requests a minute per IP: cache the list** at
-start-up instead of reading it per request. Payments, bills and subscriptions already carry their
-`currency`.
+`currencies.list` returns the catalog as an array (`{ test: true }`: the test networks'
+currencies; `{ main: true }`: only the chains' native coins), and `get` one by id (a token's
+`mainCurrencyId`). A `Currency` has its `code` (what requests name it by: `BASE:USDC`, or `ETH` for
+a native coin), `symbol`, `name`, `chain`, `decimals`, and `address` (absent on a native coin).
+These routes are public and **limited to 60 requests a minute per IP: cache the list** at start-up
+instead of reading it per request. Every response that names a currency carries this object
+(`payment.currency`, `member.acceptedCurrencies`, …).
 
 ## Pagination and iterators
 
-Paginated lists return a `Page<T>`: `items`, `nextCursor` (`null` on the last page, else the value
-to pass back as the params' `cursor`, verbatim) and `hasMore` (`nextCursor !== null`).
+Paginated lists return a `Page<T>`: `items`, `hasMore` (another page follows), and `nextCursor`
+(present iff `hasMore`: the value to pass back as the params' `cursor`, verbatim; it is opaque,
+never an id to build or parse, at most 200 characters).
 
 <!-- docs:snippet customers-list -->
 ```ts
@@ -1195,41 +1333,47 @@ const page = await client.customers.list({ limit: 10 });
 for (const customer of page.items) {
 	console.log(`${customer.uuid} ${customer.email}`);
 }
-// null on the last page; else pass it back as cursor to read the next one.
-console.log(`next cursor: ${page.nextCursor}`);
+if (page.hasMore) {
+	// Pass it back, verbatim, as the cursor param for the next page.
+	console.log(`next cursor: ${page.nextCursor}`);
+}
 ```
 <!-- /docs:snippet -->
 
-Each paginated list has an `iterate…` twin returning an `AsyncIterableIterator<T>`: it fetches one
-page at a time, only as you consume it, keeps your filters and page size, and stops when you
-`break`. An error is thrown from the `for await` loop and ends it.
+To walk the pages yourself, pass `page.nextCursor` back as `cursor` and list again while
+`page.hasMore`. Each paginated list has an `iterate…` twin returning an `AsyncIterableIterator<T>`:
+it fetches one page at a time, only as you consume it, keeps your filters and page size, and stops
+when you `break`, after the page whose `hasMore` is `false` (a full last page answers `false`:
+there is never an extra empty request), or defensively on a page that claims more without a new
+`nextCursor` or with no items. An error is thrown from the `for await` loop and ends it.
 
 <!-- docs:snippet pagination-iterate -->
 ```ts
 // Every payment of the last 30 days: the iterator fetches the pages one at a time, as the loop
-// consumes them, and stops when you break.
+// consumes them, and stops when you break (or after the page whose hasMore is false).
 const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
-let total = 0;
+let count = 0;
 for await (const payment of client.payments.iterate({ createdAfter: since, limit: 50 })) {
-	total += payment.amount;
+	count++;
+	console.log(payment.uuid, payment.amountUsd, 'USD');
 }
-console.log(`${total.toFixed(2)} USD over the last 30 days`);
+console.log(`${count} payments over the last 30 days`);
 ```
 <!-- /docs:snippet -->
 
 | Method | Iterator | Page size: default / max |
 |---|---|---|
-| `customers.list` | `iterate` | 10 / 100 |
-| `payments.list`, `payments.listCombined` | `iterate`, `iterateCombined` | 10 / 50 |
-| `failures.list` | `iterate` | 10 / 50 |
+| `products.list`, `customers.list` | `iterate` | 20 / 100 |
+| `payments.list`, `transactions.list`, `failures.list` | `iterate` | 20 / 100 |
 | `subscriptions.list`, `subscriptions.listBills` | `iterate`, `iterateBills` | 20 / 100 |
-| `refunds.listInactive` | `iterateInactive` | 10 / 50 |
+| `refunds.list` | `iterate` | 20 / 100 |
 | `members.list`, `invitations.list` | `iterate` | 20 / 100 |
-| `webhooks.events.list` (cursor `evt_…`) | `iterate` | 20 / 100 |
+| `webhooks.endpoints.list`, `webhooks.events.list` | `iterate` | 20 / 100 |
 
-The other lists are short and return a plain array: `products.list`, `refunds.list`,
-`wallets.*`, `currencies.*`, `webhooks.endpoints.list` (at most 10), `members.listHeldFunds` and
-`subscriptions.getPublicHistory` (the 10 latest bills).
+`limit` is clamped by the API (0 or less: 20; above 100: 100). The bounded lists answer one page
+and return its items as a plain array: `currencies.list`, `wallets.list`, `wallets.listForMember`,
+`wallets.listAcceptedCurrencies`, `members.listHeldFunds` and `accounting.exportJson` (should one
+ever claim more, the SDK follows its `nextCursor`, so it is never cut short silently).
 
 ## Errors
 
@@ -1240,11 +1384,11 @@ builds, even with two copies of the package installed):
 | Class | When | Codes and properties worth knowing |
 |---|---|---|
 | `ValidationError` | 400 `validation_failed`, or input the SDK refused **before sending** (`status` `undefined`) | `fieldErrors`: each failing input by its wire name, dotted when nested (`frequency.unit`) |
-| `BadRequestError` | any other 400 | `bad_request`, `foreign_key_violation` (`details.field`) |
+| `BadRequestError` | any other 400 | `foreign_key_violation` (`details.field`), `test_mode_only`, `sender_is_receiver` |
 | `AuthenticationError` | 401 | a missing, unknown, expired or revoked key (a removed member's keys too) |
 | `PermissionDeniedError` | 403 | `forbidden`, `policy_disabled` (`details.policy`), `plan_required` |
-| `NotFoundError` | 404 | unknown, deleted, or outside the request's space |
-| `ConflictError` | 409 | `unique_violation` (`details.field`), `tx_already_sent`, `merchant_not_ready` (`details.reason`), `refund_already_exists` (`details.refundUuid`), `held_funds_released`, `held_funds_pending`, `already_joined`, `payment_not_due`, `idempotency_key_in_use`, `conflict` |
+| `NotFoundError` | 404 | unknown, deleted, or outside the request's space; also a `getByReference` that found nothing (code `not_found`, the list's `requestId`) |
+| `ConflictError` | 409 | `unique_violation` (`details.field`), `tx_already_sent`, `merchant_not_ready` (`details.reason`), `refund_already_exists` (`details.refundUuid`), `held_funds_released`, `held_funds_pending`, `already_joined`, `payment_not_due`, `subscription_already_stopped_or_inactive`, `idempotency_key_in_use`, `conflict` |
 | `GoneError` | 410 | `merchant_closed`: a removed member's or a closed organization's space |
 | `IdempotencyError` | 422 `idempotency_key_reused` | an `Idempotency-Key` reused for another request: a bug, never retried |
 | `RateLimitError` | 429 | `retryAfter` (seconds), `limit`, `periodSeconds` |
@@ -1255,7 +1399,8 @@ builds, even with two copies of the package installed):
 
 Every `ApiError` carries `status` (`undefined` when no response was received), `code` (branch on
 it, never on the message; `''` when absent), `rawMessage` (the API's own message), `details`
-(never `null`), `requestId` (quote it to support), `fieldErrors`, `rawBody` (the error response as
+(never `null`, and raw: money in it is a string, `details.max === '5'`, but the accounting window's
+`max` is the number 92), `requestId` (quote it to support), `fieldErrors`, `rawBody` (the error response as
 received, `''` without one) and `cause`. Its `message` reads
 `"<message> (status <status>, code <code>, request <requestId>)"`, followed by
 `"; <field>: <message>"` for each field error, and its `name` is the class name.
@@ -1264,7 +1409,7 @@ received, `''` without one) and `cause`. Its `message` reads
 ```ts
 try {
 	const payment = await client.payments.getByReference('order-1042');
-	console.log(`order-1042 paid: ${payment.amount} USD`);
+	console.log(`order-1042 paid: ${payment.amountUsd} USD`);
 } catch (err) {
 	if (err instanceof NotFoundError) {
 		console.log('no payment for order-1042 yet');
@@ -1283,20 +1428,26 @@ try {
 <!-- /docs:snippet -->
 
 **Client-side validation** runs before every request: names and texts (lengths in characters, no
-markup characters), references (`A-Z a-z 0-9 . _ : @ -`, 1 to 100), emails, phone numbers,
-absolute `http(s)` URLs, prices above 0, percents (at most 2 decimals), durations (a frequency
-between 1 unit and 1 year), UUIDs and transaction ids, dates, the checkout's product choice, and
-exclusive filters. A failure is a `ValidationError` with `status` `undefined`, its message
-`validation failed` followed by the field list, and nothing is sent. What depends on the key's mode
-or on stored data is left to the API: the 5 USD test-mode cap, `https`-only live URLs, the
-frequency minimum (1 hour live, 5 minutes test), the 95-day export window, uniqueness.
+markup characters), references (`A-Z a-z 0-9 . _ : @ -`, 1 to 100, on creates and on the
+`reference` filters and `getByReference`), emails (the customers' `email` filter too), phone
+numbers, absolute `http(s)` URLs, USD amounts (decimal strings with at most 2 decimals, above 0, at
+most 1,000,000), percents (decimal strings, at most 2 decimals: `refundPercent` above 0 up to 100,
+`organizationFeePercent` 0 to 50), metadata (keys, values, at most 50 keys), durations (a frequency
+between 1 unit and 1 year), UUIDs and transaction ids, dates, cursors (at most 200 characters), the
+checkout's product choice, the enum filters (refund `status`, transaction `type`, failure `kind`
+and `category`, invitation `status`), and exclusive filters. A failure is a `ValidationError` with
+`status` `undefined`, `code` `''`, its message `validation failed` followed by the field list, and
+nothing is sent. What depends on the key's mode or on stored data is left to the API: the `'5'` USD
+test-mode cap, `https`-only live URLs, the live subscription minimum (`'0.25'`), the frequency
+minimum (1 hour live, 5 minutes test), the 92-day export window, the 50-key cap on merged metadata,
+uniqueness.
 
 ## Retries and idempotency
 
 | | |
 |---|---|
-| Retried methods | every read (GET), and the 7 creates: `checkoutSessions.createPayment`, `checkoutSessions.createSubscription`, `products.create`, `customers.create`, `webhooks.endpoints.create`, `invitations.create`, `refunds.initiate` |
-| Never retried | every other write: updates, deletes, `checkoutSessions.expire`, `subscriptions.cancel`, `subscriptions.executeTestBilling`, `members.trust`, `members.remove`, `invitations.revoke`, `webhooks.verifyRemote` |
+| Retried methods | every read (GET), and the 7 creates: `checkoutSessions.createPayment`, `checkoutSessions.createSubscription`, `products.create`, `customers.create`, `webhooks.endpoints.create`, `invitations.create`, `refunds.create` |
+| Never retried | every other write: updates (`subscriptions.update` included), deletes, `checkoutSessions.expire`, `subscriptions.cancel`, `subscriptions.testBill`, `members.trust`, `members.remove`, `invitations.revoke`, `webhooks.verifyRemote`; a 429 on them is thrown, not retried |
 | Retried on | a network error or timeout, a 5xx, a 429, a 409 `idempotency_key_in_use` |
 | Not retried on | any other 4xx (422 `idempotency_key_reused` included), a 3xx, an unusable response |
 | Attempts | 3 retries by default (`maxRetries`; `0` disables them) |
@@ -1332,7 +1483,7 @@ const client = QBitFlow.fromEnv({ maxRetries: 5, timeout: 15_000 });
 // opening a second one.
 const orderId = 'order-1042';
 const session = await client.checkoutSessions.createPayment(
-	{ productName: 'T-shirt', description: 'Blue, size M', price: 4.99, reference: orderId },
+	{ productName: 'T-shirt', description: 'Blue, size M', priceUsd: '4.99', reference: orderId },
 	{ idempotencyKey: `checkout-${orderId}` }
 );
 console.log(`Redirect the customer to ${session.link}`);
@@ -1377,7 +1528,7 @@ naming it), `QBITFLOW_BASE_URL` and `QBITFLOW_ON_BEHALF_OF` (an empty variable c
 
 | Request option (any method, last argument) | |
 |---|---|
-| `onBehalfOf` | acts in that member's space for this call; `''` forces the organization's |
+| `onBehalfOf` | acts in that member's space for this call; `''` forces the organization's (no header) |
 | `idempotencyKey` | the 7 creates only: your own `Idempotency-Key` |
 | `requestId` | sends `X-Request-Id` (1 to 128 of `A-Z a-z 0-9 - _ . :`) |
 | `signal` | an `AbortSignal` cancelling the call, its retries and its waits |
@@ -1394,9 +1545,9 @@ changes after construction; `client.onBehalfOf` derives clients that share it. E
 
 ## Migrating from 2.x
 
-3.0.0 is a rewrite for API v2: base URL `/v2`, a `checkoutSessions` service, UUID ids, members and
-invitations instead of users and claims, a new webhook signature, typed errors, no `axios` or `ws`
-dependency. **[MIGRATION-v3.md](MIGRATION-v3.md)** maps every 2.x method and type to its
+3.0.0 is a rewrite for API v2: base URL `/v2`, REST routes, a `checkoutSessions` service, UUID
+ids, money as decimal strings, members and invitations instead of users and claims, a new webhook
+signature, typed errors, no `axios` or `ws` dependency. **[MIGRATION-v3.md](MIGRATION-v3.md)** maps every 2.x method and type to its
 replacement, with before/after code for the common tasks.
 
 ## Examples
@@ -1411,8 +1562,8 @@ They are also the source of this README's code blocks and of the snippets on
 | [`checkout.ts`](examples/checkout.ts) | a payment checkout, its status, `waitForCompletion`, expiry |
 | [`catalog.ts`](examples/catalog.ts) | a product, the products and customers lists, a checkout for a catalog product |
 | [`payments.ts`](examples/payments.ts) | a page of payments, one by id and by reference, the iterator, `formatAmount` |
-| [`subscriptions.ts`](examples/subscriptions.ts) | a subscription checkout with a trial, `hasAccess`, bills, test billing, cancel at period end |
-| [`refunds.ts`](examples/refunds.ts) | a partial refund, the active refunds |
+| [`subscriptions.ts`](examples/subscriptions.ts) | a subscription checkout with a trial, `hasAccess`, bills, its metadata, a test bill, cancel at period end |
+| [`refunds.ts`](examples/refunds.ts) | a partial refund, the pending refunds, a refund by id |
 | [`marketplace.ts`](examples/marketplace.ts) | invitations, members, `onBehalfOf`, wallets, held funds, fee, trust, removal |
 | [`webhooks.ts`](examples/webhooks.ts) | a webhook endpoint and its secret, the event log |
 | [`webhook-handler.ts`](examples/webhook-handler.ts) | a `node:http` receiver built on the webhook router, with deduplication and typed handlers |

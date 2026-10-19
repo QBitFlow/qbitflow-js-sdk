@@ -7,43 +7,51 @@
 import type { AccountingEventType, Chain, NetworkFeesPayer } from '../enums.js';
 
 /**
- * One row of the accounting export: a payment, a bill, a refund, or a fee.
+ * One row of the accounting export (`accounting.exportJson`): a payment, a bill or a refund of
+ * the space, or a fee it earned on another space's payment or bill.
  *
- * The fields are in the CSV's column order, laid out to be read left to right: what happened and
- * when, the USD amounts (gross, the fees, net), the same amounts in the currency paid, the network
- * fees, the rates, the on-chain proof, then the ids. Read CSV columns by header name, not
- * position. Amounts are in the currency's units (`"7.5"` USDC, not `"7500000"`), decimal strings,
- * with the currency's decimals beside them. A `referralFee` row only has `txTimeUtc`, `type`,
- * `chain`, `blockNumberOrSlot`, `currency`, `currencyDecimals`, `currencyPriceUsd`,
- * `tokenContractOrMint` and the referral fee: every other field is absent.
+ * The export is flat on purpose, for spreadsheets: one column per key, the currency named by its
+ * symbol, chain and decimals (no nested currency object). Every amount is a decimal string, in
+ * the currency's units (`"7.5"` USDC, not `"7500000"`) with its on-chain twin `…MinUnits` beside
+ * it; a value the row doesn't have (a fee that doesn't apply, an amount not known) is absent,
+ * never `"0"`. The fields are in the CSV's column order, laid out to be read left to right: what
+ * happened and when, the USD amounts (gross, the fees, net), the same amounts in the currency
+ * paid, the network fees, the rates, the on-chain proof, then the ids. Read CSV columns by header
+ * name, not position. Rows are ordered by `txTimeUtc`, then `type`, then `txUuid`.
+ *
+ * `grossAmount = platformFee + organizationFee + netAmount` exactly (an absent fee counts 0); a
+ * refund's net is its gross, both negative. A `referralFee` row only tells what the referrer
+ * earned, when and on which chain: `type`, `txTimeUtc`, `chain`, `blockNumberOrSlot`, `currency`,
+ * `currencyDecimals`, `currencyPriceUsd`, `tokenContractOrMint`, `referralFeePercent`,
+ * `referralFeeUsd`, `referralFee` and `referralFeeMinUnits`; every other field is absent.
  */
 export interface AccountingEvent {
 	/** When the transaction's block was mined (UTC): an event is in the export of that day. */
 	txTimeUtc: string;
-	/** `payment`, `subscriptionHistory`, `refund`, `organizationFee` or `referralFee`. */
+	/** `payment`, `bill`, `refund`, `organizationFee` or `referralFee`. */
 	type: AccountingEventType;
-	/** The payment's reference, if any. */
-	paymentReference?: string;
+	/** The payment's own reference (yours), when it has one. */
+	reference?: string;
 	/** For a refund of a payment, the payment's reference (a bill has none). */
-	relatedPaymentReference?: string;
+	relatedReference?: string;
 	/** The product's name. */
 	productName?: string;
-	/** The merchant's reference of the customer. */
+	/** Your reference of the customer. */
 	customerReference?: string;
 
-	/** The gross amount in USD: what was charged (a refund: what was sent back, negative). */
-	grossAmountUsd?: number;
-	/** QBitFlow's fee in USD, the referrer's share included. */
-	platformFeeUsd?: number;
-	/** The referral fee in USD. */
-	referralFeeUsd: number;
-	/** The organization's fee in USD. */
-	organizationFeeUsd?: number;
+	/** What the customer paid in USD (a refund: what went back, negative). */
+	grossAmountUsd?: string;
+	/** QBitFlow's fee in USD, the referrer's share included; absent when none (a refund). */
+	platformFeeUsd?: string;
+	/** The referrer's share of the platform fee in USD; absent when no referral applied. */
+	referralFeeUsd?: string;
+	/** The organization's fee on a member's payment in USD; absent when none. */
+	organizationFeeUsd?: string;
 	/**
 	 * What the merchant received (a payment or a bill: after the fees) or sent back (a refund: the
 	 * refunded amount, negative), in USD. Network fees are never part of it.
 	 */
-	netAmountUsd?: number;
+	netAmountUsd?: string;
 
 	/** The chain. */
 	chain: Chain;
@@ -52,29 +60,36 @@ export interface AccountingEvent {
 	 * `SOL`; Base's is `ETH`). Always set.
 	 */
 	currency: string;
-	/** The currency's decimals: an amount × 10^`currencyDecimals` is its min units on-chain. */
+	/** The currency's decimals: an amount × 10^currencyDecimals is its min units on-chain. */
 	currencyDecimals: number;
 	/**
-	 * The currency's USD price the amounts were converted at (`grossAmountUsd / grossAmount`; a
-	 * refund: its refunded transaction's). Absent without a gross amount.
+	 * The currency's USD price the amounts were converted at: `grossAmountUsd / grossAmount`, to 8
+	 * decimals (a refund: its refunded transaction's). Absent without a gross amount.
 	 */
-	currencyPriceUsd?: number;
-	/** The gross amount in the currency's units (a decimal string). */
+	currencyPriceUsd?: string;
+	/** The gross amount in the currency's units. */
 	grossAmount?: string;
+	/** The same on-chain: an integer string. */
+	grossAmountMinUnits?: string;
 	/** QBitFlow's fee in the currency's units, the referrer's share included. */
 	platformFee?: string;
+	/** The same on-chain. */
+	platformFeeMinUnits?: string;
 	/**
 	 * The referrer's share, paid out of the platform fee, in the currency's units: what a
-	 * `referralFee` event earned. `"0"` when no referral applied.
+	 * `referralFee` event earned. Absent when no referral applied (none, or past its deadline).
 	 */
-	referralFee: string;
-	/** The organization's fee in the currency's units (`"0"` when none). */
+	referralFee?: string;
+	/** The same on-chain. */
+	referralFeeMinUnits?: string;
+	/** The organization's fee in the currency's units; absent when none. */
 	organizationFee?: string;
-	/**
-	 * The net amount in the currency's units (a refund: the refunded amount, negative).
-	 * `grossAmount = platformFee + organizationFee + netAmount` exactly.
-	 */
+	/** The same on-chain. */
+	organizationFeeMinUnits?: string;
+	/** The net amount in the currency's units (a refund: the refunded amount, negative). */
 	netAmount?: string;
+	/** The same on-chain. */
+	netAmountMinUnits?: string;
 
 	/**
 	 * Whose wallet paid the transaction's network fees, never part of the net: `payer` (a payment
@@ -83,11 +98,10 @@ export interface AccountingEvent {
 	 * `referralFee` rows.
 	 */
 	networkFeesPaidBy?: NetworkFeesPayer;
-	/**
-	 * The network fees in `networkFeesCurrency`'s units (a decimal string); absent when unknown (a
-	 * refund recorded before they were).
-	 */
+	/** The network fees in `networkFeesCurrency`'s units; absent when not recorded. */
 	networkFees?: string;
+	/** The same in `networkFeesCurrency`'s min units. */
+	networkFeesMinUnits?: string;
 	/**
 	 * What paid them: the event's currency on a payment or a bill (the payer's gas refund, taken
 	 * in it), the chain's native currency (`ETH`, `SOL`) on a refund.
@@ -95,20 +109,17 @@ export interface AccountingEvent {
 	networkFeesCurrency?: string;
 	/** `networkFeesCurrency`'s decimals. */
 	networkFeesCurrencyDecimals?: number;
-	/**
-	 * `networkFeesCurrency`'s USD price `networkFeesUsd` was converted at; absent when unknown (a
-	 * refund recorded before it was).
-	 */
-	networkFeesCurrencyPriceUsd?: number;
+	/** `networkFeesCurrency`'s USD price `networkFeesUsd` was converted at; absent when unknown. */
+	networkFeesCurrencyPriceUsd?: string;
 	/** The network fees in USD; absent when unknown. */
-	networkFeesUsd?: number;
+	networkFeesUsd?: string;
 
-	/** QBitFlow's fee rate on the event, in percent (0.99 = 0.99 %). */
-	platformFeePercent?: number;
-	/** The referrer's share of the platform fee, in percent (20 = 20 % of it). */
-	referralFeePercent: number;
-	/** The organization's fee rate on the event, in percent. */
-	organizationFeePercent?: number;
+	/** QBitFlow's fee rate on the event, a percent string (`"0.99"` = 0.99 %). */
+	platformFeePercent?: string;
+	/** The referrer's share of the platform fee (`"20"` = 20 % of it), when a referral applied. */
+	referralFeePercent?: string;
+	/** The organization's fee rate on the event, when it took one. */
+	organizationFeePercent?: string;
 
 	/** The sender; absent on `referralFee` rows. */
 	fromAddress?: string;
@@ -117,22 +128,22 @@ export interface AccountingEvent {
 	/** The transaction's hash; absent on `referralFee` rows. */
 	txHash?: string;
 	/** The block (or slot). */
-	blockNumberOrSlot: string;
-	/** The token's contract (EVM) or mint (Solana); `''` for a native currency. */
-	tokenContractOrMint: string;
+	blockNumberOrSlot?: string;
+	/** The token's contract (EVM) or mint (Solana); absent for a native currency. */
+	tokenContractOrMint?: string;
 	/** The transaction on the chain's explorer; absent on `referralFee` rows. */
 	explorerUrl?: string;
-	/** The transaction's page for its customer; absent on `referralFee` rows. */
+	/** The transaction's public page for its customer; absent on `referralFee` rows. */
 	receiptUrl?: string;
 
 	/**
-	 * The event's transaction, prefixed by its type: `pay@` (a payment, an organization fee's),
-	 * `sub-hist@` (a bill), `refund@` (a refund); absent on `referralFee` rows.
+	 * The event's transaction, prefixed by its type: `pay@` (a payment), `sub-hist@` (a bill),
+	 * `refund@` (a refund); absent on `referralFee` rows.
 	 */
-	paymentUuid?: string;
+	txUuid?: string;
 	/** For a refund, the refunded payment's (`pay@…`) or bill's (`sub-hist@…`) id. */
-	relatedPaymentUuid?: string;
-	/** The product; absent when none. */
+	relatedTxUuid?: string;
+	/** The product; absent when the event has none. */
 	productUuid?: string;
 	/** The product's reference. */
 	productReference?: string;

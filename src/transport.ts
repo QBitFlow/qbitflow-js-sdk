@@ -72,7 +72,7 @@ export interface RequestOptions {
 }
 
 /** The HTTP methods the API uses. */
-export type Method = 'GET' | 'POST' | 'PUT' | 'DELETE';
+export type Method = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 
 /** One API call. */
 export interface Endpoint {
@@ -547,7 +547,8 @@ export function decodeResponse<T>(schema: Schema<T>, res: RawResponse): T {
 			cause: err,
 		});
 	}
-	if (value === null && schema.expected !== 'an array') {
+	// Every answer is a JSON object (lists are pages): null is no answer at all.
+	if (value === null) {
 		throw new ServerError({
 			message: 'unexpected response body: null where an object was expected',
 			status: res.status,

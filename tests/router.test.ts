@@ -8,7 +8,13 @@ import type { AddressInfo } from 'node:net';
 
 import { QBitFlow } from '../src/client';
 import { ValidationError, WebhookSignatureError } from '../src/errors';
-import { webhooks, type Event, type PaymentCompleted } from '../src/index';
+import {
+	webhooks,
+	type Event,
+	type PaymentCompleted,
+	type Refund,
+	type Subscription,
+} from '../src/index';
 import { MAX_WEBHOOK_BODY_BYTES, WebhookRouter } from '../src/webhookRouter';
 import { thrown } from './helpers/server';
 
@@ -28,7 +34,8 @@ const envelope = (type: string, data: unknown, version = 'v2'): string =>
 const PAYMENT = envelope('payment.completed', {
 	uuid: 'pay@019eca82-5680-7b00-8000-000000000001',
 	reference: 'order-1042',
-	amount: 4.99,
+	amount: '4.99',
+	amountUsd: '4.99',
 });
 const UNKNOWN = envelope('invoice.finalized', { number: 7 });
 const TEST_EVENT = envelope('webhook.test', { endpointUuid: 'e', message: 'hi' });
@@ -99,7 +106,8 @@ describe('router.handle', () => {
 		['not JSON', 'not json'],
 		['a JSON array', '[1]'],
 		['a v1 body', envelope('payment.completed', {}, 'v1')],
-		['a wrong field type', envelope('payment.completed', { amount: 'x' })],
+		// A JSON number where the model has a decimal string.
+		['a wrong field type', envelope('payment.completed', { amount: 4.99 })],
 	])('%s: 400 (ValidationError), no handler', async (_name, body) => {
 		const { router, calls } = recordingRouter();
 		const result = await router.handle(body, webhooks.sign(body, SECRET));
@@ -242,19 +250,31 @@ describe('router.handle', () => {
 			.router(SECRET)
 			.on('payment.completed', (data: PaymentCompleted) => data.reference)
 			.on('subscription.billingFailed', (data) => {
-				const amount: string = data.amountUsd; // a string here
+				const amount: string = data.amountUsd; // money is a decimal string
 				return amount;
 			})
 			.on('subscription.upcomingBill', (data) => {
-				const amount: number = data.amountUsd; // a number there
+				const amount: string = data.amountUsd; // here too
 				return amount;
 			})
+			.on('subscription.billed', (data) => {
+				// Nested: the bill and its subscription.
+				const paid: string = data.bill.amountUsd;
+				return `${paid} ${data.subscription.status}`;
+			})
+			.on('subscription.created', (data: Subscription) => data.managementPageLink)
+			.on('refund.approved', (data: Refund) => data.refundPercent)
 			.on('checkout.expired', (data, event) => {
 				const type: 'checkout.expired' = event.type;
 				return webhooks.isSubscriptionSession(data) ? type : data.uuid;
 			})
 			// @ts-expect-error: a payment has no previousStatus
 			.on('payment.completed', (data) => data.previousStatus);
+		// The retired refund.completed is no known type: refused by the compiler and at run time.
+		expect(
+			// @ts-expect-error: not a known event type
+			thrown(() => webhooks.router(SECRET).on('refund.completed', () => undefined))
+		).toBeInstanceOf(ValidationError);
 		expect(true).toBe(true);
 	});
 

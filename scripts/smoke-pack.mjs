@@ -66,7 +66,7 @@ try {
 		join(consumer, 'esm.mjs'),
 		"import { QBitFlow, VERSION, SubscriptionStatus, ConflictError, NotFoundError, webhooks } from 'qbitflow';\n" +
 			"const c = new QBitFlow('sk_smoke');\n" +
-			"if (typeof c.products.list !== 'function' || VERSION !== '3.0.0' || SubscriptionStatus.PastDue !== 'pastDue' || !ConflictError) process.exit(2);\n" +
+			"if (typeof c.products.list !== 'function' || typeof c.transactions.list !== 'function' || VERSION !== '3.0.0' || SubscriptionStatus.PastDue !== 'pastDue' || !ConflictError) process.exit(2);\n" +
 			"if (typeof c.onBehalfOf('019eca82-5680-7b00-8000-0000000000b1').checkoutSessions.createPayment !== 'function') process.exit(3);\n" +
 			"const e = webhooks.parseEvent('{\"id\":\"evt_1\",\"type\":\"webhook.test\",\"version\":\"v2\",\"createdAt\":\"2026-10-01T12:00:00Z\",\"data\":{}}');\n" +
 			"if (e.data.endpointUuid !== '') process.exit(4);\n" +
@@ -107,11 +107,11 @@ try {
 		join(consumer, 'types.mts'),
 		"import { QBitFlow, webhooks, SubscriptionStatus, type CreatePaymentSessionParams, type Payment, type Event } from 'qbitflow';\n" +
 			"const c = new QBitFlow({ apiKey: 'sk_smoke', maxRetries: 0 });\n" +
-			"const params: CreatePaymentSessionParams = { productName: 'T-shirt', price: 25, successUrl: 'https://x.io/ok?id={{UUID}}' };\n" +
-			"const p = {} as Payment; const sym: string | undefined = p.currency?.symbol; const ref: string | undefined = p.reference;\n" +
+			"const params: CreatePaymentSessionParams = { productName: 'T-shirt', priceUsd: '25.00', successUrl: 'https://x.io/ok?id={{UUID}}' };\n" +
+			"const p = {} as Payment; const sym: string = p.currency.symbol; const ref: string | undefined = p.reference; const usd: string = p.amountUsd;\n" +
 			"const scoped: QBitFlow = c.onBehalfOf('019eca82-5680-7b00-8000-0000000000b1');\n" +
 			"const status: string = SubscriptionStatus.Active;\n" +
-			"function handle(e: Event): string { switch (e.type) { case 'payment.completed': return e.data.uuid; case 'subscription.billingFailed': return e.data.amountUsd; default: return webhooks.isUnknownEvent(e) ? 'unknown' : e.type; } }\n" +
+			"function handle(e: Event): string { switch (e.type) { case 'payment.completed': return e.data.uuid; case 'subscription.billingFailed': return e.data.amountUsd; case 'subscription.billed': return e.data.bill.uuid; case 'refund.approved': return e.data.refundPercent; default: return webhooks.isUnknownEvent(e) ? 'unknown' : e.type; } }\n" +
 			"import { formatAmount, hasAccess, Placeholders, type WebhookResult, type WebhookRouter, type WaitOptions } from 'qbitflow';\n" +
 			"const router: WebhookRouter = webhooks.router('whsec_x').on('payment.completed', (data, event) => { const r: string | undefined = data.reference; return [r, event.id]; }).onAny(async (e) => e.id);\n" +
 			"const fetchHandler: (req: Request) => Promise<Response> = router.fetchHandler();\n" +
@@ -119,7 +119,7 @@ try {
 			"const wait: WaitOptions = { timeout: 1000, interval: 1000 };\n" +
 			"const access: boolean = hasAccess({ currentPeriodEnd: undefined }); const amount: string = formatAmount('1', 6);\n" +
 			"const fromEnv: QBitFlow = QBitFlow.fromEnv({ maxRetries: 0 }); const url = `https://x.io/ok?id=${Placeholders.UUID}`;\n" +
-			'void params; void sym; void ref; void scoped; void status; void handle; void fetchHandler; void result; void wait; void access; void amount; void fromEnv; void url;\n'
+			'void params; void sym; void ref; void usd; void scoped; void status; void handle; void fetchHandler; void result; void wait; void access; void amount; void fromEnv; void url;\n'
 	);
 	writeFileSync(join(consumer, 'default-import.mts'), "import qb from 'qbitflow';\nvoid qb;\n");
 	const tsc = join(root, 'node_modules', '.bin', 'tsc');

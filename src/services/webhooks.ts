@@ -1,5 +1,5 @@
 import { type Core, path } from '../core.js';
-import { list } from '../decode.js';
+import type { Schema } from '../decode.js';
 import { encodeBody } from '../encode.js';
 import {
 	BadRequestError,
@@ -11,6 +11,7 @@ import type { Page } from '../models/common.js';
 import type { Event } from '../models/events.js';
 import type {
 	CreateWebhookEndpointParams,
+	EndpointListParams,
 	EventDetail,
 	EventListParams,
 	UpdateWebhookEndpointParams,
@@ -18,7 +19,12 @@ import type {
 	WebhookEndpointCreated,
 } from '../models/webhooks.js';
 import { iteratePages } from '../pagination.js';
-import { createWebhookEndpointBody, eventListQuery, updateWebhookEndpointBody } from '../params.js';
+import {
+	createWebhookEndpointBody,
+	eventListQuery,
+	pageQuery,
+	updateWebhookEndpointBody,
+} from '../params.js';
 import {
 	EventDetailSchema,
 	EventSchema,
@@ -48,22 +54,41 @@ export class WebhookEndpointsService {
 	constructor(private readonly core: Core) {}
 
 	/**
-	 * The space's webhook endpoints (`GET /webhooks/endpoints`; at most 10, not paginated). A
-	 * member's key needs the organization's `members.webhooks` policy (403 `policy_disabled`), as
-	 * every endpoints and events method.
+	 * One page of the space's webhook endpoints (`GET /webhooks/endpoints`; newest first, page
+	 * size 20 by default, at most 100; a space has at most 10 per mode). A member's key needs the
+	 * organization's `members.webhooks` policy (403 `policy_disabled`), as every endpoints and
+	 * events method. {@link iterate} walks every page.
 	 */
-	async list(options?: RequestOptions): Promise<WebhookEndpoint[]> {
+	async list(
+		params?: EndpointListParams,
+		options?: RequestOptions
+	): Promise<Page<WebhookEndpoint>> {
+		const query = pageQuery(params);
 		return this.core.call(
-			list(WebhookEndpointSchema),
-			{ method: 'GET', path: '/webhooks/endpoints' },
+			page(WebhookEndpointSchema),
+			{ method: 'GET', path: '/webhooks/endpoints', query },
 			options
 		);
 	}
 
 	/**
+	 * Walks every endpoint {@link list} returns, fetching the pages lazily and keeping the page
+	 * size. An error ends the walk.
+	 */
+	iterate(
+		params?: EndpointListParams,
+		options?: RequestOptions
+	): AsyncIterableIterator<WebhookEndpoint> {
+		return iteratePages(params?.cursor, (cursor) => this.list({ ...params, cursor }, options));
+	}
+
+	/**
 	 * Adds a webhook endpoint to the space (`POST /webhooks/endpoints`, 201). The answer carries
 	 * the endpoint's `secret` (`whsec_…`), shown only this once: store it to verify the
-	 * deliveries. Sends an `Idempotency-Key` and is retried on transient failures.
+	 * deliveries. Sends an `Idempotency-Key` and is retried on transient failures (a replay of the
+	 * same key within 24 h returns the same endpoint and secret). `includeMembers` absent: `true`
+	 * for an organization endpoint (a marketplace receives every seller's events), `false` for a
+	 * member's.
 	 *
 	 * Errors: 400 `validation_failed` (live mode needs https and a public host); 409 `conflict`
 	 * beyond 10 endpoints per space and mode.
@@ -80,7 +105,10 @@ export class WebhookEndpointsService {
 		);
 	}
 
-	/** A webhook endpoint (`GET /webhooks/endpoints/:uuid`). Its secret is never returned again. */
+	/**
+	 * A webhook endpoint (`GET /webhooks/endpoints/:uuid`). Its secret is never returned again
+	 * (rotate it in the dashboard).
+	 */
 	async get(uuid: string, options?: RequestOptions): Promise<WebhookEndpoint> {
 		checkPathUUID('uuid', uuid);
 		return this.core.call(
@@ -91,9 +119,9 @@ export class WebhookEndpointsService {
 	}
 
 	/**
-	 * Changes a webhook endpoint (`PUT /webhooks/endpoints/:uuid`): only the fields given change.
-	 * `enabled: false` pauses it, `true` enables it again; `payloadVersion: 'v2'` moves an endpoint
-	 * migrated from v1 to the event envelope. Not retried.
+	 * Changes a webhook endpoint (`PATCH /webhooks/endpoints/:uuid`): only the fields given change;
+	 * `description: ''` clears the description; `events: []` receives every type. `enabled: false`
+	 * pauses it, `true` enables it again (also after it was disabled for failing). Not retried.
 	 */
 	async update(
 		uuid: string,
@@ -104,12 +132,15 @@ export class WebhookEndpointsService {
 		const body = updateWebhookEndpointBody(params);
 		return this.core.call(
 			WebhookEndpointSchema,
-			{ method: 'PUT', path: path('/webhooks/endpoints/:', ['uuid', uuid]), body },
+			{ method: 'PATCH', path: path('/webhooks/endpoints/:', ['uuid', uuid]), body },
 			options
 		);
 	}
 
-	/** Deletes a webhook endpoint (`DELETE /webhooks/endpoints/:uuid`). Not retried. */
+	/**
+	 * Deletes a webhook endpoint (`DELETE /webhooks/endpoints/:uuid`, 204): it receives nothing
+	 * more. Not retried.
+	 */
 	async delete(uuid: string, options?: RequestOptions): Promise<void> {
 		checkPathUUID('uuid', uuid);
 		await this.core.callVoid(
@@ -126,28 +157,35 @@ export class WebhookEventsService {
 
 	/**
 	 * One page of the space's event log (`GET /webhooks/events`; newest first, page size 20 by
-	 * default, at most 100), optionally by `type`; `includeMembers` adds the members' events
-	 * (organization key). The cursor is an event id (`evt_…`). Each event's `data` is typed.
+	 * default, at most 100; events are kept at least 90 days), each event exactly as it was
+	 * delivered, optionally filtered by `type`; `includeMembers` adds the members' events
+	 * (organization key). The cursor is opaque. Each event's `data` is typed (narrow on `type`).
 	 */
 	async list(params?: EventListParams, options?: RequestOptions): Promise<Page<Event>> {
 		const query = eventListQuery(params);
 		return this.core.call(
-			page(EventSchema) as unknown as import('../decode.js').Schema<Page<Event>>,
+			page(EventSchema) as unknown as Schema<Page<Event>>,
 			{ method: 'GET', path: '/webhooks/events', query },
 			options
 		);
 	}
 
-	/** Walks every event `list` returns, lazily, keeping the filters and the page size. */
+	/**
+	 * Walks every event {@link list} returns, fetching the pages lazily and keeping the filters
+	 * and the page size. An error ends the walk.
+	 */
 	iterate(params?: EventListParams, options?: RequestOptions): AsyncIterableIterator<Event> {
 		return iteratePages(params?.cursor, (cursor) => this.list({ ...params, cursor }, options));
 	}
 
-	/** An event of the log with its deliveries to the space's endpoints (`GET /webhooks/events/:id`; `evt_…`). */
+	/**
+	 * An event of the log with its deliveries to the space's endpoints (`GET /webhooks/events/:id`;
+	 * `id` is `evt_…`, at most 64 characters).
+	 */
 	async get(id: string, options?: RequestOptions): Promise<EventDetail> {
 		checkPathRequired('id', id);
 		return this.core.call(
-			EventDetailSchema as unknown as import('../decode.js').Schema<EventDetail>,
+			EventDetailSchema as unknown as Schema<EventDetail>,
 			{ method: 'GET', path: path('/webhooks/events/:', ['id', id]) },
 			options
 		);

@@ -3,7 +3,8 @@
  * API's binding rules so a bad input fails before the round trip, with a `ValidationError`
  * naming each failing input by its wire name. Lengths count code points. Rules that depend on
  * the key's mode or on server state (the test-mode price cap, https-only URLs in live mode, the
- * frequency minimum, the 95-day export window, uniqueness) are left to the API.
+ * live subscription price minimum, the frequency minimum, the 92-day export window, the merged
+ * metadata key count, uniqueness, refund rounding) are left to the API.
  *
  * @internal Not part of the public API.
  */
@@ -24,10 +25,22 @@ const REFERENCE = /^[A-Za-z0-9._:@-]+$/;
 const PHONE = /^\+?[0-9][0-9 ().-]{4,}[0-9]$/;
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const NIL_UUID = '00000000-0000-0000-0000-000000000000';
-const TX_PREFIXES = ['pay', 'sub', 'payg', 'sub-hist', 'refund', 'transfer'];
+const TX_PREFIXES = ['pay', 'sub', 'payg', 'sub-hist', 'refund', 'transfer', 'release'];
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
-/** An amount in USD sent as a string: digits, then at most 2 decimals. */
-const USD_STRING = /^[0-9]+(\.[0-9]{1,2})?$/;
+/**
+ * The grammar of the `usd` and `percent` inputs: digits and an optional fraction of 1 or 2 digits
+ * (no sign, exponent, leading `.` or grouping; trailing zeros are fine).
+ */
+const DECIMAL = /^[0-9]+(\.[0-9]{1,2})?$/;
+/** The largest USD amount an input takes (`usd=1000000`: prices and fee lines). */
+export const MAX_USD = 1_000_000;
+/** The longest cursor a paginated list takes (the API's `max=200`). */
+const MAX_CURSOR_LENGTH = 200;
+/** Metadata limits (`types.Metadata`). */
+const MAX_METADATA_KEYS = 50;
+const MAX_METADATA_KEY_LENGTH = 40;
+const MAX_METADATA_VALUE_LENGTH = 500;
+const METADATA_KEY = /^[A-Za-z0-9_.:-]+$/;
 const MAX_UINT32 = 4294967295;
 
 /** Each duration unit's length in seconds (months = 30 days, years = 365 days). */
@@ -79,7 +92,7 @@ export function isNilUUID(value: string): boolean {
 	return value === NIL_UUID;
 }
 
-/** A transaction id: `<pay|sub|payg|sub-hist|refund|transfer>@<uuid>`, or a bare UUID. */
+/** A transaction id: `<pay|sub|payg|sub-hist|refund|transfer|release>@<uuid>`, or a bare UUID. */
 export function isTxId(value: unknown): value is string {
 	if (typeof value !== 'string') return false;
 	const at = value.indexOf('@');
@@ -115,13 +128,22 @@ export function isHttpUrl(value: string): boolean {
 	}
 }
 
-/** Whether `value`'s shortest decimal form has at most 2 decimals (the form `JSON.stringify` sends). */
-export function hasAtMostTwoDecimals(value: number): boolean {
-	if (Number.isInteger(value)) return true;
-	const s = String(Math.abs(value));
-	const [mantissa, exponent] = s.split('e');
-	const decimals = (mantissa.split('.')[1]?.length ?? 0) - Number(exponent ?? 0);
-	return decimals <= 2;
+/**
+ * Compares a value matching the decimal grammar with the integer `limit`, exactly (no float): -1,
+ * 0 or +1.
+ */
+export function compareDecimal(value: string, limit: number): number {
+	const [rawWhole, frac = ''] = value.split('.');
+	const whole = rawWhole.replace(/^0+/, '');
+	const lim = limit === 0 ? '' : String(limit);
+	if (whole.length !== lim.length) return whole.length < lim.length ? -1 : 1;
+	if (whole !== lim) return whole < lim ? -1 : 1;
+	return /[1-9]/.test(frac) ? 1 : 0;
+}
+
+/** Whether a value matching the decimal grammar is zero (`"0"`, `"0.00"`). */
+function isZeroDecimal(value: string): boolean {
+	return !/[1-9]/.test(value);
 }
 
 /** A valid `Idempotency-Key`: 1 to 255 printable ASCII characters without spaces (0x21–0x7E). */
@@ -260,52 +282,97 @@ export class Validator {
 		if (!isHttpUrl(value)) this.add(field, 'must be an absolute http or https URL');
 	}
 
-	/** Checks a price in USD: finite and above 0. */
-	price(field: string, value: unknown): void {
-		if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
-			this.add(field, 'must be a number above 0');
-		}
-	}
-
 	/**
-	 * Checks a required amount in USD (the API's `usd=<max>`): a finite number, or a string of
-	 * digits with an optional decimal point (no sign, no exponent), above 0, at most `max`, with
-	 * at most 2 decimals (a number's shortest decimal form).
+	 * Checks an amount in USD sent as a decimal **string** (the API's `usd=<max>`): digits with at
+	 * most 2 decimals (no sign, exponent or leading `.`), above 0, at most `max`, compared exactly
+	 * (never through a float). A number is refused: a float cannot carry `"0.1"` exactly, and the
+	 * API answers 400 to a JSON number.
 	 */
 	usd(field: string, value: unknown, max: number): void {
-		if (value === undefined || value === null) {
-			this.add(field, 'is required');
-			return;
-		}
-		let amount: number;
-		if (typeof value === 'number') {
-			amount = Number.isFinite(value) && hasAtMostTwoDecimals(value) ? value : Number.NaN;
-		} else if (typeof value === 'string') {
-			amount = USD_STRING.test(value) ? Number(value) : Number.NaN;
-		} else {
-			amount = Number.NaN;
-		}
-		if (!(amount > 0 && amount <= max)) {
+		if (
+			typeof value !== 'string' ||
+			!DECIMAL.test(value) ||
+			isZeroDecimal(value) ||
+			compareDecimal(value, max) > 0
+		) {
 			this.add(
 				field,
-				`must be an amount in USD above 0 and at most ${max}, with at most 2 decimals`
+				`must be an amount in USD as a decimal string (e.g. "12.50"): above 0, at most ${max}, with at most 2 decimals`
 			);
 		}
 	}
 
-	/** Checks a rate in percent: finite, from 0 (above 0 when `positive`) to `max`, at most 2 decimals. */
+	/**
+	 * Checks a rate in percent sent as a decimal **string**: digits with at most 2 decimals, at
+	 * most 16 characters, from 0 (above 0 when `positive`) to `max`, compared exactly.
+	 */
 	percent(field: string, value: unknown, max: number, positive: boolean): void {
 		if (
-			typeof value !== 'number' ||
-			!Number.isFinite(value) ||
-			value < 0 ||
-			(positive && value === 0) ||
-			value > max ||
-			!hasAtMostTwoDecimals(value)
+			typeof value !== 'string' ||
+			value.length > 16 ||
+			!DECIMAL.test(value) ||
+			(positive && isZeroDecimal(value)) ||
+			compareDecimal(value, max) > 0
 		) {
 			const low = positive ? 'above 0' : '0';
-			this.add(field, `must be a percentage from ${low} to ${max}, with at most 2 decimals`);
+			this.add(
+				field,
+				`must be a percentage as a decimal string (e.g. "7.5"): from ${low} to ${max}, with at most 2 decimals`
+			);
 		}
+	}
+
+	/**
+	 * Checks a metadata map when set: at most 50 keys (error on `field`); each key 1 to 40 of
+	 * `A-Z a-z 0-9 _ - . :` (error on `field`, the key not echoed); each value a string of at most
+	 * 500 code points, without control (a tab included) or bidirectional characters (error on
+	 * `field.<key>`). On an update only the map sent is checked: the 50-key cap on the merged
+	 * result is the API's.
+	 */
+	metadata(field: string, input: unknown): void {
+		if (input === undefined || input === null) return;
+		if (typeof input !== 'object' || Array.isArray(input)) {
+			this.add(field, 'must be an object of string values');
+			return;
+		}
+		const keys = Object.keys(input).sort();
+		if (keys.length > MAX_METADATA_KEYS) {
+			this.add(field, `must have at most ${MAX_METADATA_KEYS} keys`);
+		}
+		let badKey = false;
+		for (const key of keys) {
+			const n = codePoints(key);
+			if (n < 1 || n > MAX_METADATA_KEY_LENGTH || !METADATA_KEY.test(key)) {
+				badKey = true;
+				continue;
+			}
+			const value = (input as Record<string, unknown>)[key];
+			if (typeof value !== 'string') {
+				this.add(`${field}.${key}`, 'must be a string');
+			} else if (codePoints(value) > MAX_METADATA_VALUE_LENGTH) {
+				this.add(
+					`${field}.${key}`,
+					`must be at most ${MAX_METADATA_VALUE_LENGTH} characters`
+				);
+			} else if (CONTROL.test(value) || BIDI.test(value)) {
+				this.add(`${field}.${key}`, 'must not contain control or bidirectional characters');
+			}
+		}
+		if (badKey) {
+			this.add(
+				field,
+				`keys must be 1 to ${MAX_METADATA_KEY_LENGTH} characters among A-Z a-z 0-9 _ - . :`
+			);
+		}
+	}
+
+	/**
+	 * Checks a list's cursor when set: a string of at most 200 characters. It is opaque
+	 * otherwise: pass back a page's `nextCursor` verbatim.
+	 */
+	cursor(input: unknown): void {
+		const value = this.str('cursor', input);
+		if (value) this.length('cursor', value, 0, MAX_CURSOR_LENGTH);
 	}
 
 	/**
@@ -379,7 +446,7 @@ export class Validator {
 		if (value && !isUUID(value)) this.add(field, 'must be a UUID');
 	}
 
-	/** Checks a transaction id (`pay@…`, `sub@…`, `sub-hist@…`, `refund@…`, or a bare UUID) when set. */
+	/** Checks a transaction id (`pay@…`, `sub@…`, `sub-hist@…`, `refund@…`, … or a bare UUID) when set. */
 	txId(field: string, input: unknown): void {
 		const value = this.str(field, input);
 		if (value && !isTxId(value)) {
@@ -395,7 +462,10 @@ export class Validator {
 		return t;
 	}
 
-	/** Checks an export window: two `YYYY-MM-DD` dates, from <= to (the API enforces the 95-day maximum). */
+	/**
+	 * Checks an export window: two `YYYY-MM-DD` dates, from <= to (the API enforces the maximum:
+	 * 92 days, both included).
+	 */
 	dateRange(fromField: string, from: unknown, toField: string, to: unknown): void {
 		const f = this.date(fromField, from);
 		const t = this.date(toField, to);
@@ -455,14 +525,14 @@ export function optionalParams(params: unknown): void {
 
 /**
  * Validates a UUID path parameter (members, invitations, endpoints, customers, products): an
- * empty one would address another route.
+ * empty one would address another route. The nil UUID passes (the API answers 404).
  */
 export function checkPathUUID(field: string, value: unknown): asserts value is string {
 	if (typeof value !== 'string' || value === '') throw fieldError(field, 'is required');
 	if (!isUUID(value)) throw fieldError(field, 'must be a UUID');
 }
 
-/** Validates a transaction id path parameter (payments, subscriptions, bills, sessions). */
+/** Validates a transaction id path parameter (payments, subscriptions, bills, sessions, refunds). */
 export function checkPathTxId(field: string, value: unknown): asserts value is string {
 	if (typeof value !== 'string' || value === '') throw fieldError(field, 'is required');
 	if (!isTxId(value)) {
@@ -470,7 +540,7 @@ export function checkPathTxId(field: string, value: unknown): asserts value is s
 	}
 }
 
-/** Validates a free-form path parameter (a reference, an email, an event id): only its presence. */
+/** Validates a free-form path parameter (an event id): only its presence, the API judges the rest. */
 export function checkPathRequired(field: string, value: unknown): asserts value is string {
 	if (typeof value !== 'string' || isBlank(value)) throw fieldError(field, 'is required');
 }

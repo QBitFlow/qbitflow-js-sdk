@@ -1,17 +1,26 @@
 /**
  * Models shared by several resources.
  *
- * Typing rule: a field the API always sends is required (absent or `null` on the wire decodes to
- * its zero value: `''`, `0`, `false`, `[]`, a zero object, or the zero time
- * `0001-01-01T00:00:00Z`); an optional field is `field?: T` (absent when the API leaves it out);
- * a field the API sends as `null` when unset is `field: T | null`. Money in a token's min units,
- * and some USD prices, are decimal **strings**, never parsed. Timestamps are RFC 3339 strings,
- * kept exactly as sent (the API may use local offsets and microseconds).
+ * Typing rule (types.md §1): a field the API always sends is required (absent or `null` on the
+ * wire decodes to its zero value: `''`, `0`, `false`, `[]`, `{}`, a zero object, or the zero time
+ * `0001-01-01T00:00:00Z`); an optional field is `field?: T`, absent when the API leaves it out
+ * (the API never sends `null`: an optional field without a value is absent). Lists are arrays
+ * and merchant `metadata` a `Record<string, string>`, both always present. Money, token amounts
+ * and fee rates are decimal **strings** (`"12.5"`, `"10004200"`, `"0.99"`), never parsed into
+ * floats: convert token amounts with `formatAmount` and `parseAmount`. Timestamps are RFC 3339
+ * strings, kept exactly as sent.
  *
  * @module
  */
 
-import type { AttemptStatus, DurationUnit, RefundInitiator, RefundStatus } from '../enums.js';
+import type {
+	AttemptStatus,
+	Chain,
+	DurationUnit,
+	FeeLineType,
+	RefundInitiator,
+	RefundStatus,
+} from '../enums.js';
 
 /**
  * A length of time as the API writes it: a value in the largest exact unit (`{value: 1, unit:
@@ -24,63 +33,108 @@ export interface Duration {
 	unit?: DurationUnit;
 }
 
-/** A currency (token or native coin) of the catalog. */
+/**
+ * A currency of the catalog: a chain's native coin (ETH, SOL; its chain is itself) or a token on
+ * a chain (USDC on Base). It is the one currency object of every response (`currencies.list`,
+ * `Payment.currency`, `Member.acceptedCurrencies`, …).
+ */
 export interface Currency {
-	/** The currency's id (`currencies.get(id)`). */
+	/** The currency's id (`currencies.get(id)`): a public catalog, unique across test and live. */
 	id: number;
-	/** Its full name (e.g. `USD Coin`). */
-	name: string;
-	/** Its symbol (e.g. `USDC`). */
+	/**
+	 * What requests name it by: `CHAIN:TOKEN` for a token (`BASE:USDC`), the chain's symbol for
+	 * its native coin (`ETH`).
+	 */
+	code: string;
+	/** Its symbol (`USDC`, `ETH`). */
 	symbol: string;
-	/** Its number of decimals (6 for USDC). */
+	/** Its full name (`USD Coin`, `Ethereum`). */
+	name: string;
+	/** The chain it is on, by its native coin's symbol: `ETH`, `BASE` or `SOL`. */
+	chain: Chain;
+	/**
+	 * The decimals of its on-chain amounts: min units = amount × 10^decimals (6 for USDC).
+	 * `formatAmount(minUnits, currency.decimals)` converts with it.
+	 */
 	decimals: number;
-	/** The token's contract address (or mint); `''` for a chain's native coin. */
-	address: string;
-	/** The chain's native coin, for a token; absent for a native coin. */
+	/** A token's contract address (EVM) or mint (Solana); absent on a native coin. */
+	address?: string;
+	/** A token's chain, by its native coin's id (`currencies.get`); absent on a native coin. */
 	mainCurrencyId?: number;
-	/** That native coin; `null` for a native coin. */
-	mainCurrency: Currency | null;
-	/** True for a testnet currency. */
+	/** True for a test network's currency, false for a live one. */
 	test: boolean;
 }
 
-/** A customer as a payment, bill or refund names it (API reads only; absent from webhooks). */
+/**
+ * An amount of a token (or of a chain's native coin, when its field says so) as responses write
+ * it: the exact amount in the token's units and its on-chain integer, always together, and its
+ * USD value when a price is known. Its currency is the resource's.
+ *
+ * ```json
+ * {"amount": "12.5", "amountMinUnits": "12500000", "amountUsd": "12.5"}
+ * ```
+ */
+export interface TokenAmount {
+	/** The amount in the token's units, exact: `amountMinUnits / 10^decimals`, a decimal string (`"12.5"`). */
+	amount: string;
+	/** The on-chain integer, in the token's smallest unit, a string of digits (`"12500000"`). */
+	amountMinUnits: string;
+	/** Its value in USD, a decimal string; absent when no price was known. */
+	amountUsd?: string;
+}
+
+/**
+ * A customer as a transaction row names it (a payment, a bill, a subscription, a refund): who
+ * paid, even once the merchant deleted the customer. Merchant API reads only: absent from
+ * webhooks.
+ */
 export interface CustomerSummary {
 	/** The customer (`customers.get`). */
 	uuid: string;
 	/** The first name. */
-	name: string;
-	/** The last name, when given. */
+	firstName: string;
+	/** The last name; absent when not given. */
 	lastName?: string;
 	/** The email, lowercase. */
 	email: string;
-	/** The merchant's reference of the customer, when it has one. */
+	/** The merchant's reference of the customer; absent without one. */
 	reference?: string;
-	/** True when the merchant deleted the customer (it still names its rows). */
-	deleted?: boolean;
+	/** True when the merchant deleted the customer: it still names its rows, but `customers.get` answers 404. */
+	deleted: boolean;
 }
 
-/** A transaction's refund, as its payment or bill shows it. */
+/**
+ * A payment's or bill's refund, as the payment shows it (`refunds.get` has the rest of the refund
+ * with the same id).
+ */
 export interface RefundSummary {
 	/** The refund (`refund@…`). */
 	uuid: string;
-	/** `pending`, `approved` or `rejected`. */
+	/** `pending`, `approved`, `rejected` or `cancelled`. */
 	status: RefundStatus;
 	/** `customer` (a request) or `merchant`. */
 	initiatedBy: RefundInitiator;
-	/** The share of what the customer paid it sends back, in percent. */
-	refundPercent: number;
-	/** What it sends back, in the currency's min units (a decimal string). */
+	/** The share of what the customer paid it sends back, a percent string (`"100"`: all of it). */
+	refundPercent: string;
+	/**
+	 * What it sends back, in the currency's units (a decimal string); absent when its currency
+	 * isn't known (a refund requested before refunds named it).
+	 */
+	amount?: string;
+	/** The same in the currency's smallest unit (a string of digits). */
 	amountMinUnits: string;
-	/** The same in USD, at the payment's time. */
-	amountUsd: number;
+	/** The same in USD, at the payment's time (a decimal string); absent when unknown. */
+	amountUsd?: string;
 	/** When it was requested or started. */
 	createdAt: string;
-	/** When it was approved (confirmed) or denied; `null` while pending. */
-	respondedAt: string | null;
+	/** When it was approved (confirmed), rejected or cancelled; absent while pending. */
+	respondedAt?: string;
 }
 
-/** A failed attempt to pay (or to send a refund): never final. */
+/**
+ * How a session's (or a refund approval's) last attempt failed, while it waits for another:
+ * never final.
+ */
 export interface Attempt {
 	/** `failed`. */
 	status: AttemptStatus;
@@ -94,110 +148,149 @@ export interface Attempt {
 	at: string;
 }
 
-/** A payment's (or bill's) fees and split. */
-export interface PaymentMetadata {
-	/** QBitFlow's fee on the payment, in percent (1.5 = 1.5 %). */
-	feePercent: number;
-	/** The organization's fee on its member's payment; absent when none. */
+/**
+ * QBitFlow's record of how a payment or a bill settled, made once at confirmation: its fee terms,
+ * how the contracts split what the payer paid, and the transaction that paid it. Every fee
+ * record, export, held-funds total and refund reads it. Merchant only (API reads and webhooks).
+ */
+export interface Settlement {
+	/** QBitFlow's fee on the payment, a percent string (`"0.99"` = 0.99 %), deducted from the amount paid. */
+	feePercent: string;
+	/**
+	 * The organization's fee on its member's payment (a marketplace's commission), taken from
+	 * what remains after QBitFlow's fee; absent when none.
+	 */
 	organizationFee?: OrganizationFee;
 	/** The referrer's share of QBitFlow's fee; absent when none. */
 	referralFee?: ReferralFee;
-	/** The transaction's network fees and block. */
-	txMetadata: TxMetadata;
-	/** How the payment was split (QBitFlow, referrer, organization, merchant). */
-	txAmounts: TxAmounts;
+	/**
+	 * How the contracts split what the payer paid; absent on records made before the split was
+	 * recorded. For a payment the organization held for its member, it is the split a direct
+	 * payment would have had (the organization's fee withheld, not paid on-chain).
+	 */
+	split?: Split;
+	/** The transaction that paid it; absent before its confirmation. */
+	transaction?: SettlementTransaction;
 }
 
-/** The organization's fee on a member's payment (a marketplace commission). */
+/** The organization's fee on its member's payment or bill (a marketplace's commission). */
 export interface OrganizationFee {
-	/** The address receiving the fee. */
-	organization: string;
-	/** The fee, in percent, taken from what remains after QBitFlow's fee. */
-	feePercent: number;
+	/** The organization's wallet that receives the fee. */
+	address: string;
+	/** The fee, a percent string, taken from what remains after QBitFlow's fee. */
+	feePercent: string;
 }
 
-/** A referrer's share of QBitFlow's fee. */
+/** The referrer's share of QBitFlow's fee on a payment or bill. */
 export interface ReferralFee {
-	/** The address receiving the fee. */
-	referrer: string;
-	/** The referrer's share of the platform fee, in percent (20 = 20 % of it). */
-	feePercent: number;
-	/** When the referral stops being paid. */
+	/** The referrer's wallet that receives the fee. */
+	address: string;
+	/** The referrer's share of the platform fee, a percent string (`"20"` = 20 % of it). */
+	feePercent: string;
+	/** Until when the referrer earns its share. */
 	deadline: string;
 }
 
-/** A transaction's network fees and block. */
-export interface TxMetadata {
-	/** The fees the transaction's sender paid, in the native coin's min units. */
-	networkFees: NetworkFees;
-	/** The block that included the transaction. */
-	blockData: BlockData;
-	/** The native coin's USD price at the transaction's time, when recorded. */
-	mainCurrencyPriceUsd?: number;
+/**
+ * How a payment or a bill was split, as the contracts paid it. Each part is an amount of the
+ * payment's currency (USD values in proportion to the payment's, to 6 decimals):
+ * `platform + organization + referral + merchant` = the payment's amount, exactly, in each unit.
+ */
+export interface Split {
+	/** QBitFlow's fee (the referrer's share not included). */
+	platform: TokenAmount;
+	/** The organization's fee; absent without one. */
+	organization?: TokenAmount;
+	/** The referrer's share of QBitFlow's fee; absent without one. */
+	referral?: TokenAmount;
+	/** What the merchant (the member, for a member's payment) received, net of every fee. */
+	merchant: TokenAmount;
+	/**
+	 * The network fee the payer paid on top of the amount, in the payment's currency; absent on
+	 * records made before it was recorded (`"0"` once recorded as none).
+	 */
+	networkFee?: TokenAmount;
 }
 
-/** The block that included a transaction. */
-export interface BlockData {
-	/** The block number (or slot), as a decimal string. */
-	number: string;
-	/** The block's time, in unix seconds. */
-	timestamp: number;
+/**
+ * The transaction that paid (or refunded, or released): where and when it landed, and what it
+ * cost its sender in the chain's native coin.
+ */
+export interface SettlementTransaction {
+	/** The block (Ethereum, Base) or slot (Solana) it landed in, a string of digits. */
+	blockNumber: string;
+	/** When its block was produced (UTC); absent only on records made before it was recorded. */
+	blockTime?: string;
+	/** The gas it consumed (Ethereum, Base); absent on Solana. */
+	gasUsed?: number;
+	/**
+	 * What the transaction cost its sender, in the chain's native coin (ETH, SOL): its gas and,
+	 * on Base, its L1 data fee; its `amountUsd` at `nativePriceUsd`.
+	 */
+	fee: TokenAmount;
+	/** The part of `fee` that paid Base's L1 data fee, in the native coin; absent off Base. */
+	l1Fee?: TokenAmount;
+	/**
+	 * The USD price of the chain's native coin when the transaction was recorded (a decimal
+	 * string); absent when no price was available.
+	 */
+	nativePriceUsd?: string;
 }
 
-/** A transaction's network fees, in the native coin's min units. */
-export interface NetworkFees {
-	/** What the sender paid: its gas and, on Base, its L1 data fee (a decimal string). */
-	amount: string;
-	/** The gas used. */
-	unitsConsumed: number;
-	/** The part of `amount` that paid Base's L1 data fee; absent on other networks. */
-	l1Fee?: string;
+/**
+ * What a refund or a held-funds release records of its transfer: the transaction only (a
+ * transfer pays no fee and has no split).
+ */
+export interface TransferSettlement {
+	/** The transfer's transaction; absent before it was confirmed. */
+	transaction?: SettlementTransaction;
 }
 
-/** How a payment was split, in USD and in the token's min units. */
-export interface TxAmounts {
-	/** The split in USD at the transaction's time. */
-	usd: TxAmountsUsd;
-	/** The split in the token's min units, exactly as paid. */
-	minUnits: TxAmountsMinUnits;
+/**
+ * An amount a checkout adds to its product's price, shown to the customer and paid with it, a
+ * subscription's with every bill (`Payment.fees`, `Subscription.fees`, `Transaction.fees`,
+ * `PaymentSessionData.fees`).
+ */
+export interface FeeLine {
+	/**
+	 * `custom` (the merchant's line) or `processingFee` (QBitFlow's fee, which the merchant has
+	 * the customer pay).
+	 */
+	type: FeeLineType;
+	/** The line's name, as the checkout shows it (`Processing fee` for the processing fee). */
+	label: string;
+	/** More about the line, as the merchant wrote it; absent without one. */
+	description?: string;
+	/** The line's amount in USD, a decimal string with at most 2 decimals (`"4.99"`). */
+	amountUsd: string;
 }
 
-/** A payment's split in the token's min units (decimal strings). */
-export interface TxAmountsMinUnits {
-	/** QBitFlow's fee (the referrer's share included). */
-	platform: string;
-	/** The organization's fee. */
-	organization: string;
-	/** The referrer's share. */
-	referral: string;
-	/** What the merchant received. */
-	merchant: string;
-	/** The network fee the payer paid on top; absent when not recorded. */
-	networkFee?: string;
-}
-
-/** A payment's split in USD. */
-export interface TxAmountsUsd {
-	/** QBitFlow's fee. */
-	platform: number;
-	/** The organization's fee; absent when none. */
-	organization?: number;
-	/** The referrer's share; absent when none. */
-	referral?: number;
-	/** What the merchant received. */
-	merchant: number;
-	/** The network fee the payer paid on top; absent when not recorded. */
-	networkFee?: number;
-}
-
-/** One page of a cursor-paginated list. */
+/**
+ * One page of a cursor-paginated list, newest first (members by when they joined). Bounded lists
+ * (currencies, wallets, members' held funds, the accounting export) answer the same envelope in
+ * one page; their methods return its `items`.
+ */
 export interface Page<T> {
-	/** The page's rows. */
+	/** The page's rows; `[]` when there are none. */
 	items: T[];
-	/** The next page's cursor (pass it back as the params' `cursor`, verbatim); `null` on the last page. */
-	nextCursor: string | null;
-	/** Whether another page follows (`nextCursor !== null`). */
+	/**
+	 * Whether another page follows: pass `nextCursor` as the params' `cursor` to read it. A full
+	 * last page answers `false`: there is never an extra empty page.
+	 */
 	hasMore: boolean;
+	/**
+	 * The next page's cursor, opaque: pass it back verbatim, never build or parse it. Absent when
+	 * `hasMore` is `false`.
+	 */
+	nextCursor?: string;
+}
+
+/** The page size and cursor of every paginated list. */
+export interface PageParams {
+	/** The page size: the server's default (20) when absent or 0 or less, at most 100 (clamped). */
+	limit?: number;
+	/** The previous page's `nextCursor`, verbatim (at most 200 characters); absent for the first page. */
+	cursor?: string;
 }
 
 /**
@@ -205,16 +298,15 @@ export interface Page<T> {
  * `subscriptions.get`, `subscriptions.getBill`).
  */
 export interface ReadParams {
-	/** Read a member's row from the organization's space (organization key without `onBehalfOf`). */
+	/**
+	 * Read a member's row from the organization's space (organization key without `onBehalfOf`;
+	 * 400 from a member's space).
+	 */
 	includeMembers?: boolean;
 }
 
-/** The filters every transaction list shares. */
-export interface TransactionListFilters {
-	/** The page size (0 or absent = the server's default). */
-	limit?: number;
-	/** The previous page's `nextCursor`; absent for the first page. */
-	cursor?: string;
+/** The filters every transaction list shares (payments, transactions, failures, subscriptions). */
+export interface TransactionListFilters extends PageParams {
 	/** Only this customer's. */
 	customerUuid?: string;
 	/** Only this product's. */

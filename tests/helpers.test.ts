@@ -8,6 +8,7 @@ import { QBitFlow, TRANSPORT } from '../src/client';
 import { NetworkError, NotFoundError, ValidationError } from '../src/errors';
 import { formatAmount, hasAccess, parseAmount, Placeholders, webhooks } from '../src/index';
 import type { Subscription } from '../src/models/subscriptions';
+import { exportWindows } from '../src/services/misc';
 import {
 	closeServers,
 	rejection,
@@ -19,6 +20,9 @@ import {
 } from './helpers/server';
 
 afterAll(closeServers);
+
+/** A bounded list's answer without rows. */
+const EMPTY_PAGE = '{"items":[],"hasMore":false}';
 
 const fieldOf = (err: unknown): string => {
 	expect(err).toBeInstanceOf(ValidationError);
@@ -64,7 +68,7 @@ describe('checkoutSessions.waitForCompletion', () => {
 	async function setup(...statuses: Array<string | 404>) {
 		const ts: TestServer = await testServer((_req, res, n) => {
 			const s = statuses[Math.min(n, statuses.length - 1)];
-			if (s === 404) reply(res, 404, '{"error":"not_found","message":"no such session"}');
+			if (s === 404) reply(res, 404, '{"error":"no such session","code":"not_found"}');
 			else reply(res, 200, JSON.stringify({ uuid: ID, status: s }));
 		});
 		const { client, transport } = testClient(ts);
@@ -83,8 +87,8 @@ describe('checkoutSessions.waitForCompletion', () => {
 		const { client, ts, sleeps } = await setup('created', 'waitingConfirmation', 'completed');
 		const status = await client.checkoutSessions.waitForCompletion(ID);
 		expect(status.status).toBe('completed');
-		expect(ts.recorded.map((r) => r.path)).toEqual(
-			Array(3).fill(`/transaction/session-checkout/${ID}/status`)
+		expect(ts.recorded.map((r) => `${r.method} ${r.path}`)).toEqual(
+			Array(3).fill(`GET /checkout-sessions/${ID}`)
 		);
 		expect(sleeps).toEqual([3000, 3000]);
 	});
@@ -131,7 +135,7 @@ describe('checkoutSessions.waitForCompletion', () => {
 		expect(sleeps).toEqual([1000, 1000]);
 	});
 
-	it("propagates getStatus's errors (a 404)", async () => {
+	it("propagates get's errors (a 404)", async () => {
 		const { client } = await setup('created', 404);
 		expect(await rejection(client.checkoutSessions.waitForCompletion(ID))).toBeInstanceOf(
 			NotFoundError
@@ -301,25 +305,28 @@ describe('accounting.exportJsonRange / exportCsvRange', () => {
 			return `${q.get('from')}..${q.get('to')}`;
 		});
 
-	it('splits a year into 4 windows of at most 95 days and concatenates the JSON', async () => {
+	it('splits a year into 4 windows of at most 92 days (both included) and concatenates the JSON', async () => {
 		const ts = await testServer((req, res) => {
 			const q = new URLSearchParams(req.query);
-			reply(res, 200, JSON.stringify([{ type: 'payment', paymentUuid: q.get('from') }]));
+			const row = { type: 'payment', txUuid: q.get('from'), grossAmountUsd: '10' };
+			reply(res, 200, JSON.stringify({ items: [row], hasMore: false }));
 		});
 		const { client } = testClient(ts);
 		const rows = await client.accounting.exportJsonRange('2026-01-01', '2026-12-31');
+		// helpers.md H6's yearly example.
 		expect(windowsOf(ts)).toEqual([
-			'2026-01-01..2026-04-06',
-			'2026-04-07..2026-07-11',
-			'2026-07-12..2026-10-15',
-			'2026-10-16..2026-12-31',
+			'2026-01-01..2026-04-02',
+			'2026-04-03..2026-07-03',
+			'2026-07-04..2026-10-03',
+			'2026-10-04..2026-12-31',
 		]);
-		expect(rows.map((r) => r.paymentUuid)).toEqual([
+		expect(rows.map((r) => r.txUuid)).toEqual([
 			'2026-01-01',
-			'2026-04-07',
-			'2026-07-12',
-			'2026-10-16',
+			'2026-04-03',
+			'2026-07-04',
+			'2026-10-04',
 		]);
+		expect(rows[0].grossAmountUsd).toBe('10');
 		expect(
 			ts.recorded.every((r) => new URLSearchParams(r.query).get('format') === 'json')
 		).toBe(true);
@@ -327,14 +334,14 @@ describe('accounting.exportJsonRange / exportCsvRange', () => {
 
 	it.each<[string, string, string[]]>([
 		['one day', '2026-03-01', ['2026-03-01..2026-03-01']],
-		['95 days: one request', '2026-04-06', ['2026-01-01..2026-04-06']],
+		['92 days, counted inclusively: one request', '2026-04-02', ['2026-01-01..2026-04-02']],
 		[
-			'96 days: two requests',
-			'2026-04-07',
-			['2026-01-01..2026-04-06', '2026-04-07..2026-04-07'],
+			'93 days: two requests',
+			'2026-04-03',
+			['2026-01-01..2026-04-02', '2026-04-03..2026-04-03'],
 		],
 	])('%s', async (_name, to, want) => {
-		const ts = await testServer((_req, res) => reply(res, 200, '[]'));
+		const ts = await testServer((_req, res) => reply(res, 200, EMPTY_PAGE));
 		const { client } = testClient(ts);
 		const from = want[0].slice(0, 10);
 		expect(await client.accounting.exportJsonRange(from, to)).toEqual([]);
@@ -342,10 +349,27 @@ describe('accounting.exportJsonRange / exportCsvRange', () => {
 	});
 
 	it('crosses leap days on calendar dates', async () => {
-		const ts = await testServer((_req, res) => reply(res, 200, '[]'));
+		const ts = await testServer((_req, res) => reply(res, 200, EMPTY_PAGE));
 		const { client } = testClient(ts);
-		await client.accounting.exportJsonRange('2028-01-01', '2028-06-30');
-		expect(windowsOf(ts)).toEqual(['2028-01-01..2028-04-05', '2028-04-06..2028-06-30']);
+		await client.accounting.exportJsonRange('2024-02-01', '2024-06-30');
+		expect(windowsOf(ts)).toEqual(['2024-02-01..2024-05-02', '2024-05-03..2024-06-30']);
+	});
+
+	it.each([
+		['2026-01-01', '2026-12-31'],
+		['2024-02-01', '2024-06-30'],
+		['2025-12-31', '2026-01-01'],
+		['2026-03-01', '2027-03-01'],
+	])('windows %s → %s: at most 92 days each, no gap, no overlap', (from, to) => {
+		const windows = exportWindows(from, to);
+		const day = (d: string): number => Date.parse(`${d}T00:00:00Z`) / 86_400_000;
+		expect(windows[0][0]).toBe(from);
+		expect(windows[windows.length - 1][1]).toBe(to);
+		windows.forEach(([f, t], i) => {
+			const days = day(t) - day(f) + 1;
+			expect(days >= 1 && days <= 92).toBe(true);
+			if (i > 0) expect(day(f)).toBe(day(windows[i - 1][1]) + 1);
+		});
 	});
 
 	it('CSV: the header once, every window rows, line endings kept, header-only windows add nothing', async () => {
@@ -374,7 +398,7 @@ describe('accounting.exportJsonRange / exportCsvRange', () => {
 			res.end(answers[n]);
 		});
 		const { client } = testClient(ts);
-		expect(await client.accounting.exportCsvRange('2026-01-01', '2026-04-07')).toBe(
+		expect(await client.accounting.exportCsvRange('2026-01-01', '2026-04-03')).toBe(
 			'h\r\nr1\r\nr2\r\n'
 		);
 	});
@@ -386,13 +410,13 @@ describe('accounting.exportJsonRange / exportCsvRange', () => {
 			res.end(answers[n]);
 		});
 		const { client } = testClient(ts);
-		expect(await client.accounting.exportCsvRange('2026-01-01', '2026-04-07')).toBe(
+		expect(await client.accounting.exportCsvRange('2026-01-01', '2026-04-03')).toBe(
 			'h\nr1\nr2\n'
 		);
 	});
 
 	it('checks the dates before sending', async () => {
-		const ts = await testServer((_req, res) => reply(res, 200, '[]'));
+		const ts = await testServer((_req, res) => reply(res, 200, EMPTY_PAGE));
 		const { client } = testClient(ts);
 		expect(
 			fieldOf(await rejection(client.accounting.exportJsonRange('2026-02-30', '2026-03-01')))
@@ -405,13 +429,26 @@ describe('accounting.exportJsonRange / exportCsvRange', () => {
 
 	it('stops at the first failing window', async () => {
 		const ts = await testServer((_req, res, n) =>
-			n === 0 ? reply(res, 200, '[]') : reply(res, 404, '{"error":"not_found","message":"x"}')
+			n === 0
+				? reply(res, 200, EMPTY_PAGE)
+				: reply(
+						res,
+						400,
+						'{"error":"validation failed","code":"validation_failed","details":{"max":92,"errors":[{"field":"to","message":"too long"}]}}'
+					)
 		);
 		const { client } = testClient(ts);
-		expect(
-			await rejection(client.accounting.exportJsonRange('2026-01-01', '2026-12-31'))
-		).toBeInstanceOf(NotFoundError);
+		const err = await rejection(client.accounting.exportJsonRange('2026-01-01', '2026-12-31'));
+		expect(err).toBeInstanceOf(ValidationError);
+		expect((err as ValidationError).details.max).toBe(92); // an integer, unlike money limits
 		expect(ts.recorded).toHaveLength(2);
+	});
+
+	it('an empty range result is []', async () => {
+		const ts = await testServer((_req, res) => reply(res, 200, EMPTY_PAGE));
+		expect(
+			await testClient(ts).client.accounting.exportJsonRange('2026-01-01', '2026-12-31')
+		).toEqual([]);
 	});
 });
 

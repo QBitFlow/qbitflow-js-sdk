@@ -54,10 +54,12 @@ console.log('listening on :8080, POST /webhooks/qbitflow');
 // More handlers on the same router. Several per type run in registration order.
 router
 	.on('payment.completed', async (payment, event) => {
-		const exact = payment.currency
-			? ` (${formatAmount(payment.amountMinUnits, payment.currency.decimals)} ${payment.currency.symbol})`
-			: '';
-		console.log(`payment ${payment.uuid}: ${payment.amount} USD${exact}`);
+		// The token amount both ways (amount, and amountMinUnits with the currency's decimals).
+		const exact = formatAmount(payment.amountMinUnits, payment.currency.decimals);
+		console.log(
+			`payment ${payment.uuid}: ${payment.amountUsd} USD (${exact} ${payment.currency.symbol})`,
+			payment.metadata
+		);
 		// A member's payment names them in event.userUuid: read more in their space with
 		// onBehalfOf.
 		if (event.userUuid && client) {
@@ -70,9 +72,10 @@ router
 			`subscription ${sub.uuid} created (${sub.status}), access: ${hasAccess(sub)} until ${sub.currentPeriodEnd ?? '—'}`
 		);
 	})
-	.on('subscription.billed', (bill) => {
+	.on('subscription.billed', ({ bill, subscription }) => {
+		// The bill paid, and the subscription as it leaves it.
 		console.log(
-			`subscription ${bill.subscriptionUuid} billed: ${bill.amount} USD (bill ${bill.uuid})`
+			`subscription ${subscription.uuid} (${subscription.status}) billed: ${bill.amountUsd} USD (bill ${bill.uuid}), paid until ${bill.periodEnd ?? '—'}`
 		);
 	})
 	.on('subscription.statusChanged', (sub) => {
@@ -85,8 +88,16 @@ router
 			`subscription ${sub.uuid}: billing failed (${sub.reason}), ${sub.remainingAttempts} attempts left`
 		);
 	})
-	.on('refund.completed', (refund) => {
-		console.log(`refund ${refund.uuid} of ${refund.txUuid} sent`);
+	.on('refund.approved', (refund) => {
+		const { uuid, txUuid, refundPercent, amount, currency } = refund;
+		console.log(
+			`refund ${uuid} of ${txUuid} sent: ${refundPercent}% (${amount} ${currency.symbol})`
+		);
+	})
+	.on('refund.rejected', (refund) => {
+		console.log(
+			`refund ${refund.uuid} of ${refund.txUuid} rejected: ${refund.merchantMessage ?? ''}`
+		);
 	})
 	.on('member.joined', (member) => {
 		console.log(

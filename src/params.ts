@@ -2,8 +2,10 @@
  * Each params type's checks (behaviour §8), query string and request body. Bodies carry the
  * wire names explicitly and only the params' known fields; a field left out (or, for the
  * fields the API treats so, left empty) is omitted. The clearable fields
- * (`UpdateCustomerParams.phoneNumber`/`address`, `UpdateProductParams.description`,
- * `UpdateWebhookEndpointParams.description`) send an explicit `''`.
+ * (`UpdateCustomerParams.lastName`/`phoneNumber`/`address`, `UpdateProductParams.description`,
+ * `UpdateWebhookEndpointParams.description`) send an explicit `''`; `metadata` is sent as given
+ * (a key set to `''` deletes it on an update). Money and percents are decimal strings, sent
+ * verbatim (`"12.50"` stays `"12.50"`).
  *
  * @internal Not part of the public API.
  */
@@ -11,20 +13,19 @@
 import { isRFC3339 } from './decode.js';
 import { Query } from './encode.js';
 import {
-	CombinedPaymentSource,
-	EventType,
 	FailureCategory,
 	FailureKind,
 	InvitationStatus,
 	knownValues,
-	SubscriptionStatus,
+	RefundStatus,
+	TransactionKind,
 } from './enums.js';
 import type {
 	CheckoutFees,
 	CreatePaymentSessionParams,
 	CreateSubscriptionSessionParams,
 } from './models/checkout.js';
-import type { Duration, ReadParams, TransactionListFilters } from './models/common.js';
+import type { Duration, PageParams, ReadParams, TransactionListFilters } from './models/common.js';
 import type {
 	CreateCustomerParams,
 	CustomerListParams,
@@ -33,13 +34,12 @@ import type {
 import type {
 	CreateInvitationParams,
 	InvitationListParams,
-	MemberListParams,
 	UpdateMemberParams,
 } from './models/members.js';
 import type {
-	CombinedPaymentListParams,
 	FailureListParams,
 	PaymentListParams,
+	TransactionListParams,
 } from './models/payments.js';
 import type {
 	CreateProductParams,
@@ -47,15 +47,15 @@ import type {
 	SubscriptionTermsParams,
 	UpdateProductParams,
 } from './models/products.js';
-import type { InitiateRefundParams, RefundListParams } from './models/refunds.js';
+import type { CreateRefundParams, RefundListParams } from './models/refunds.js';
 import type {
-	BillListParams,
 	CancelSubscriptionParams,
 	SubscriptionListParams,
+	UpdateSubscriptionParams,
 } from './models/subscriptions.js';
 import type {
+	AcceptedCurrenciesParams,
 	CurrencyListParams,
-	SupportedCurrenciesParams,
 	WalletListParams,
 } from './models/wallets.js';
 import type {
@@ -63,7 +63,7 @@ import type {
 	EventListParams,
 	UpdateWebhookEndpointParams,
 } from './models/webhooks.js';
-import { optionalParams, requireParams, Validator } from './validate.js';
+import { MAX_USD, optionalParams, requireParams, Validator } from './validate.js';
 
 type Body = Record<string, unknown>;
 
@@ -86,13 +86,26 @@ const nonZero = (value: number | undefined | null): number | undefined =>
 const given = <T>(value: T | undefined | null): T | undefined =>
 	value === undefined || value === null ? undefined : value;
 
+/** A metadata map on the wire: as given, left out when absent or without keys (Go `omitempty`). */
+function metadataBody(
+	m: Record<string, string> | undefined | null
+): Record<string, string> | undefined {
+	return m !== undefined && m !== null && Object.keys(m).length > 0 ? { ...m } : undefined;
+}
+
 /** A duration's wire form: `{value, unit}` (`unit` omitted when empty). */
 function durationBody(d: Duration | undefined | null): Body | undefined {
 	if (d === undefined || d === null) return undefined;
 	return compact({ value: d.value, unit: nonEmpty(d.unit) });
 }
 
-// ── Shared list filters ─────────────────────────────────────────────────────
+// ── Shared list checks ──────────────────────────────────────────────────────
+
+/** Checks a paginated list's `limit` (an integer when set) and `cursor` (at most 200 characters). */
+function validatePage(v: Validator, p: PageParams | undefined): void {
+	v.limit('limit', p?.limit);
+	v.cursor(p?.cursor);
+}
 
 /** Checks an instant filter: a valid `Date`, or an RFC 3339 string. */
 function instant(v: Validator, field: string, value: unknown): void {
@@ -107,11 +120,12 @@ function instant(v: Validator, field: string, value: unknown): void {
 }
 
 function validateFilters(v: Validator, p: TransactionListFilters): void {
-	v.limit('limit', p.limit);
+	validatePage(v, p);
 	v.uuid('customerUuid', p.customerUuid);
 	v.uuid('productUuid', p.productUuid);
 	instant(v, 'createdAfter', p.createdAfter);
 	instant(v, 'createdBefore', p.createdBefore);
+	v.bool('includeMembers', p.includeMembers);
 	v.uuid('userUuid', p.userUuid);
 	v.exclusive('includeMembers', p.includeMembers === true, 'userUuid', !!p.userUuid);
 }
@@ -127,12 +141,23 @@ function filtersQuery(p: TransactionListFilters): Query {
 		.string('userUuid', p.userUuid);
 }
 
-const SUBSCRIPTION_STATUSES = knownValues(SubscriptionStatus);
-const COMBINED_SOURCES = knownValues(CombinedPaymentSource);
+/** A paginated list without filters (members, bills, webhook endpoints). */
+export function pageQuery(p: PageParams | undefined): string {
+	optionalParams(p);
+	const v = new Validator();
+	validatePage(v, p);
+	v.check();
+	return new Query().page(p?.limit, p?.cursor).encode();
+}
+
+const TRANSACTION_KINDS = knownValues(TransactionKind);
 const FAILURE_KINDS = knownValues(FailureKind);
 const FAILURE_CATEGORIES = knownValues(FailureCategory);
 const INVITATION_STATUSES = knownValues(InvitationStatus);
-const EVENT_TYPES = knownValues(EventType);
+const REFUND_STATUSES = knownValues(RefundStatus);
+
+/** The most statuses `RefundListParams.status` may name. */
+const MAX_REFUND_STATUSES = 5;
 
 // ── Products ────────────────────────────────────────────────────────────────
 
@@ -163,9 +188,17 @@ function termsBody(p: SubscriptionTermsParams | undefined | null): Body | undefi
 
 export function productListQuery(p: ProductListParams | undefined): string {
 	optionalParams(p);
+	const v = new Validator();
+	validatePage(v, p);
+	v.bool('includeHidden', p?.includeHidden);
+	v.bool('subscription', p?.subscription);
+	v.reference('reference', p?.reference);
+	v.check();
 	return new Query()
+		.page(p?.limit, p?.cursor)
 		.flag('includeHidden', p?.includeHidden)
 		.bool('subscription', p?.subscription)
+		.string('reference', p?.reference)
 		.encode();
 }
 
@@ -174,18 +207,20 @@ export function createProductBody(p: CreateProductParams): Body {
 	const v = new Validator();
 	if (v.required('name', p.name)) v.name('name', p.name, 2, 100);
 	v.text('description', p.description, 2, 500);
-	v.price('price', p.price);
+	if (v.required('priceUsd', p.priceUsd)) v.usd('priceUsd', p.priceUsd, MAX_USD);
 	v.reference('reference', p.reference);
 	if (p.subscription !== undefined && p.subscription !== null) {
 		validateTerms(v, p.subscription, 'subscription.', true);
 	}
+	v.metadata('metadata', p.metadata);
 	v.check();
 	return compact({
 		name: p.name,
 		description: nonEmpty(p.description),
-		price: p.price,
+		priceUsd: p.priceUsd,
 		reference: nonEmpty(p.reference),
 		subscription: termsBody(p.subscription),
+		metadata: metadataBody(p.metadata),
 	});
 }
 
@@ -195,7 +230,8 @@ export function updateProductBody(p: UpdateProductParams): Body {
 	v.name('name', p.name, 2, 100);
 	if (p.description !== undefined && p.description !== null)
 		v.text('description', p.description, 2, 500);
-	if (p.price !== undefined && p.price !== null) v.price('price', p.price);
+	if (p.priceUsd !== undefined && p.priceUsd !== null && p.priceUsd !== '')
+		v.usd('priceUsd', p.priceUsd, MAX_USD);
 	v.bool('isActive', p.isActive);
 	if (p.subscription !== undefined && p.subscription !== null) {
 		validateTerms(v, p.subscription, 'subscription.', false);
@@ -206,14 +242,16 @@ export function updateProductBody(p: UpdateProductParams): Body {
 		'removeSubscription',
 		p.removeSubscription === true
 	);
+	v.metadata('metadata', p.metadata);
 	v.check();
 	return compact({
 		name: nonEmpty(p.name),
 		description: given(p.description),
-		price: given(p.price),
+		priceUsd: nonEmpty(p.priceUsd),
 		isActive: given(p.isActive),
 		subscription: termsBody(p.subscription),
 		removeSubscription: p.removeSubscription === true ? true : undefined,
+		metadata: metadataBody(p.metadata),
 	});
 }
 
@@ -222,63 +260,79 @@ export function updateProductBody(p: UpdateProductParams): Body {
 export function createCustomerBody(p: CreateCustomerParams): Body {
 	requireParams(p);
 	const v = new Validator();
-	if (v.required('name', p.name)) v.name('name', p.name, 2, 100);
+	if (v.required('firstName', p.firstName)) v.name('firstName', p.firstName, 2, 100);
 	v.name('lastName', p.lastName, 1, 100);
 	if (v.required('email', p.email)) v.email('email', p.email);
 	v.phone('phoneNumber', p.phoneNumber);
 	v.text('address', p.address, 0, 500);
 	v.reference('reference', p.reference);
+	v.metadata('metadata', p.metadata);
 	v.check();
 	return compact({
-		name: p.name,
+		firstName: p.firstName,
 		lastName: nonEmpty(p.lastName),
 		email: p.email,
 		phoneNumber: nonEmpty(p.phoneNumber),
 		address: nonEmpty(p.address),
 		reference: nonEmpty(p.reference),
+		metadata: metadataBody(p.metadata),
 	});
 }
 
 export function updateCustomerBody(p: UpdateCustomerParams): Body {
 	requireParams(p);
 	const v = new Validator();
-	v.name('name', p.name, 2, 100);
+	v.name('firstName', p.firstName, 2, 100);
 	v.name('lastName', p.lastName, 1, 100);
 	v.email('email', p.email);
 	v.phone('phoneNumber', p.phoneNumber);
 	v.text('address', p.address, 0, 500);
+	v.metadata('metadata', p.metadata);
 	v.check();
 	return compact({
-		name: nonEmpty(p.name),
-		lastName: nonEmpty(p.lastName),
+		firstName: nonEmpty(p.firstName),
+		lastName: given(p.lastName),
 		email: nonEmpty(p.email),
 		phoneNumber: given(p.phoneNumber),
 		address: given(p.address),
+		metadata: metadataBody(p.metadata),
 	});
 }
 
 export function customerListQuery(p: CustomerListParams | undefined): string {
 	optionalParams(p);
 	const v = new Validator();
-	v.limit('limit', p?.limit);
+	validatePage(v, p);
 	v.email('email', p?.email);
+	v.reference('reference', p?.reference);
 	v.bool('verified', p?.verified);
 	v.check();
 	return new Query()
 		.page(p?.limit, p?.cursor)
 		.string('email', p?.email)
+		.string('reference', p?.reference)
 		.bool('verified', p?.verified)
 		.encode();
+}
+
+/** Checks a `getByReference` argument like a created reference: required, 1 to 100 of `A-Z a-z 0-9 . _ : @ -`. */
+export function referenceQuery(reference: unknown): string {
+	const v = new Validator();
+	if (v.required('reference', reference)) v.reference('reference', reference);
+	v.check();
+	return new Query().set('reference', reference as string).encode();
 }
 
 // ── Checkout sessions ───────────────────────────────────────────────────────
 
 /** The most fee lines of a checkout's own (`fees.items`). */
 const MAX_FEE_ITEMS = 10;
-/** The largest amount of a fee line, in USD (`usd=1000000`). */
-const MAX_FEE_USD = 1_000_000;
 
-/** Checks a checkout's `fees` when given; field errors on their wire paths. */
+/**
+ * Checks a checkout's `fees` when given (behaviour §8): at most 10 lines; each label the name
+ * rule, 1 to 40; each description the text rule, at most 200; each amount the usd rule. Field
+ * errors on their wire paths.
+ */
 function validateFees(v: Validator, fees: unknown): void {
 	if (fees === undefined || fees === null) return;
 	if (typeof fees !== 'object' || Array.isArray(fees)) {
@@ -304,7 +358,8 @@ function validateFees(v: Validator, fees: unknown): void {
 		const { label, description, amountUsd } = item as Record<string, unknown>;
 		if (v.required(`${path}.label`, label)) v.name(`${path}.label`, label, 1, 40);
 		v.text(`${path}.description`, description, 0, 200);
-		v.usd(`${path}.amountUsd`, amountUsd, MAX_FEE_USD);
+		if (v.required(`${path}.amountUsd`, amountUsd))
+			v.usd(`${path}.amountUsd`, amountUsd, MAX_USD);
 	});
 }
 
@@ -324,6 +379,7 @@ function feesBody(fees: CheckoutFees | undefined | null): Body | undefined {
 	});
 }
 
+/** Checks every field of a session but its fees (reported last, behaviour §8). */
 function validateSession(v: Validator, p: CreatePaymentSessionParams): void {
 	v.reference('reference', p.reference);
 	v.uuid('productUuid', p.productUuid);
@@ -341,21 +397,22 @@ function validateSession(v: Validator, p: CreatePaymentSessionParams): void {
 	) {
 		v.intRange('expiresInMinutes', p.expiresInMinutes, 10, 1440);
 	}
+	v.metadata('metadata', p.metadata);
 
 	// Exactly one of: productUuid, productReference, an inline product. Any inline field next
-	// to productUuid or productReference counts as mixing.
-	const hasPrice = p.price !== undefined && p.price !== null && p.price !== 0;
+	// to productUuid or productReference counts as mixing (behaviour §10).
+	const hasPrice = p.priceUsd !== undefined && p.priceUsd !== null && p.priceUsd !== '';
 	const inline = !!p.productName || hasPrice || !!p.description;
 	const chosen = [!!p.productUuid, !!p.productReference, inline].filter(Boolean).length;
 	if (chosen !== 1) {
 		v.add(
 			'productUuid',
-			'or productReference, or an inline product (productName and price), is required: exactly one of them'
+			'or productReference, or an inline product (productName and priceUsd), is required: exactly one of them'
 		);
 	} else if (inline) {
 		if (!p.productName) v.add('productName', 'is required for an inline product');
-		if (!hasPrice) v.add('price', 'is required for an inline product');
-		else v.price('price', p.price);
+		if (!hasPrice) v.add('priceUsd', 'is required for an inline product');
+		else v.usd('priceUsd', p.priceUsd, MAX_USD);
 	}
 }
 
@@ -366,12 +423,13 @@ function sessionBody(p: CreatePaymentSessionParams): Body {
 		productReference: nonEmpty(p.productReference),
 		productName: nonEmpty(p.productName),
 		description: nonEmpty(p.description),
-		price: nonZero(p.price),
+		priceUsd: nonEmpty(p.priceUsd),
 		successUrl: nonEmpty(p.successUrl),
 		cancelUrl: nonEmpty(p.cancelUrl),
 		customerUuid: nonEmpty(p.customerUuid),
 		customerReference: nonEmpty(p.customerReference),
 		expiresInMinutes: nonZero(p.expiresInMinutes),
+		metadata: metadataBody(p.metadata),
 	};
 }
 
@@ -401,29 +459,30 @@ export function createSubscriptionSessionBody(p: CreateSubscriptionSessionParams
 	});
 }
 
-// ── Payments and failures ───────────────────────────────────────────────────
+// ── Payments, transactions and failures ─────────────────────────────────────
 
 export function paymentListQuery(p: PaymentListParams | undefined): string {
 	optionalParams(p);
 	if (!p) return '';
 	const v = new Validator();
 	validateFilters(v, p);
+	v.reference('reference', p.reference);
 	v.bool('refunded', p.refunded);
 	v.check();
-	return filtersQuery(p).bool('refunded', p.refunded).encode();
+	return filtersQuery(p).string('reference', p.reference).bool('refunded', p.refunded).encode();
 }
 
-export function combinedPaymentListQuery(p: CombinedPaymentListParams | undefined): string {
+export function transactionListQuery(p: TransactionListParams | undefined): string {
 	optionalParams(p);
 	if (!p) return '';
 	const v = new Validator();
 	validateFilters(v, p);
-	v.oneOf('source', p.source, COMBINED_SOURCES);
+	v.oneOf('type', p.type, TRANSACTION_KINDS);
 	v.txId('subscriptionUuid', p.subscriptionUuid);
 	v.bool('refunded', p.refunded);
 	v.check();
 	return filtersQuery(p)
-		.string('source', p.source)
+		.string('type', p.type)
 		.string('subscriptionUuid', p.subscriptionUuid)
 		.bool('refunded', p.refunded)
 		.encode();
@@ -447,6 +506,9 @@ export function failureListQuery(p: FailureListParams | undefined): string {
 
 export function readQuery(p: ReadParams | undefined): string {
 	optionalParams(p);
+	const v = new Validator();
+	v.bool('includeMembers', p?.includeMembers);
+	v.check();
 	return new Query().flag('includeMembers', p?.includeMembers).encode();
 }
 
@@ -457,18 +519,19 @@ export function subscriptionListQuery(p: SubscriptionListParams | undefined): st
 	if (!p) return '';
 	const v = new Validator();
 	validateFilters(v, p);
-	v.oneOf('status', p.status, SUBSCRIPTION_STATUSES);
+	// Not checked against the known statuses: a newer one is sent as is.
+	v.str('status', p.status);
 	v.reference('reference', p.reference);
 	v.check();
 	return filtersQuery(p).string('status', p.status).string('reference', p.reference).encode();
 }
 
-export function billListQuery(p: BillListParams | undefined): string {
-	optionalParams(p);
+export function updateSubscriptionBody(p: UpdateSubscriptionParams): Body {
+	requireParams(p);
 	const v = new Validator();
-	v.limit('limit', p?.limit);
+	v.metadata('metadata', p.metadata);
 	v.check();
-	return new Query().page(p?.limit, p?.cursor).encode();
+	return compact({ metadata: metadataBody(p.metadata) });
 }
 
 export function cancelSubscriptionQuery(p: CancelSubscriptionParams | undefined): string {
@@ -481,11 +544,11 @@ export function cancelSubscriptionQuery(p: CancelSubscriptionParams | undefined)
 
 // ── Refunds ─────────────────────────────────────────────────────────────────
 
-export function initiateRefundBody(p: InitiateRefundParams): Body {
+export function createRefundBody(p: CreateRefundParams): Body {
 	requireParams(p);
 	const v = new Validator();
 	if (v.required('txUuid', p.txUuid)) v.txId('txUuid', p.txUuid);
-	if (p.refundPercent !== undefined && p.refundPercent !== null) {
+	if (p.refundPercent !== undefined && p.refundPercent !== null && p.refundPercent !== '') {
 		v.percent('refundPercent', p.refundPercent, 100, true);
 	}
 	v.text('reason', p.reason, 0, 500);
@@ -493,56 +556,68 @@ export function initiateRefundBody(p: InitiateRefundParams): Body {
 	v.check();
 	return compact({
 		txUuid: p.txUuid,
-		refundPercent: given(p.refundPercent),
+		refundPercent: nonEmpty(p.refundPercent),
 		reason: nonEmpty(p.reason),
 		merchantMessage: nonEmpty(p.merchantMessage),
 	});
 }
 
-/** `refunds.list` (`paged` false: no limit/cursor) and `refunds.listInactive` (`paged` true). */
-export function refundListQuery(p: RefundListParams | undefined, paged: boolean): string {
+export function refundListQuery(p: RefundListParams | undefined): string {
 	optionalParams(p);
 	if (!p) return '';
 	const v = new Validator();
-	if (paged) v.limit('limit', p.limit);
-	v.uuid('userUuid', p.userUuid);
-	v.bool('includeMembers', p.includeMembers);
+	validatePage(v, p);
+	const statuses: unknown = p.status;
+	if (statuses !== undefined && statuses !== null) {
+		if (!Array.isArray(statuses)) {
+			v.add('status', 'must be a list of refund statuses');
+		} else {
+			if (statuses.length > MAX_REFUND_STATUSES)
+				v.add('status', `must name at most ${MAX_REFUND_STATUSES} statuses`);
+			statuses.forEach((status: unknown, i) => {
+				const field = `status[${i}]`;
+				if (typeof status !== 'string' || status === '') v.add(field, 'is required');
+				else v.oneOf(field, status, REFUND_STATUSES);
+			});
+		}
+	}
+	v.txId('txUuid', p.txUuid);
 	v.bool('held', p.held);
+	v.bool('includeMembers', p.includeMembers);
+	v.uuid('userUuid', p.userUuid);
 	v.exclusive('includeMembers', p.includeMembers === true, 'userUuid', !!p.userUuid);
 	v.check();
-	const q = new Query();
-	if (paged) q.page(p.limit, p.cursor);
+	const q = new Query().page(p.limit, p.cursor);
+	for (const status of p.status ?? []) q.add('status', status);
 	return q
+		.string('txUuid', p.txUuid)
+		.bool('held', p.held)
 		.bool('includeMembers', p.includeMembers)
 		.string('userUuid', p.userUuid)
-		.bool('held', p.held)
 		.encode();
 }
 
 // ── Members and invitations ─────────────────────────────────────────────────
 
-export function memberListQuery(p: MemberListParams | undefined): string {
-	optionalParams(p);
-	const v = new Validator();
-	v.limit('limit', p?.limit);
-	v.check();
-	return new Query().page(p?.limit, p?.cursor).encode();
-}
-
 export function updateMemberBody(p: UpdateMemberParams): Body {
 	requireParams(p);
 	const v = new Validator();
-	v.percent('organizationFeePercent', p.organizationFeePercent ?? 0, 50, false);
+	if (v.required('organizationFeePercent', p.organizationFeePercent))
+		v.percent('organizationFeePercent', p.organizationFeePercent, 50, false);
 	v.check();
-	return { organizationFeePercent: p.organizationFeePercent ?? 0 };
+	return { organizationFeePercent: p.organizationFeePercent };
 }
 
 export function createInvitationBody(p: CreateInvitationParams): Body {
 	requireParams(p);
 	const v = new Validator();
 	if (v.required('email', p.email)) v.email('email', p.email);
-	v.bool('trustLayer', p.trustLayer);
-	if (p.organizationFeePercent !== undefined && p.organizationFeePercent !== null) {
+	v.bool('holdFunds', p.holdFunds);
+	if (
+		p.organizationFeePercent !== undefined &&
+		p.organizationFeePercent !== null &&
+		p.organizationFeePercent !== ''
+	) {
 		v.percent('organizationFeePercent', p.organizationFeePercent, 50, false);
 	}
 	v.url('redirectUrl', p.redirectUrl);
@@ -550,8 +625,8 @@ export function createInvitationBody(p: CreateInvitationParams): Body {
 	return compact({
 		email: p.email,
 		role: 'user',
-		trustLayer: p.trustLayer === true,
-		organizationFeePercent: given(p.organizationFeePercent),
+		holdFunds: p.holdFunds === true,
+		organizationFeePercent: nonEmpty(p.organizationFeePercent),
 		redirectUrl: nonEmpty(p.redirectUrl),
 	});
 }
@@ -559,7 +634,7 @@ export function createInvitationBody(p: CreateInvitationParams): Body {
 export function invitationListQuery(p: InvitationListParams | undefined): string {
 	optionalParams(p);
 	const v = new Validator();
-	v.limit('limit', p?.limit);
+	validatePage(v, p);
 	v.oneOf('status', p?.status, INVITATION_STATUSES);
 	v.check();
 	return new Query().page(p?.limit, p?.cursor).string('status', p?.status).encode();
@@ -569,10 +644,13 @@ export function invitationListQuery(p: InvitationListParams | undefined): string
 
 export function walletListQuery(p: WalletListParams | undefined): string {
 	optionalParams(p);
+	const v = new Validator();
+	v.bool('withBalances', p?.withBalances);
+	v.check();
 	return new Query().flag('withBalances', p?.withBalances).encode();
 }
 
-export function supportedCurrenciesQuery(p: SupportedCurrenciesParams | undefined): string {
+export function acceptedCurrenciesQuery(p: AcceptedCurrenciesParams | undefined): string {
 	optionalParams(p);
 	const v = new Validator();
 	v.uuid('userUuid', p?.userUuid);
@@ -582,12 +660,19 @@ export function supportedCurrenciesQuery(p: SupportedCurrenciesParams | undefine
 
 export function currencyListQuery(p: CurrencyListParams | undefined): string {
 	optionalParams(p);
-	return new Query().flag('test', p?.test).encode();
+	const v = new Validator();
+	v.bool('test', p?.test);
+	v.bool('main', p?.main);
+	v.check();
+	return new Query().flag('test', p?.test).flag('main', p?.main).encode();
 }
 
 // ── Accounting ──────────────────────────────────────────────────────────────
 
-/** Checks an export window (two `YYYY-MM-DD` dates, from <= to) and encodes it with the format. */
+/**
+ * Checks an export window (two `YYYY-MM-DD` dates, from <= to; the API enforces the 92-day
+ * maximum, both days included) and encodes it with the format.
+ */
 export function accountingQuery(from: string, to: string, format: 'json' | 'csv'): string {
 	const v = new Validator();
 	v.dateRange('from', from, 'to', to);
@@ -637,8 +722,10 @@ export function updateWebhookEndpointBody(p: UpdateWebhookEndpointParams): Body 
 export function eventListQuery(p: EventListParams | undefined): string {
 	optionalParams(p);
 	const v = new Validator();
-	v.limit('limit', p?.limit);
-	v.oneOf('type', p?.type, EVENT_TYPES);
+	validatePage(v, p);
+	// Not checked against the known types: newer ones appear over time (the API's 400).
+	v.str('type', p?.type);
+	v.bool('includeMembers', p?.includeMembers);
 	v.check();
 	return new Query()
 		.page(p?.limit, p?.cursor)

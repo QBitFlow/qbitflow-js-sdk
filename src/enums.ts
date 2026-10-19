@@ -63,7 +63,7 @@ export const BillingFailureReason = {
 } as const;
 export type BillingFailureReason = Open<ValuesOf<typeof BillingFailureReason>>;
 
-/** Where a billing run is ({@link BillingState.stage}). */
+/** Where a bill stands ({@link TestBill.stage}). */
 export const BillingStage = {
 	/** Being planned, charged or recorded. */
 	Running: 'running',
@@ -75,14 +75,17 @@ export const BillingStage = {
 } as const;
 export type BillingStage = Open<ValuesOf<typeof BillingStage>>;
 
-/** How a finished billing run ended. */
+/** How a bill ended ({@link TestBill.outcome}). */
 export const BillingOutcome = {
 	Paid: 'paid',
 	/** Nothing to bill: paid already, cancelled, or gone. */
 	NotDue: 'notDue',
 	/** Below the minimum amount: the period moved on without a charge. */
 	Skipped: 'skipped',
-	/** The subscription was cancelled. */
+	/**
+	 * The subscription was cancelled (stopped, its trial over, its merchant closed, inactive
+	 * on-chain, or its last attempt failed).
+	 */
 	Cancelled: 'cancelled',
 	/** Its customer paused the subscription: not charged. */
 	Paused: 'paused',
@@ -97,7 +100,7 @@ export const CheckoutSessionStatusValue = {
 	WaitingConfirmation: 'waitingConfirmation',
 	/** Confirmed and recorded. Final. */
 	Completed: 'completed',
-	/** Expired unpaid. Final. */
+	/** Expired unpaid (at its `expiresAt`, or expired by its merchant). Final. */
 	Expired: 'expired',
 } as const;
 export type CheckoutSessionStatusValue = Open<ValuesOf<typeof CheckoutSessionStatusValue>>;
@@ -118,11 +121,21 @@ export const FeeLineType = {
 } as const;
 export type FeeLineType = Open<ValuesOf<typeof FeeLineType>>;
 
-/** A refund's status. */
+/**
+ * Where a refund stands. An approval and a rejection are final: the transaction never gets
+ * another refund. A cancelled one never moved money and blocks nothing.
+ */
 export const RefundStatus = {
+	/** Requested, or started by the merchant and not sent yet. */
 	Pending: 'pending',
+	/** The refund transfer is confirmed (`refund.approved`). */
 	Approved: 'approved',
+	/** Rejected by whoever decides it (`refund.rejected`). */
 	Rejected: 'rejected',
+	/** A merchant's refund dropped before it was sent (announced by nothing). */
+	Cancelled: 'cancelled',
+	/** Declared, never set: a failed approval leaves the refund pending. */
+	Failed: 'failed',
 } as const;
 export type RefundStatus = Open<ValuesOf<typeof RefundStatus>>;
 
@@ -142,14 +155,17 @@ export const NotRefundableReason = {
 } as const;
 export type NotRefundableReason = Open<ValuesOf<typeof NotRefundableReason>>;
 
-/** What a combined feed row is. */
-export const CombinedPaymentSource = {
-	/** A one-time payment (`pay@…`). */
+/**
+ * What a row of the transactions feed is ({@link Transaction.type}). Not
+ * {@link TransactionType}, which is a checkout's `txType`.
+ */
+export const TransactionKind = {
+	/** A one-time payment (`pay@…`): `payments.get`. */
 	Payment: 'payment',
-	/** A subscription's bill (`sub-hist@…`). */
-	SubscriptionHistory: 'subscriptionHistory',
+	/** A subscription's bill (`sub-hist@…`): `subscriptions.getBill`. */
+	Bill: 'bill',
 } as const;
-export type CombinedPaymentSource = Open<ValuesOf<typeof CombinedPaymentSource>>;
+export type TransactionKind = Open<ValuesOf<typeof TransactionKind>>;
 
 /** What a failed attempt was paying. */
 export const FailureKind = {
@@ -182,7 +198,7 @@ export const FailureCategory = {
 } as const;
 export type FailureCategory = Open<ValuesOf<typeof FailureCategory>>;
 
-/** A blockchain (the testnet's in test mode). */
+/** A blockchain, by its native coin's symbol ({@link Currency.chain}; the testnet's in test mode). */
 export const Chain = {
 	/** Ethereum. */
 	ETH: 'ETH',
@@ -213,7 +229,7 @@ export const TransactionType = {
 } as const;
 export type TransactionType = Open<ValuesOf<typeof TransactionType>>;
 
-/** A transfer's kind (`heldFunds.released`). */
+/** A transfer's kind ({@link HeldFundsReleased.type}: `heldFundsRelease`). */
 export const TransferType = {
 	/** v1: funds held for a user, paid when they claimed their account. */
 	AccountClaim: 'accountClaim',
@@ -226,18 +242,26 @@ export type TransferType = Open<ValuesOf<typeof TransferType>>;
 
 /** A held-funds line's kind. */
 export const LedgerEntryType = {
+	/** A payment made to the member while the organization held their funds. */
 	Payment: 'payment',
-	SubscriptionHistory: 'subscriptionHistory',
+	/** A subscription bill paid to the member while held. */
+	Bill: 'bill',
+	/** A refund the organization sent of one of them. */
 	Refund: 'refund',
 } as const;
 export type LedgerEntryType = Open<ValuesOf<typeof LedgerEntryType>>;
 
 /** An accounting export row's kind. */
 export const AccountingEventType = {
+	/** A one-time payment (`pay@…`). */
 	Payment: 'payment',
-	SubscriptionHistory: 'subscriptionHistory',
+	/** A subscription's bill (`sub-hist@…`). */
+	Bill: 'bill',
+	/** A refund the space sent (`refund@…`). */
 	Refund: 'refund',
+	/** The fee the organization earned on a member's payment or bill. */
 	OrganizationFee: 'organizationFee',
+	/** The referrer's share earned on a referred organization's payment or bill. */
 	ReferralFee: 'referralFee',
 } as const;
 export type AccountingEventType = Open<ValuesOf<typeof AccountingEventType>>;
@@ -279,12 +303,15 @@ export const EventType = {
 	SubscriptionBillingFailed: 'subscription.billingFailed',
 	SubscriptionUpcomingBill: 'subscription.upcomingBill',
 	RefundRequested: 'refund.requested',
-	RefundCompleted: 'refund.completed',
-	RefundDenied: 'refund.denied',
+	/** Was `refund.completed`. */
+	RefundApproved: 'refund.approved',
+	/** Was `refund.denied`. */
+	RefundRejected: 'refund.rejected',
 	MemberJoined: 'member.joined',
 	MemberRemoved: 'member.removed',
 	HeldFundsReleased: 'heldFunds.released',
 	CheckoutExpired: 'checkout.expired',
+	/** Sent only by an endpoint's test (the dashboard); no endpoint subscribes to it. */
 	WebhookTest: 'webhook.test',
 } as const;
 /** A known webhook event type. */
@@ -293,16 +320,14 @@ export type EventType = Open<KnownEventType>;
 
 /** A webhook endpoint's (and an event's) payload version. */
 export const WebhookPayloadVersion = {
-	/** v1's bodies (endpoints migrated from v1; not parsed by this SDK). */
-	V1: 'v1',
-	/** The event envelope. */
+	/** The event envelope `{id, type, version, createdAt, test, userUuid, data}`: the only version. */
 	V2: 'v2',
 } as const;
 export type WebhookPayloadVersion = Open<ValuesOf<typeof WebhookPayloadVersion>>;
 
 /** Why a webhook endpoint is disabled. */
 export const EndpointDisabledReason = {
-	/** Every delivery failing for too long. */
+	/** Every delivery failing for 3 days (live mode only). */
 	Failing: 'failing',
 	/** Disabled by its owner. */
 	Owner: 'owner',

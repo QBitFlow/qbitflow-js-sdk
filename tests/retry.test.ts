@@ -37,7 +37,7 @@ const keyInUse409: Reply = [409, '{"error":"in use","code":"idempotency_key_in_u
 const get = (path: string): Endpoint => ({ method: 'GET', path });
 const create: Endpoint = {
 	method: 'POST',
-	path: '/product',
+	path: '/products',
 	body: { name: 'Pro' },
 	idempotent: true,
 };
@@ -115,8 +115,8 @@ describe('retry matrix', () => {
 				ServerError,
 			],
 			[
-				'PUT 500 not retried',
-				{ method: 'PUT', path: '/product/x', body: {} },
+				'PATCH 500 not retried',
+				{ method: 'PATCH', path: '/products/x', body: {} },
 				[err500],
 				1,
 				[],
@@ -124,7 +124,7 @@ describe('retry matrix', () => {
 			],
 			[
 				'DELETE 503 not retried',
-				{ method: 'DELETE', path: '/product/x' },
+				{ method: 'DELETE', path: '/products/x' },
 				[err503],
 				1,
 				[],
@@ -416,7 +416,7 @@ describe('network errors, timeouts and cancellation', () => {
 			expect(err.status).toBe(302);
 			expect(isRetryable(err)).toBe(false);
 		}
-		expect(ts.recorded.map((r) => r.path)).toEqual(['/me', '/product']);
+		expect(ts.recorded.map((r) => r.path)).toEqual(['/me', '/products']);
 		expect(sleeps).toHaveLength(0);
 	});
 });

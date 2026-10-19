@@ -1,5 +1,5 @@
 /**
- * The decoding schemas of every answer and webhook event, mirroring the API's types (docs/core).
+ * The decoding schemas of every answer and webhook event, mirroring the API's types (docs/api).
  * `object<T>()` needs exactly one decoder per property of `T`, so a schema cannot drift from its
  * interface without a compile error.
  *
@@ -12,16 +12,14 @@ import {
 	enumString,
 	type Fields,
 	integer,
-	lazy,
 	list,
-	nullable,
-	number,
 	object,
 	optional,
 	raw,
 	rawMember,
 	type Schema,
 	string,
+	stringMap,
 	timestamp,
 	unsigned,
 } from './decode.js';
@@ -35,7 +33,6 @@ import type {
 	CancellationReason,
 	Chain,
 	CheckoutSessionStatusValue,
-	CombinedPaymentSource,
 	Credential,
 	DurationUnit,
 	EndpointDisabledReason,
@@ -51,33 +48,33 @@ import type {
 	RefundStatus,
 	Role,
 	SubscriptionStatus,
+	TransactionKind,
 	TransactionType,
 	TransferType,
 	WebhookPayloadVersion,
 } from './enums.js';
 import type { AccountingEvent } from './models/accounting.js';
 import type {
-	CheckoutSession,
 	CheckoutSessionStatus,
+	CreatedCheckoutSession,
 	PaymentSessionData,
 	SubscriptionSessionData,
 } from './models/checkout.js';
 import type {
 	Attempt,
-	BlockData,
 	Currency,
 	CustomerSummary,
 	Duration,
-	NetworkFees,
+	FeeLine,
 	OrganizationFee,
 	Page,
-	PaymentMetadata,
 	ReferralFee,
 	RefundSummary,
-	TxAmounts,
-	TxAmountsMinUnits,
-	TxAmountsUsd,
-	TxMetadata,
+	Settlement,
+	SettlementTransaction,
+	Split,
+	TokenAmount,
+	TransferSettlement,
 } from './models/common.js';
 import type { Customer } from './models/customers.js';
 import type {
@@ -88,26 +85,25 @@ import type {
 	SubscriptionActionRequiredChanged,
 	SubscriptionBilled,
 	SubscriptionBillingFailed,
-	SubscriptionCreated,
 	SubscriptionStatusChanged,
 	SubscriptionUpcomingBill,
 	WebhookTest,
 } from './models/events.js';
 import type {
+	CreatedInvitation,
 	HeldFunds,
 	Invitation,
-	InvitationCreated,
 	LedgerEntry,
 	Me,
 	MeMember,
 	MeSpace,
 	Member,
-	MemberHeldFundsSummary,
+	MemberHeldFunds,
 } from './models/members.js';
-import type { Bill, CombinedPayment, Failure, FeeLine, Payment } from './models/payments.js';
+import type { Bill, Failure, Payment, Transaction } from './models/payments.js';
 import type { Product, SubscriptionTerms } from './models/products.js';
 import type { Refund, RefundApproval } from './models/refunds.js';
-import type { BillingState, DunningStatus, Subscription } from './models/subscriptions.js';
+import type { Allowance, DunningStatus, Subscription, TestBill } from './models/subscriptions.js';
 import type { Balance, TokenWallet, Wallet } from './models/wallets.js';
 import type {
 	DeliveryAttempt,
@@ -117,21 +113,12 @@ import type {
 } from './models/webhooks.js';
 
 const optString = optional(string);
-const optNumber = optional(number);
 const optBoolean = optional(boolean);
 const optTimestamp = optional(timestamp);
-const nullableTimestamp = nullable(timestamp);
 
-/** A page of `item`s; `hasMore` is computed from `nextCursor`. */
+/** A page of `item`s: `{items, hasMore, nextCursor?}` (absent `items` → `[]`). */
 export function page<T>(item: Schema<T>): Schema<Page<T>> {
-	const inner = object<{ items: T[]; nextCursor: string | null }>({
-		items: list(item),
-		nextCursor: nullable(string),
-	});
-	return custom('an object', (value, path, ctx) => {
-		const p = inner.decode(value, path, ctx);
-		return { ...p, hasMore: p.nextCursor !== null } as Page<T>;
-	});
+	return object<Page<T>>({ items: list(item), hasMore: boolean, nextCursor: optString });
 }
 
 // ── Common ──────────────────────────────────────────────────────────────────
@@ -141,35 +128,44 @@ export const DurationSchema = object<Duration>({
 	unit: optional(enumString<DurationUnit>()),
 });
 
-export const CurrencySchema: Schema<Currency> = object<Currency>({
+export const CurrencySchema = object<Currency>({
 	id: unsigned,
-	name: string,
+	code: string,
 	symbol: string,
+	name: string,
+	chain: enumString<Chain>(),
 	decimals: unsigned,
-	address: string,
+	address: optString,
 	mainCurrencyId: optional(unsigned),
-	mainCurrency: nullable(lazy(() => CurrencySchema)),
 	test: boolean,
 });
 
+const tokenAmountFields: Fields<TokenAmount> = {
+	amount: string,
+	amountMinUnits: string,
+	amountUsd: optString,
+};
+export const TokenAmountSchema = object<TokenAmount>(tokenAmountFields);
+
 export const CustomerSummarySchema = object<CustomerSummary>({
 	uuid: string,
-	name: string,
+	firstName: string,
 	lastName: optString,
 	email: string,
 	reference: optString,
-	deleted: optBoolean,
+	deleted: boolean,
 });
 
 export const RefundSummarySchema = object<RefundSummary>({
 	uuid: string,
 	status: enumString<RefundStatus>(),
 	initiatedBy: enumString<RefundInitiator>(),
-	refundPercent: number,
+	refundPercent: string,
+	amount: optString,
 	amountMinUnits: string,
-	amountUsd: number,
+	amountUsd: optString,
 	createdAt: timestamp,
-	respondedAt: nullableTimestamp,
+	respondedAt: optTimestamp,
 });
 
 export const AttemptSchema = object<Attempt>({
@@ -180,94 +176,82 @@ export const AttemptSchema = object<Attempt>({
 	at: timestamp,
 });
 
-const OrganizationFeeSchema = object<OrganizationFee>({ organization: string, feePercent: number });
+const OrganizationFeeSchema = object<OrganizationFee>({ address: string, feePercent: string });
 
 const ReferralFeeSchema = object<ReferralFee>({
-	referrer: string,
-	feePercent: number,
+	address: string,
+	feePercent: string,
 	deadline: timestamp,
 });
 
-const NetworkFeesSchema = object<NetworkFees>({
-	amount: string,
-	unitsConsumed: unsigned,
-	l1Fee: optString,
+const SplitSchema = object<Split>({
+	platform: TokenAmountSchema,
+	organization: optional(TokenAmountSchema),
+	referral: optional(TokenAmountSchema),
+	merchant: TokenAmountSchema,
+	networkFee: optional(TokenAmountSchema),
 });
 
-const BlockDataSchema = object<BlockData>({ number: string, timestamp: unsigned });
-
-export const TxMetadataSchema = object<TxMetadata>({
-	networkFees: NetworkFeesSchema,
-	blockData: BlockDataSchema,
-	mainCurrencyPriceUsd: optNumber,
+export const SettlementTransactionSchema = object<SettlementTransaction>({
+	blockNumber: string,
+	blockTime: optTimestamp,
+	gasUsed: optional(unsigned),
+	fee: TokenAmountSchema,
+	l1Fee: optional(TokenAmountSchema),
+	nativePriceUsd: optString,
 });
 
-const TxAmountsUsdSchema = object<TxAmountsUsd>({
-	platform: number,
-	organization: optNumber,
-	referral: optNumber,
-	merchant: number,
-	networkFee: optNumber,
-});
-
-const TxAmountsMinUnitsSchema = object<TxAmountsMinUnits>({
-	platform: string,
-	organization: string,
-	referral: string,
-	merchant: string,
-	networkFee: optString,
-});
-
-const TxAmountsSchema = object<TxAmounts>({
-	usd: TxAmountsUsdSchema,
-	minUnits: TxAmountsMinUnitsSchema,
-});
-
-export const PaymentMetadataSchema = object<PaymentMetadata>({
-	feePercent: number,
+export const SettlementSchema = object<Settlement>({
+	feePercent: string,
 	organizationFee: optional(OrganizationFeeSchema),
 	referralFee: optional(ReferralFeeSchema),
-	txMetadata: TxMetadataSchema,
-	txAmounts: TxAmountsSchema,
+	split: optional(SplitSchema),
+	transaction: optional(SettlementTransactionSchema),
 });
 
-// ── Payments ────────────────────────────────────────────────────────────────
+export const TransferSettlementSchema = object<TransferSettlement>({
+	transaction: optional(SettlementTransactionSchema),
+});
 
-const FeeLineSchema = object<FeeLine>({
+export const FeeLineSchema = object<FeeLine>({
 	type: enumString<FeeLineType>(),
 	label: string,
 	description: optString,
 	amountUsd: string,
 });
 
+// ── Payments ────────────────────────────────────────────────────────────────
+
 const paymentFields: Fields<Payment> = {
 	uuid: string,
 	createdAt: timestamp,
 	from: string,
 	to: string,
-	amount: number,
+	amount: string,
 	amountMinUnits: string,
-	currencyId: unsigned,
-	currency: nullable(CurrencySchema),
+	amountUsd: string,
+	currency: CurrencySchema,
 	txHash: string,
 	chain: optional(enumString<Chain>()),
 	explorerUrl: optString,
 	test: boolean,
 	userUuid: optString,
 	reference: optString,
-	price: number,
+	priceUsd: string,
 	fees: list(FeeLineSchema),
-	name: string,
-	description: string,
+	productName: string,
+	productDescription: optString,
+	metadata: stringMap,
 	productUuid: optString,
 	customerUuid: optString,
 	customerReference: optString,
 	note: optString,
 	customer: optional(CustomerSummarySchema),
-	metadata: PaymentMetadataSchema,
+	settlement: SettlementSchema,
 	confirmedAt: optTimestamp,
+	paid: optString,
 	paidMinUnits: optString,
-	paidUsd: optNumber,
+	paidUsd: optString,
 	refund: optional(RefundSummarySchema),
 	refundable: optBoolean,
 	notRefundableReason: optional(enumString<NotRefundableReason>()),
@@ -275,67 +259,76 @@ const paymentFields: Fields<Payment> = {
 };
 export const PaymentSchema = object<Payment>(paymentFields);
 
-const billFields: Fields<Bill> = {
+export const BillSchema = object<Bill>({
 	uuid: string,
 	createdAt: timestamp,
 	from: string,
 	to: string,
-	amount: number,
+	amount: string,
 	amountMinUnits: string,
-	currencyId: unsigned,
-	currency: nullable(CurrencySchema),
+	amountUsd: string,
+	currency: CurrencySchema,
 	txHash: string,
 	chain: optional(enumString<Chain>()),
 	explorerUrl: optString,
 	test: boolean,
 	userUuid: optString,
-	name: string,
-	description: string,
+	productName: string,
+	productDescription: optString,
 	productUuid: optString,
 	subscriptionUuid: string,
 	customerUuid: optString,
 	customerReference: optString,
 	customer: optional(CustomerSummarySchema),
-	metadata: PaymentMetadataSchema,
+	settlement: SettlementSchema,
 	periodStart: optTimestamp,
 	periodEnd: optTimestamp,
 	confirmedAt: optTimestamp,
+	paid: optString,
 	paidMinUnits: optString,
-	paidUsd: optNumber,
+	paidUsd: optString,
 	refund: optional(RefundSummarySchema),
 	refundable: optBoolean,
 	notRefundableReason: optional(enumString<NotRefundableReason>()),
-};
-export const BillSchema = object<Bill>(billFields);
+});
 
-export const CombinedPaymentSchema = object<CombinedPayment>({
-	source: enumString<CombinedPaymentSource>(),
+export const TransactionSchema = object<Transaction>({
+	type: enumString<TransactionKind>(),
 	uuid: string,
 	createdAt: timestamp,
 	from: string,
 	to: string,
-	name: string,
-	description: string,
-	amount: number,
+	productName: string,
+	productDescription: optString,
+	priceUsd: optString,
+	fees: list(FeeLineSchema),
+	amount: string,
 	amountMinUnits: string,
-	currencyId: unsigned,
-	currency: nullable(CurrencySchema),
+	amountUsd: string,
+	currency: CurrencySchema,
 	productUuid: optString,
 	txHash: string,
 	customerUuid: optString,
 	customer: optional(CustomerSummarySchema),
 	customerReference: optString,
 	subscriptionUuid: optString,
+	periodStart: optTimestamp,
+	periodEnd: optTimestamp,
 	reference: optString,
 	subscriptionReference: optString,
+	metadata: stringMap,
 	chain: optional(enumString<Chain>()),
 	explorerUrl: optString,
 	test: boolean,
 	userUuid: optString,
+	settlement: SettlementSchema,
+	confirmedAt: optTimestamp,
+	paid: optString,
+	paidMinUnits: optString,
+	paidUsd: optString,
 	refund: optional(RefundSummarySchema),
 	refundable: optBoolean,
 	notRefundableReason: optional(enumString<NotRefundableReason>()),
-	metadata: nullable(PaymentMetadataSchema),
 });
 
 export const FailureSchema = object<Failure>({
@@ -347,9 +340,10 @@ export const FailureSchema = object<Failure>({
 	code: string,
 	category: enumString<FailureCategory>(),
 	message: optString,
-	attemptedUsd: number,
+	attempted: string,
 	attemptedMinUnits: string,
-	currencyId: unsigned,
+	attemptedUsd: string,
+	currency: CurrencySchema,
 	from: string,
 	txHash: optString,
 	customerUuid: optString,
@@ -362,10 +356,10 @@ export const FailureSchema = object<Failure>({
 
 // ── Checkout sessions ───────────────────────────────────────────────────────
 
-export const CheckoutSessionSchema = object<CheckoutSession>({
+export const CreatedCheckoutSessionSchema = object<CreatedCheckoutSession>({
 	link: string,
 	uuid: string,
-	expiresAt: optTimestamp,
+	expiresAt: timestamp,
 });
 
 export const CheckoutSessionStatusSchema = object<CheckoutSessionStatus>({
@@ -374,6 +368,7 @@ export const CheckoutSessionStatusSchema = object<CheckoutSessionStatus>({
 	txHash: optString,
 	message: optString,
 	lastAttempt: optional(AttemptSchema),
+	expiresAt: optTimestamp,
 });
 
 const paymentSessionFields: Fields<PaymentSessionData> = {
@@ -383,9 +378,9 @@ const paymentSessionFields: Fields<PaymentSessionData> = {
 	productReference: optString,
 	productName: optString,
 	description: optString,
-	price: optNumber,
+	priceUsd: string,
 	fees: list(FeeLineSchema),
-	amount: optNumber,
+	amountUsd: string,
 	successUrl: optString,
 	cancelUrl: optString,
 	redirectUrl: optString,
@@ -393,7 +388,8 @@ const paymentSessionFields: Fields<PaymentSessionData> = {
 	userName: optString,
 	test: boolean,
 	txType: enumString<TransactionType>(),
-	availableCurrencyIds: list(unsigned),
+	availableCurrencies: list(CurrencySchema),
+	metadata: stringMap,
 	createdAt: optTimestamp,
 	expiresAt: optTimestamp,
 };
@@ -404,7 +400,7 @@ export const SubscriptionSessionDataSchema = object<SubscriptionSessionData>({
 	frequency: DurationSchema,
 	trialPeriod: optional(DurationSchema),
 	minPeriods: optional(unsigned),
-	upgradingFromTrial: optBoolean,
+	upgradingFromTrial: boolean,
 });
 
 /** `checkout.expired`'s data: a subscription session for `txType` `createSubscription`, else a payment session. */
@@ -428,30 +424,37 @@ const DunningStatusSchema = object<DunningStatus>({
 	awaitingMaximumSince: optTimestamp,
 });
 
+const AllowanceSchema = object<Allowance>({
+	...tokenAmountFields,
+	remainingPeriods: optional(unsigned),
+	maxPerPeriod: optString,
+	maxPerPeriodMinUnits: optString,
+});
+
 const subscriptionFields: Fields<Subscription> = {
 	uuid: string,
 	reference: optString,
 	createdAt: timestamp,
 	updatedAt: timestamp,
-	from: string,
+	from: optString,
 	to: string,
-	productUuid: string,
-	subscriptionHash: string,
-	currencyId: unsigned,
-	currency: nullable(CurrencySchema),
+	productUuid: optString,
+	subscriptionHash: optString,
+	currency: CurrencySchema,
 	frequency: DurationSchema,
-	allowance: string,
 	status: enumString<SubscriptionStatus>(),
 	actionRequired: optional(enumString<ActionRequired>()),
 	currentPeriodEnd: optTimestamp,
 	priceUsd: string,
 	fees: list(FeeLineSchema),
-	maxAmountPerPeriod: optString,
-	lastBillingDate: timestamp,
-	nextBillingDate: optTimestamp,
+	allowance: optional(AllowanceSchema),
+	lastBilledAt: optTimestamp,
+	nextBillingAt: optTimestamp,
 	cancelledAt: optTimestamp,
 	cancellationReason: optional(enumString<CancellationReason>()),
-	minimumCancellationDate: optTimestamp,
+	cancellableAt: optTimestamp,
+	metadata: stringMap,
+	managementPageLink: optString,
 	test: boolean,
 	userUuid: optString,
 	customerUuid: optString,
@@ -461,12 +464,12 @@ const subscriptionFields: Fields<Subscription> = {
 };
 export const SubscriptionSchema = object<Subscription>(subscriptionFields);
 
-export const BillingStateSchema = object<BillingState>({
+export const TestBillSchema = object<TestBill>({
 	billUuid: string,
 	stage: enumString<BillingStage>(),
 	outcome: optional(enumString<BillingOutcome>()),
 	attempts: unsigned,
-	nextAttempt: optTimestamp,
+	nextAttemptAt: optTimestamp,
 	txHash: optString,
 	failureCode: optString,
 });
@@ -482,26 +485,29 @@ const RefundApprovalSchema = object<RefundApproval>({
 export const RefundSchema = object<Refund>({
 	uuid: string,
 	txUuid: string,
-	reason: string,
+	reason: optString,
 	status: enumString<RefundStatus>(),
 	createdAt: timestamp,
-	merchantMessage: string,
-	respondedAt: nullableTimestamp,
+	merchantMessage: optString,
+	respondedAt: optTimestamp,
 	test: boolean,
 	userUuid: optString,
-	txHash: string,
+	txHash: optString,
 	initiatedBy: enumString<RefundInitiator>(),
 	held: boolean,
+	paid: string,
 	paidMinUnits: string,
-	paidUsd: number,
-	refundPercent: number,
+	paidUsd: optString,
+	refundPercent: string,
+	amount: string,
 	amountMinUnits: string,
-	amountUsd: number,
-	currencyId: unsigned,
-	metadata: nullable(TxMetadataSchema),
+	amountUsd: optString,
+	currency: CurrencySchema,
+	settlement: optional(TransferSettlementSchema),
 	chain: optional(enumString<Chain>()),
 	explorerUrl: optString,
 	approval: optional(RefundApprovalSchema),
+	customerUuid: optString,
 	productName: optString,
 	customer: optional(CustomerSummarySchema),
 });
@@ -510,13 +516,14 @@ export const RefundSchema = object<Refund>({
 
 export const CustomerSchema = object<Customer>({
 	uuid: string,
-	name: string,
+	firstName: string,
 	lastName: optString,
 	email: string,
 	verified: boolean,
 	phoneNumber: optString,
 	address: optString,
 	reference: optString,
+	metadata: stringMap,
 	createdAt: timestamp,
 	test: boolean,
 	userUuid: optString,
@@ -531,11 +538,12 @@ const SubscriptionTermsSchema = object<SubscriptionTerms>({
 export const ProductSchema = object<Product>({
 	uuid: string,
 	name: string,
-	description: string,
-	price: number,
+	description: optString,
+	priceUsd: string,
 	createdAt: timestamp,
 	isActive: boolean,
 	reference: string,
+	metadata: stringMap,
 	subscription: optional(SubscriptionTermsSchema),
 	paymentLink: optString,
 	test: boolean,
@@ -546,8 +554,8 @@ export const ProductSchema = object<Product>({
 
 const MeMemberSchema = object<MeMember>({
 	userUuid: string,
-	name: string,
-	lastName: string,
+	firstName: string,
+	lastName: optString,
 	email: string,
 });
 
@@ -556,8 +564,12 @@ const MeSpaceSchema = object<MeSpace>({
 	organizationUuid: string,
 	organizationName: string,
 	userUuid: optString,
-	member: optional(MeMemberSchema),
 	test: boolean,
+	role: enumString<Role>(),
+	member: optional(MeMemberSchema),
+	organizationFeePercent: optString,
+	trustedAt: optTimestamp,
+	createdAt: timestamp,
 });
 
 export const MeSchema = object<Me>({
@@ -565,20 +577,20 @@ export const MeSchema = object<Me>({
 	apiKeyUuid: optString,
 	userUuid: optString,
 	role: optional(enumString<Role>()),
-	onBehalfOf: optString,
+	onBehalfOfUserUuid: optString,
 	space: optional(MeSpaceSchema),
 });
 
 const memberFields: Fields<Member> = {
 	userUuid: string,
-	name: string,
-	lastName: string,
+	firstName: string,
+	lastName: optString,
 	email: string,
 	test: boolean,
-	organizationFeePercent: number,
-	trustedAt: nullableTimestamp,
+	organizationFeePercent: string,
+	trustedAt: optTimestamp,
 	joinedAt: timestamp,
-	acceptedCurrencyIds: list(unsigned),
+	acceptedCurrencies: list(CurrencySchema),
 	spaceUuid: string,
 };
 export const MemberSchema = object<Member>(memberFields);
@@ -588,56 +600,57 @@ export const LedgerEntrySchema = object<LedgerEntry>({
 	type: enumString<LedgerEntryType>(),
 	description: string,
 	refundedTxUuid: optString,
-	amount: number,
-	metadata: nullable(PaymentMetadataSchema),
-	currencyId: unsigned,
+	amountUsd: string,
+	settlement: optional(SettlementSchema),
+	currency: CurrencySchema,
+	owed: string,
 	owedMinUnits: string,
-	owedUsd: number,
+	owedUsd: string,
 	createdAt: timestamp,
 });
 
 export const HeldFundsSchema = object<HeldFunds>({
 	ledgers: list(LedgerEntrySchema),
-	totalAmount: number,
+	totalUsd: string,
 });
 
-export const MemberHeldFundsSummarySchema = object<MemberHeldFundsSummary>({
+export const MemberHeldFundsSchema = object<MemberHeldFunds>({
 	userUuid: string,
-	totalAmount: number,
+	totalUsd: string,
 	count: integer,
 	oldestAt: timestamp,
 });
 
-export const InvitationSchema = object<Invitation>({
+const invitationFields: Fields<Invitation> = {
 	uuid: string,
-	test: nullable(boolean),
+	test: optBoolean,
 	email: string,
 	role: enumString<Role>(),
-	trustLayer: nullable(boolean),
-	organizationFeePercent: number,
+	holdFunds: optBoolean,
+	organizationFeePercent: optString,
 	redirectUrl: optString,
 	expiresAt: timestamp,
 	acceptedByUserUuid: optString,
-	acceptedAt: nullableTimestamp,
-	revokedAt: nullableTimestamp,
+	acceptedAt: optTimestamp,
+	revokedAt: optTimestamp,
 	createdAt: timestamp,
 	status: enumString<InvitationStatus>(),
-});
+};
+export const InvitationSchema = object<Invitation>(invitationFields);
 
-export const InvitationCreatedSchema = object<InvitationCreated>({
-	invitation: InvitationSchema,
+export const CreatedInvitationSchema = object<CreatedInvitation>({
+	...invitationFields,
 	link: string,
 });
 
 // ── Wallets ─────────────────────────────────────────────────────────────────
 
-const BalanceSchema = object<Balance>({ currency: string, balance: string, balanceUsd: number });
+const BalanceSchema = object<Balance>({ currency: CurrencySchema, ...tokenAmountFields });
 
 const TokenWalletSchema = object<TokenWallet>({
 	uuid: string,
 	createdAt: timestamp,
-	tokenId: unsigned,
-	token: CurrencySchema,
+	currency: CurrencySchema,
 	walletUuid: string,
 	balance: optional(BalanceSchema),
 });
@@ -645,11 +658,10 @@ const TokenWalletSchema = object<TokenWallet>({
 export const WalletSchema = object<Wallet>({
 	uuid: string,
 	createdAt: timestamp,
-	publicKey: string,
+	address: string,
 	test: boolean,
 	userUuid: optString,
 	tokenWallets: list(TokenWalletSchema),
-	currencyId: unsigned,
 	currency: CurrencySchema,
 });
 
@@ -658,42 +670,48 @@ export const WalletSchema = object<Wallet>({
 export const AccountingEventSchema = object<AccountingEvent>({
 	txTimeUtc: timestamp,
 	type: enumString<AccountingEventType>(),
-	paymentReference: optString,
-	relatedPaymentReference: optString,
+	reference: optString,
+	relatedReference: optString,
 	productName: optString,
 	customerReference: optString,
-	grossAmountUsd: optNumber,
-	platformFeeUsd: optNumber,
-	referralFeeUsd: number,
-	organizationFeeUsd: optNumber,
-	netAmountUsd: optNumber,
+	grossAmountUsd: optString,
+	platformFeeUsd: optString,
+	referralFeeUsd: optString,
+	organizationFeeUsd: optString,
+	netAmountUsd: optString,
 	chain: enumString<Chain>(),
 	currency: string,
 	currencyDecimals: unsigned,
-	currencyPriceUsd: optNumber,
+	currencyPriceUsd: optString,
 	grossAmount: optString,
+	grossAmountMinUnits: optString,
 	platformFee: optString,
-	referralFee: string,
+	platformFeeMinUnits: optString,
+	referralFee: optString,
+	referralFeeMinUnits: optString,
 	organizationFee: optString,
+	organizationFeeMinUnits: optString,
 	netAmount: optString,
+	netAmountMinUnits: optString,
 	networkFeesPaidBy: optional(enumString<NetworkFeesPayer>()),
 	networkFees: optString,
+	networkFeesMinUnits: optString,
 	networkFeesCurrency: optString,
 	networkFeesCurrencyDecimals: optional(unsigned),
-	networkFeesCurrencyPriceUsd: optNumber,
-	networkFeesUsd: optNumber,
-	platformFeePercent: optNumber,
-	referralFeePercent: number,
-	organizationFeePercent: optNumber,
+	networkFeesCurrencyPriceUsd: optString,
+	networkFeesUsd: optString,
+	platformFeePercent: optString,
+	referralFeePercent: optString,
+	organizationFeePercent: optString,
 	fromAddress: optString,
 	toAddress: optString,
 	txHash: optString,
-	blockNumberOrSlot: string,
-	tokenContractOrMint: string,
+	blockNumberOrSlot: optString,
+	tokenContractOrMint: optString,
 	explorerUrl: optString,
 	receiptUrl: optString,
-	paymentUuid: optString,
-	relatedPaymentUuid: optString,
+	txUuid: optString,
+	relatedTxUuid: optString,
 	productUuid: optString,
 	productReference: optString,
 	productDescription: optString,
@@ -710,7 +728,7 @@ const webhookEndpointFields: Fields<WebhookEndpoint> = {
 	events: list(enumString<EventType>()),
 	includeMembers: boolean,
 	payloadVersion: enumString<WebhookPayloadVersion>(),
-	description: string,
+	description: optString,
 	createdAt: timestamp,
 	rotatedAt: optTimestamp,
 	disabledAt: optTimestamp,
@@ -732,7 +750,7 @@ const DeliveryAttemptSchema = object<DeliveryAttempt>({
 	endpointUuid: string,
 	attempt: integer,
 	delivered: boolean,
-	skipped: optBoolean,
+	skipped: boolean,
 	statusCode: optional(integer),
 	error: optString,
 	durationMs: integer,
@@ -753,27 +771,19 @@ const PaymentCompletedSchema = object<PaymentCompleted>({
 	managementPageLink: optString,
 });
 
-const SubscriptionCreatedSchema = object<SubscriptionCreated>({
-	...subscriptionFields,
-	managementPageLink: optString,
-});
-
 const SubscriptionBilledSchema = object<SubscriptionBilled>({
-	...billFields,
-	subscriptionReference: optString,
-	subscriptionStatus: enumString<SubscriptionStatus>(),
+	bill: BillSchema,
+	subscription: SubscriptionSchema,
 });
 
 const SubscriptionStatusChangedSchema = object<SubscriptionStatusChanged>({
 	...subscriptionFields,
 	previousStatus: enumString<SubscriptionStatus>(),
-	managementPageLink: optString,
 });
 
 const SubscriptionActionRequiredChangedSchema = object<SubscriptionActionRequiredChanged>({
 	...subscriptionFields,
 	previousActionRequired: optional(enumString<ActionRequired>()),
-	managementPageLink: optString,
 });
 
 const SubscriptionBillingFailedSchema = object<SubscriptionBillingFailed>({
@@ -785,13 +795,12 @@ const SubscriptionBillingFailedSchema = object<SubscriptionBillingFailed>({
 	attempt: unsigned,
 	remainingAttempts: unsigned,
 	nextAttemptAt: optTimestamp,
-	managementPageLink: optString,
 });
 
 const SubscriptionUpcomingBillSchema = object<SubscriptionUpcomingBill>({
 	...subscriptionFields,
-	billingDate: timestamp,
-	amountUsd: number,
+	billingAt: timestamp,
+	amountUsd: string,
 	trialEnding: boolean,
 	balanceSufficient: optBoolean,
 	allowanceSufficient: optBoolean,
@@ -804,10 +813,10 @@ const HeldFundsReleasedSchema = object<HeldFundsReleased>({
 	createdAt: timestamp,
 	from: string,
 	to: string,
-	amount: number,
+	amount: string,
 	amountMinUnits: string,
-	currencyId: unsigned,
-	currency: nullable(CurrencySchema),
+	amountUsd: string,
+	currency: CurrencySchema,
 	txHash: string,
 	chain: optional(enumString<Chain>()),
 	explorerUrl: optString,
@@ -815,7 +824,7 @@ const HeldFundsReleasedSchema = object<HeldFundsReleased>({
 	userUuid: optString,
 	received: boolean,
 	type: enumString<TransferType>(),
-	txMetadata: TxMetadataSchema,
+	settlement: TransferSettlementSchema,
 	ledgers: list(LedgerEntrySchema),
 });
 
@@ -824,15 +833,15 @@ const WebhookTestSchema = object<WebhookTest>({ endpointUuid: string, message: s
 /** Each known event type's data schema. */
 export const EVENT_DATA_SCHEMAS: Record<string, Schema<unknown>> = {
 	'payment.completed': PaymentCompletedSchema,
-	'subscription.created': SubscriptionCreatedSchema,
+	'subscription.created': SubscriptionSchema,
 	'subscription.billed': SubscriptionBilledSchema,
 	'subscription.statusChanged': SubscriptionStatusChangedSchema,
 	'subscription.actionRequiredChanged': SubscriptionActionRequiredChangedSchema,
 	'subscription.billingFailed': SubscriptionBillingFailedSchema,
 	'subscription.upcomingBill': SubscriptionUpcomingBillSchema,
 	'refund.requested': RefundSchema,
-	'refund.completed': RefundSchema,
-	'refund.denied': RefundSchema,
+	'refund.approved': RefundSchema,
+	'refund.rejected': RefundSchema,
 	'member.joined': MemberJoinedSchema,
 	'member.removed': MemberSchema,
 	'heldFunds.released': HeldFundsReleasedSchema,

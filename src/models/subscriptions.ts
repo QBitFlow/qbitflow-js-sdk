@@ -11,44 +11,74 @@ import type {
 	CancellationReason,
 	SubscriptionStatus,
 } from '../enums.js';
-import type { Currency, CustomerSummary, Duration, TransactionListFilters } from './common.js';
-import type { FeeLine } from './payments.js';
+import type {
+	Currency,
+	CustomerSummary,
+	Duration,
+	FeeLine,
+	PageParams,
+	TokenAmount,
+	TransactionListFilters,
+} from './common.js';
 
-/** A subscription. Grant access while `now < currentPeriodEnd`. */
+/**
+ * A subscription (`sub@…`). Grant access while `now < currentPeriodEnd`, whatever the status
+ * (`hasAccess(subscription)`): the status says why, `actionRequired` what its customer must do.
+ */
 export interface Subscription {
 	/** The subscription's id (`sub@…`), its checkout session's for life. */
 	uuid: string;
-	/** The merchant's reference, set when creating its checkout. */
+	/**
+	 * Your reference for the subscription (an order or customer id), set when creating its
+	 * checkout.
+	 */
 	reference?: string;
 	/** When it was created. */
 	createdAt: string;
-	/** When it last changed. */
+	/** Its last change (a bill, a status, its metadata). */
 	updatedAt: string;
-	/** The subscriber's wallet. */
-	from: string;
-	/** The wallet that receives the bills. */
+	/**
+	 * The subscriber's wallet, the one it bills; absent when unknown (a trial not confirmed yet may
+	 * have none).
+	 */
+	from?: string;
+	/**
+	 * The wallet its bills pay: the merchant's (or, while the organization holds a member's funds,
+	 * the organization's).
+	 */
 	to: string;
-	/** The subscription's product. */
-	productUuid: string;
-	/** The transaction that created it on-chain (`''` on a trial until confirmed). */
-	subscriptionHash: string;
-	/** The currency billed. */
-	currencyId: number;
-	/** That currency. */
-	currency: Currency | null;
+	/** Its product (`products.get`); absent without one. */
+	productUuid?: string;
+	/**
+	 * The transaction that created it on-chain; absent until then (a trial, until its customer
+	 * confirms it).
+	 */
+	subscriptionHash?: string;
+	/** The currency (token) billed. */
+	currency: Currency;
 	/** The billing interval. */
 	frequency: Duration;
-	/** What remains of the allowance the subscriber granted, in the token's min units (a decimal string). */
-	allowance: string;
-	/** `trial`, `trialExpired`, `active`, `pastDue`, `paused`, `stopped` or `cancelled`. */
+	/**
+	 * `trial`, `trialExpired`, `active`, `pastDue`, `paused`, `stopped` or `cancelled`. Every
+	 * change sends `subscription.statusChanged`.
+	 */
 	status: SubscriptionStatus;
-	/** What its customer must do (`topUpAllowance`, `raiseMaximum`, `confirmTrial`); absent for nothing. */
+	/**
+	 * What its customer must do (`topUpAllowance`, `raiseMaximum`, `confirmTrial`); absent for
+	 * nothing. Every change sends `subscription.actionRequiredChanged`.
+	 */
 	actionRequired?: ActionRequired;
-	/** The end of the period paid for (or of the trial): grant access while `now < currentPeriodEnd`. */
+	/**
+	 * The paid-through date: grant access while `now < currentPeriodEnd`, whatever the status. A
+	 * trial: its end; `active`, `paused`, `stopped`: the end of the period paid for; `pastDue`: the
+	 * start of the unpaid period (past); `cancelled`: when it was cancelled, or the end of its last
+	 * paid period if that came first. Absent when unknown.
+	 */
 	currentPeriodEnd?: string;
 	/**
-	 * The price per period the customer subscribed at, in USD (a decimal string; `"0"` for old v1
-	 * subscriptions). Every bill charges it plus `fees`.
+	 * The price per period the customer subscribed at, in USD (a decimal string, `"9.99"`), locked
+	 * at signup (a free trial's too); never `"0"`. Every bill charges it plus `fees`, converted to
+	 * the token at the bill's price.
 	 */
 	priceUsd: string;
 	/**
@@ -57,30 +87,75 @@ export interface Subscription {
 	 * every bill charges `priceUsd` plus these lines. `[]` without any.
 	 */
 	fees: FeeLine[];
-	/** The customer's maximum per period, in min units (a decimal string); absent on trials and old subscriptions. */
-	maxAmountPerPeriod?: string;
-	/** The date of the last bill. */
-	lastBillingDate: string;
-	/** When the next bill is due (a trial: when it ends; stopped: when it is cancelled); absent once cancelled. */
-	nextBillingDate?: string;
-	/** When it was cancelled. */
+	/**
+	 * What the subscriber's wallet still lets QBitFlow bill, and the most one bill may charge, at
+	 * today's price; absent during a free trial (nothing signed yet).
+	 */
+	allowance?: Allowance;
+	/** When it was last billed; absent before its first bill (a trial). */
+	lastBilledAt?: string;
+	/**
+	 * When its next bill is due (a trial: when it ends; `stopped`: when it is cancelled); absent
+	 * once cancelled.
+	 */
+	nextBillingAt?: string;
+	/** When it was cancelled; absent until then. */
 	cancelledAt?: string;
-	/** Why it stopped or was cancelled. */
+	/** Why it stopped or was cancelled; absent while it runs. */
 	cancellationReason?: CancellationReason;
-	/** The earliest date it can be cancelled (`minPeriods`). */
-	minimumCancellationDate?: string;
+	/**
+	 * The earliest its customer may cancel it (the checkout's `minPeriods`); absent when they may
+	 * cancel it any time.
+	 */
+	cancellableAt?: string;
+	/**
+	 * Your own data: its checkout session's, copied when the subscription was created, then
+	 * changed with `subscriptions.update` (merged). `{}` without any.
+	 */
+	metadata: Record<string, string>;
+	/**
+	 * The subscription's page for its customer: where they top up its allowance, raise its
+	 * maximum, pause, resume or cancel it, and confirm a trial. Share it with them.
+	 */
+	managementPageLink?: string;
 	/** True in test mode. */
 	test: boolean;
 	/** The member whose space it is in; absent for the organization's own. */
 	userUuid?: string;
 	/** The customer, when QBitFlow has one. */
 	customerUuid?: string;
-	/** The merchant's reference of the customer. */
+	/** Your reference of the customer, as the checkout was given it. */
 	customerReference?: string;
-	/** Names the customer (API reads only). */
+	/** Names the customer, even once deleted (API reads only). */
 	customer?: CustomerSummary;
-	/** The failing bill's retries, while past due (API reads only). */
+	/**
+	 * Where its failing bill's retries stand (API reads only: webhooks tell each failure with
+	 * `subscription.billingFailed`); absent while no bill is failing.
+	 */
 	dunning?: DunningStatus;
+}
+
+/**
+ * What a subscriber's wallet still lets QBitFlow bill for their subscription (the allowance left
+ * on-chain), in the subscription's token, how many bills that covers at today's price, and the
+ * most one bill may charge, as they signed it. `amount`, `amountMinUnits` and `amountUsd` (its
+ * value at today's price; absent without one) come from {@link TokenAmount}.
+ */
+export interface Allowance extends TokenAmount {
+	/**
+	 * How many whole bills the allowance still covers at today's price (rounded down, before each
+	 * bill's network fee). 0 is a value: the customer must top it up (`actionRequired`
+	 * `topUpAllowance`) before the next bill. Absent without a price.
+	 */
+	remainingPeriods?: number;
+	/**
+	 * The most one bill may charge, as the subscriber signed it, in the token's units: a bill
+	 * above it waits for a new maximum (`actionRequired` `raiseMaximum`). Absent when none is
+	 * recorded.
+	 */
+	maxPerPeriod?: string;
+	/** The same as an on-chain integer. */
+	maxPerPeriodMinUnits?: string;
 }
 
 /** A past-due subscription's retries. */
@@ -108,42 +183,73 @@ export interface SubscriptionCancellation {
 	pending: boolean;
 }
 
-/** A test billing run's state (`subscriptions.executeTestBilling`). */
-export interface BillingState {
-	/** The bill's id, bare (its history entry is `sub-hist@<billUuid>`). */
+/**
+ * Where a test bill stands once its attempt settled (`subscriptions.testBill`): done (its
+ * `outcome`), waiting for its next attempt after a failure (`failureCode`, `nextAttemptAt`), or
+ * still running after 2 minutes. Its events are a live bill's (`subscription.billed`,
+ * `subscription.billingFailed`, `subscription.statusChanged`).
+ */
+export interface TestBill {
+	/**
+	 * The bill (`sub-hist@…`): the id its `subscription.billed` and `subscriptions.getBill` carry
+	 * once it is paid.
+	 */
 	billUuid: string;
-	/** `running`, `waiting`, `pending` or `done`. */
+	/**
+	 * `running` (being charged), `waiting` (for its next attempt, its due date or a trial's grace
+	 * period), `pending` (over the customer's maximum: waiting for a new one) or `done`.
+	 */
 	stage: BillingStage;
-	/** How it ended, once done. */
+	/** How it ended, once done: `paid`, `notDue`, `skipped`, `cancelled` or `paused`; absent before. */
 	outcome?: BillingOutcome;
-	/** The failed attempts so far. */
+	/** Its failed attempts so far. */
 	attempts: number;
-	/** When it tries again at the latest, while waiting or pending. */
-	nextAttempt?: string;
+	/** When it is tried again at the latest, while waiting or pending; absent otherwise. */
+	nextAttemptAt?: string;
 	/** The charge's transaction, once paid. */
 	txHash?: string;
-	/** The last failure's code (e.g. `insufficient_allowance`). */
+	/** Its last failure's code (e.g. `insufficient_allowance`). */
 	failureCode?: string;
 }
 
-/** Filters `subscriptions.list` (page size: server default 20, max 100). */
+/**
+ * Changes a subscription (`subscriptions.update`): its metadata only. Its price and terms are
+ * locked at signup; its status changes through its actions (`cancel`, its customer's pause and
+ * resume).
+ */
+export interface UpdateSubscriptionParams {
+	/**
+	 * Merged into the subscription's: a key set to a value sets it, a key set to `''` deletes it,
+	 * keys not named are kept (absent: unchanged). At most 50 keys once merged; each key 1 to 40
+	 * of `A-Z a-z 0-9 _ - . :`, each value at most 500 characters without control or
+	 * bidirectional characters.
+	 */
+	metadata?: Record<string, string>;
+}
+
+/** Filters `subscriptions.list`. */
 export interface SubscriptionListParams extends TransactionListFilters {
-	/** Only those in this status. */
+	/**
+	 * Only those in this status (cancelled ones are listed unless filtered out). Not checked
+	 * against the known statuses: a newer one is sent as is.
+	 */
 	status?: SubscriptionStatus;
-	/** Only the one with this reference. */
+	/**
+	 * Only the one with this reference (a page of 0 or 1 subscription;
+	 * `subscriptions.getByReference` reads it).
+	 */
 	reference?: string;
 }
 
-/** Pages `subscriptions.listBills` (page size: server default 20, max 100). */
-export interface BillListParams {
-	/** The page size (0 or absent = the server's default). */
-	limit?: number;
-	/** The previous page's `nextCursor`; absent for the first page. */
-	cursor?: string;
-}
+/** Pages `subscriptions.listBills`. */
+export type BillListParams = PageParams;
 
 /** `subscriptions.cancel`'s options. */
 export interface CancelSubscriptionParams {
-	/** Cancel now (absent or `true`, the default); `false` stops it at the end of the current period. */
+	/**
+	 * Cancel now (absent or `true`, the default: status `cancelled`); `false` stops it now
+	 * (status `stopped`, never billed again) and cancels it when its paid period ends
+	 * (`nextBillingAt`). A trial is cancelled immediately only (`false`: 400).
+	 */
 	immediate?: boolean;
 }

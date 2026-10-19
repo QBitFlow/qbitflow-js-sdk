@@ -55,46 +55,57 @@ export function queryEscape(value: string): string {
 
 /** A query string under construction: unset values are omitted, keys are sorted. */
 export class Query {
-	private readonly values = new Map<string, string>();
+	private readonly values = new Map<string, string[]>();
 
-	/** Sets `key` to `value`. */
+	/** Sets `key` to `value` (replacing its values). */
 	set(key: string, value: string): this {
-		this.values.set(key, value);
+		this.values.set(key, [value]);
+		return this;
+	}
+
+	/** Adds one more `value` for `key` (a repeated key: `?status=a&status=b`). */
+	add(key: string, value: string): this {
+		const list = this.values.get(key);
+		if (list) list.push(value);
+		else this.values.set(key, [value]);
 		return this;
 	}
 
 	/** Sets a string when non-empty. */
 	string(key: string, value: string | undefined | null): this {
-		if (typeof value === 'string' && value !== '') this.values.set(key, value);
+		if (typeof value === 'string' && value !== '') this.set(key, value);
 		return this;
 	}
 
 	/** Sets a flag when `true` (a `false` flag is the default and is not sent). */
 	flag(key: string, value: boolean | undefined | null): this {
-		if (value === true) this.values.set(key, 'true');
+		if (value === true) this.set(key, 'true');
 		return this;
 	}
 
 	/** Sets a tri-state boolean when given: `true` or `false`. */
 	bool(key: string, value: boolean | undefined | null): this {
-		if (typeof value === 'boolean') this.values.set(key, String(value));
+		if (typeof value === 'boolean') this.set(key, String(value));
 		return this;
 	}
 
-	/** Sets an integer when non-zero, in decimal. */
+	/** Sets an integer when given (`0` included), in decimal. */
 	int(key: string, value: number | undefined | null): this {
-		if (typeof value === 'number' && value !== 0) this.values.set(key, String(value));
+		if (typeof value === 'number') this.set(key, String(value));
 		return this;
 	}
 
 	/** Sets an instant when given: a `Date` as ISO 8601 (UTC), a string as is (RFC 3339). */
 	time(key: string, value: Date | string | undefined | null): this {
-		if (value instanceof Date) this.values.set(key, value.toISOString());
-		else if (typeof value === 'string' && value !== '') this.values.set(key, value);
+		if (value instanceof Date) this.set(key, value.toISOString());
+		else if (typeof value === 'string' && value !== '') this.set(key, value);
 		return this;
 	}
 
-	/** Sets a cursor page's `limit` and `cursor`. */
+	/**
+	 * Sets a cursor page's `limit` (when given, `0` included: the server treats 0 or less as its
+	 * default) and `cursor` (when non-empty).
+	 */
 	page(limit: number | undefined, cursor: string | undefined): this {
 		return this.int('limit', limit).string('cursor', cursor);
 	}
@@ -103,7 +114,11 @@ export class Query {
 	encode(): string {
 		return [...this.values.keys()]
 			.sort()
-			.map((key) => `${queryEscape(key)}=${queryEscape(this.values.get(key) as string)}`)
+			.flatMap((key) =>
+				(this.values.get(key) as string[]).map(
+					(value) => `${queryEscape(key)}=${queryEscape(value)}`
+				)
+			)
 			.join('&');
 	}
 }

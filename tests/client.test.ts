@@ -50,6 +50,7 @@ describe('constructor', () => {
 			c.customers,
 			c.checkoutSessions,
 			c.payments,
+			c.transactions,
 			c.failures,
 			c.subscriptions,
 			c.refunds,
@@ -116,7 +117,7 @@ describe('headers', () => {
 		const ts = await testServer(staticReply(200, '{"credential":"apiKey"}'));
 		const { client } = testClient(ts);
 		await client.me();
-		await client.products.create({ name: 'Pro', price: 1 }, { requestId: 'req-1.a:b_c' });
+		await client.products.create({ name: 'Pro', priceUsd: '1' }, { requestId: 'req-1.a:b_c' });
 
 		const [get, post] = ts.recorded;
 		for (const r of ts.recorded) {
@@ -126,10 +127,11 @@ describe('headers', () => {
 			expect(r.headers['on-behalf-of']).toBeUndefined();
 		}
 		expect([get.method, get.path]).toEqual(['GET', '/me']);
+		expect([post.method, post.path]).toEqual(['POST', '/products']);
 		for (const h of ['content-type', 'idempotency-key', 'x-request-id'])
 			expect(get.headers[h]).toBeUndefined();
 		expect(post.headers['content-type']).toBe('application/json');
-		expect(post.body).toBe('{"name":"Pro","price":1}');
+		expect(post.body).toBe('{"name":"Pro","priceUsd":"1"}');
 		expect(post.headers['x-request-id']).toBe('req-1.a:b_c');
 		expect(post.headers['idempotency-key']).toMatch(UUID_V4);
 	});
@@ -165,6 +167,8 @@ describe('onBehalfOf', () => {
 		];
 		for (const [c, o] of calls) await c.me(o);
 		calls.forEach(([, , want], i) => expect(ts.recorded[i].headers['on-behalf-of']).toBe(want));
+		// The organization level omits the header: it is never sent empty or blank (a 403).
+		for (const r of ts.recorded) expect(r.headers['on-behalf-of']).not.toBe('');
 
 		const configured = new QBitFlow(TEST_API_KEY, { baseUrl: ts.url, onBehalfOf: MEMBER });
 		await configured.me();
@@ -184,6 +188,13 @@ describe('onBehalfOf', () => {
 			expect(err.fieldErrors[0].field).toBe('onBehalfOf');
 		}
 		expect(await rejection(client.me({ onBehalfOf: '123' }))).toBeInstanceOf(ValidationError);
+		// A whitespace-only value is invalid, not the organization level: only '' is.
+		for (const blank of [' ', '\t', `${MEMBER} `]) {
+			expect(thrown(() => client.onBehalfOf(blank))).toBeInstanceOf(ValidationError);
+			expect(await rejection(client.me({ onBehalfOf: blank }))).toBeInstanceOf(
+				ValidationError
+			);
+		}
 		expect(ts.recorded).toHaveLength(0);
 		await client.me();
 		// Uppercase UUIDs are UUIDs, and are sent as given.
@@ -201,7 +212,7 @@ describe('me', () => {
 					credential: 'apiKey',
 					apiKeyUuid: '019cadfd-8900-7b00-8000-0000000000f1',
 					role: 'user',
-					onBehalfOf: MEMBER,
+					onBehalfOfUserUuid: MEMBER,
 					space: {
 						uuid: '019eca82-5680-7c00-8000-0000000000b2',
 						organizationUuid: '019cadfd-8900-7a00-8000-0000000000a1',
@@ -209,13 +220,18 @@ describe('me', () => {
 						userUuid: MEMBER,
 						member: {
 							userUuid: MEMBER,
-							name: 'Ada',
+							firstName: 'Ada',
 							lastName: 'Lovelace',
 							email: 'ada@example.com',
 						},
 						test: true,
+						role: 'owner',
+						organizationFeePercent: '7.5',
+						trustedAt: '2026-10-02T12:00:00Z',
+						createdAt: '2026-10-01T12:00:00Z',
 					},
 					user: { ignored: true },
+					spaces: [],
 				})
 			)
 		);
@@ -223,10 +239,14 @@ describe('me', () => {
 		const me = await client.me();
 		expect(me.credential).toBe('apiKey');
 		expect(me.role).toBe('user');
-		expect(me.onBehalfOf).toBe(MEMBER);
+		expect(me.onBehalfOfUserUuid).toBe(MEMBER);
 		expect(me.userUuid).toBeUndefined();
 		expect(me.space?.test).toBe(true);
 		expect(me.space?.organizationName).toBe('Example Shop');
-		expect(me.space?.member?.name).toBe('Ada');
+		expect(me.space?.member?.firstName).toBe('Ada');
+		expect(me.space?.role).toBe('owner');
+		expect(me.space?.organizationFeePercent).toBe('7.5');
+		expect(me.space?.trustedAt).toBe('2026-10-02T12:00:00Z');
+		expect(me.space?.createdAt).toBe('2026-10-01T12:00:00Z');
 	});
 });

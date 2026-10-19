@@ -44,4 +44,4 @@ if (process.env.QBITFLOW_BASE_URL) {
 }
 const client = fromEnvironment();
 const me = await client.me();
-console.log(`fromEnv: role ${me.role}, on behalf of ${me.onBehalfOf ?? 'nobody'}`);
+console.log(`fromEnv: role ${me.role}, on behalf of ${me.onBehalfOfUserUuid ?? 'nobody'}`);

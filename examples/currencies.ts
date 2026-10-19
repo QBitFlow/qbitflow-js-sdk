@@ -8,9 +8,11 @@ import { QBitFlow } from 'qbitflow';
 const client = QBitFlow.fromEnv();
 
 // docs:start currencies-list
-// A public route limited to 60 requests a minute per IP: cache the list at start-up.
-const currencies = await client.currencies.listAvailable();
-for (const currency of currencies) {
-	console.log(`${currency.id}: ${currency.symbol}, ${currency.decimals} decimals`);
+// A public route limited to 60 requests a minute per IP: cache the list at start-up. One bounded
+// list (an array): the live currencies; test: true, the test networks'; main: true, the chains'
+// native coins only.
+const currencies = await client.currencies.list();
+for (const { id, code, name, chain, decimals } of currencies) {
+	console.log(`${id}: ${code} (${name} on ${chain}), ${decimals} decimals`);
 }
 // docs:end currencies-list

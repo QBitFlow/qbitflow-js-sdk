@@ -160,11 +160,11 @@ describe('error payload', () => {
 	});
 
 	it('builds client-side errors without a status', () => {
-		const ve = fieldError('price', 'must be a number above 0');
+		const ve = fieldError('priceUsd', 'must be a decimal string');
 		expect(ve.status).toBeUndefined();
 		expect(ve.code).toBe('');
 		expect(ve.details).toEqual({});
-		expect(ve.message).toBe('validation failed; price: price must be a number above 0');
+		expect(ve.message).toBe('validation failed; priceUsd: priceUsd must be a decimal string');
 		expect(ve).toBeInstanceOf(QBitFlowError);
 	});
 });

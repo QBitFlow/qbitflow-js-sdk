@@ -68,7 +68,7 @@ export { formatAmount, hasAccess, parseAmount, Placeholders } from './helpers.js
 export type { ProductsService } from './services/products.js';
 export type { CustomersService } from './services/customers.js';
 export type { CheckoutSessionsService, WaitOptions } from './services/checkout.js';
-export type { FailuresService, PaymentsService } from './services/payments.js';
+export type { FailuresService, PaymentsService, TransactionsService } from './services/payments.js';
 export type { SubscriptionsService } from './services/subscriptions.js';
 export type { RefundsService } from './services/refunds.js';
 export type { InvitationsService, MembersService } from './services/members.js';

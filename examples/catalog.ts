@@ -14,7 +14,7 @@ async function createProduct(client: QBitFlow): Promise<void> {
 	const product = await client.products.create({
 		name: 'T-shirt',
 		description: 'Blue, size M',
-		price: 4.99, // USD
+		priceUsd: '4.99', // USD, a decimal string, never a float
 		reference: 'tshirt-blue-m', // your own id: unique per space
 	});
 	console.log(`product ${product.uuid}, payment link ${product.paymentLink}`);
@@ -30,10 +30,9 @@ try {
 
 {
 	// docs:start products-list
-	// The active products; includeHidden: true adds the inactive ones.
-	const products = await client.products.list();
-	for (const product of products) {
-		console.log(`${product.reference}: ${product.name}, ${product.price} USD`);
+	// iterate walks every page (list returns one); hidden products only with includeHidden.
+	for await (const product of client.products.iterate()) {
+		console.log(`${product.reference}: ${product.name}, ${product.priceUsd} USD`);
 	}
 	// docs:end products-list
 }
@@ -44,8 +43,10 @@ try {
 	for (const customer of page.items) {
 		console.log(`${customer.uuid} ${customer.email}`);
 	}
-	// null on the last page; else pass it back as cursor to read the next one.
-	console.log(`next cursor: ${page.nextCursor}`);
+	if (page.hasMore) {
+		// Pass it back, verbatim, as the cursor param for the next page.
+		console.log(`next cursor: ${page.nextCursor}`);
+	}
 	// docs:end customers-list
 }
 
