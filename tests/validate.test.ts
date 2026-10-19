@@ -97,24 +97,6 @@ describe('rules', () => {
 				P.createWebhookEndpointBody({ url: 'https://x.io', description: 'x'.repeat(201) })
 			)
 		).toEqual(['description']);
-		expect(
-			fields(() =>
-				P.createRefundBody({
-					txUuid: `pay@${MEMBER}`,
-					reason: 'Broken, can you refund?',
-					merchantMessage: 'Sorry\nTeam',
-				})
-			)
-		).toEqual([]);
-		expect(
-			fields(() =>
-				P.createRefundBody({
-					txUuid: `pay@${MEMBER}`,
-					reason: '{x}',
-					merchantMessage: 'm'.repeat(501),
-				})
-			)
-		).toEqual(['reason', 'merchantMessage']);
 	});
 
 	it('reference', () => {
@@ -307,37 +289,7 @@ describe('rules', () => {
 	});
 
 	// The percent rule: a decimal string, digits with at most 2 decimals, at most 16 characters,
-	// from 0 (above 0 for a refund) to its maximum, compared exactly.
-	it('percent: refundPercent (0, 100]', () => {
-		const refund = (refundPercent: unknown) => () =>
-			P.createRefundBody({ txUuid: MEMBER, refundPercent } as never);
-		for (const p of ['0.01', '1.5', '33.33', '50', '100', '100.00', '007.5']) {
-			expect(fields(refund(p))).toEqual([]);
-		}
-		for (const p of [
-			'0',
-			'0.00',
-			'-1',
-			'100.01',
-			'101',
-			'1.155',
-			'0.30000000000000004',
-			'1e1',
-			'.5',
-			'5.',
-			'50%',
-			' 5',
-			'00000000000000050', // 17 characters: over the 16-character limit
-			'NaN',
-			'Infinity',
-			50, // never a number
-		]) {
-			expect(fields(refund(p))).toEqual(['refundPercent']);
-		}
-		expect(fields(refund(undefined))).toEqual([]); // the default, 100
-		expect(fields(refund(''))).toEqual([]); // '' = the default, not sent
-	});
-
+	// from 0 to its maximum, compared exactly.
 	it('percent: organizationFeePercent [0, 50]', () => {
 		const member = (organizationFeePercent: unknown) => () =>
 			P.updateMemberBody({ organizationFeePercent } as never);
@@ -349,17 +301,37 @@ describe('rules', () => {
 			} as never);
 		for (const p of [
 			'0',
+			'0.00',
 			'0.05',
 			'1.5',
+			'33.33',
 			'50',
 			'50.00',
+			'007.5',
 			'000000000000050',
-			'0000000000000050',
+			'0000000000000050', // 16 characters: the limit
 		]) {
 			expect(fields(member(p))).toEqual([]);
 			expect(fields(invite(p))).toEqual([]);
 		}
-		for (const p of ['-0.01', '50.01', '51', '1.234', '1e1', '00000000000000050', 10]) {
+		for (const p of [
+			'-0.01',
+			'-1',
+			'50.01',
+			'51',
+			'1.234',
+			'1.155',
+			'0.30000000000000004',
+			'1e1',
+			'.5',
+			'5.',
+			'50%',
+			' 5',
+			'00000000000000050', // 17 characters: over the 16-character limit
+			'NaN',
+			'Infinity',
+			10, // never a number
+		]) {
 			expect(fields(member(p))).toEqual(['organizationFeePercent']);
 			expect(fields(invite(p))).toEqual(['organizationFeePercent']);
 		}
@@ -647,8 +619,7 @@ describe('rules', () => {
 		]) {
 			expect(isTxId(id)).toBe(false);
 		}
-		expect(fields(() => P.createRefundBody({} as never))).toEqual(['txUuid']);
-		expect(fields(() => P.createRefundBody({ txUuid: 'order-1' }))).toEqual(['txUuid']);
+		expect(fields(() => P.refundListQuery({ txUuid: 'order-1' }))).toEqual(['txUuid']);
 		expect(fields(() => P.failureListQuery({ subscriptionUuid: 'sub@nope' }))).toEqual([
 			'subscriptionUuid',
 		]);
@@ -725,7 +696,7 @@ describe('rules', () => {
 	});
 
 	it('refund statuses', () => {
-		const all = ['pending', 'approved', 'rejected', 'cancelled', 'failed'];
+		const all = ['pending', 'approved', 'rejected', 'failed', 'pending']; // duplicates allowed
 		const run = (status: unknown) => fields(() => P.refundListQuery({ status } as never));
 		expect(run(all)).toEqual([]);
 		expect(run([])).toEqual([]);
@@ -733,6 +704,7 @@ describe('rules', () => {
 		expect(run([...all, 'pending'])).toEqual(['status']);
 		expect(run(['approved', 'completed', ''])).toEqual(['status[1]', 'status[2]']);
 		expect(run(['denied'])).toEqual(['status[0]']);
+		expect(run(['approved', 'cancelled'])).toEqual(['status[1]']); // retired: unknown
 		expect(run([42])).toEqual(['status[0]']);
 		expect(run('pending')).toEqual(['status']);
 		// A repeated ?status=, in the order given.
@@ -967,16 +939,6 @@ describe('update semantics: what the bodies send', () => {
 				expiresInMinutes: 30,
 				frequency: { value: 1, unit: 'weeks' },
 			},
-		],
-		[
-			'refund',
-			() => P.createRefundBody({ txUuid: `pay@${MEMBER}` }),
-			{ txUuid: `pay@${MEMBER}` },
-		],
-		[
-			'refund 50 %',
-			() => P.createRefundBody({ txUuid: `pay@${MEMBER}`, refundPercent: '50' }),
-			{ txUuid: `pay@${MEMBER}`, refundPercent: '50' },
 		],
 		[
 			'money stays as typed',

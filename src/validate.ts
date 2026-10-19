@@ -304,20 +304,18 @@ export class Validator {
 
 	/**
 	 * Checks a rate in percent sent as a decimal **string**: digits with at most 2 decimals, at
-	 * most 16 characters, from 0 (above 0 when `positive`) to `max`, compared exactly.
+	 * most 16 characters, from 0 to `max`, compared exactly.
 	 */
-	percent(field: string, value: unknown, max: number, positive: boolean): void {
+	percent(field: string, value: unknown, max: number): void {
 		if (
 			typeof value !== 'string' ||
 			value.length > 16 ||
 			!DECIMAL.test(value) ||
-			(positive && isZeroDecimal(value)) ||
 			compareDecimal(value, max) > 0
 		) {
-			const low = positive ? 'above 0' : '0';
 			this.add(
 				field,
-				`must be a percentage as a decimal string (e.g. "7.5"): from ${low} to ${max}, with at most 2 decimals`
+				`must be a percentage as a decimal string (e.g. "7.5"): from 0 to ${max}, with at most 2 decimals`
 			);
 		}
 	}

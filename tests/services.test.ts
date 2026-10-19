@@ -712,7 +712,7 @@ const ROUTES: RouteCase[] = [
 				{
 					limit: 5,
 					cursor: CURSOR,
-					status: ['pending', 'cancelled'],
+					status: ['pending', 'rejected'],
 					txUuid: PAY_ID,
 					includeMembers: false,
 					held: true,
@@ -722,7 +722,7 @@ const ROUTES: RouteCase[] = [
 		method: 'GET',
 		path: '/refunds',
 		// The statuses are a repeated key, in the order given.
-		query: `cursor=${CURSOR}&held=true&includeMembers=false&limit=5&status=pending&status=cancelled&txUuid=${PAY_ID_Q}`,
+		query: `cursor=${CURSOR}&held=true&includeMembers=false&limit=5&status=pending&status=rejected&txUuid=${PAY_ID_Q}`,
 		reply: page(REFUND),
 		check: (v) =>
 			expect([v.items.length, !!v.items[0].approval, v.items[0].refundPercent]).toEqual([
@@ -753,42 +753,6 @@ const ROUTES: RouteCase[] = [
 				'USDC',
 			]),
 	},
-	{
-		name: 'refunds.create',
-		call: (c, o) =>
-			c.refunds.create(
-				{
-					txUuid: BILL_ID,
-					refundPercent: '50.50',
-					reason: 'Damaged',
-					merchantMessage: 'Sorry',
-				},
-				o
-			),
-		method: 'POST',
-		path: '/refunds',
-		idempotent: true,
-		status: 201,
-		body: {
-			txUuid: BILL_ID,
-			refundPercent: '50.50',
-			reason: 'Damaged',
-			merchantMessage: 'Sorry',
-		},
-		reply: REFUND,
-		check: (v) => expect([v.uuid, v.txUuid]).toEqual(['refund@1', 'pay@1']),
-	},
-	{
-		name: 'refunds.create minimal',
-		call: (c, o) => c.refunds.create({ txUuid: PAY_ID, refundPercent: '' }, o),
-		method: 'POST',
-		path: '/refunds',
-		idempotent: true,
-		status: 201,
-		body: { txUuid: PAY_ID }, // '' = the default, 100: not sent
-		reply: REFUND,
-	},
-
 	// Members.
 	{
 		name: 'members.list',
@@ -1208,7 +1172,7 @@ describe('every method sends its request and decodes its answer', () => {
 });
 
 describe('retry policy per method', () => {
-	it('retries a 503 on the reads and the 7 idempotent creates only, with a stable key', async () => {
+	it('retries a 503 on the reads and the 6 idempotent creates only, with a stable key', async () => {
 		const idempotent = new Set<string>();
 		for (const rc of ROUTES) {
 			const ts = await testServer((req, res, n) => {
@@ -1253,7 +1217,6 @@ describe('retry policy per method', () => {
 			'customers.create',
 			'invitations.create',
 			'products.create',
-			'refunds.create',
 			'webhooks.endpoints.create',
 		]);
 	});
@@ -1432,7 +1395,6 @@ describe('validation before the request', () => {
 			'',
 			(c) => c.checkoutSessions.createSubscription(undefined as never),
 		],
-		['refunds.create no params', '', (c) => c.refunds.create(undefined as never)],
 		['members.update no params', '', (c) => c.members.update(MEMBER, undefined as never)],
 		['invitations.create no params', '', (c) => c.invitations.create(undefined as never)],
 		[
@@ -1558,21 +1520,10 @@ describe('validation before the request', () => {
 			'status',
 			(c) =>
 				c.refunds.list({
-					status: ['pending', 'approved', 'rejected', 'cancelled', 'failed', 'pending'],
+					status: ['pending', 'approved', 'rejected', 'failed', 'pending', 'approved'],
 				}),
 		],
 		['refunds.list txUuid', 'txUuid', (c) => c.refunds.list({ txUuid: 'order-1' })],
-		[
-			'refunds.create percent zero',
-			'refundPercent',
-			(c) => c.refunds.create({ txUuid: PAY_ID, refundPercent: '0' }),
-		],
-		[
-			'refunds.create percent above 100',
-			'refundPercent',
-			(c) => c.refunds.create({ txUuid: PAY_ID, refundPercent: '100.01' }),
-		],
-		['refunds.create txUuid', 'txUuid', (c) => c.refunds.create({ txUuid: '' })],
 		[
 			'members.update fee',
 			'organizationFeePercent',

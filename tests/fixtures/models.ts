@@ -11,7 +11,7 @@ const fxNative = `{"id":1,"code":"ETH","symbol":"ETH","name":"Ethereum","chain":
 	"test":false}`;
 const fxSummary = `{"uuid":"c-1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com",
 	"reference":"crm-1","deleted":true}`;
-const fxRefundSm = `{"uuid":"refund@1","status":"cancelled","initiatedBy":"merchant",
+const fxRefundSm = `{"uuid":"refund@1","status":"approved","initiatedBy":"merchant",
 	"refundPercent":"50","amount":"5.0021","amountMinUnits":"5002100","amountUsd":"5.0021",
 	"createdAt":"2026-10-01T12:00:00Z","respondedAt":"2026-10-01T13:00:00Z"}`;
 const fxAttempt = `{"status":"failed","code":"insufficient_funds","message":"Not enough USDC",

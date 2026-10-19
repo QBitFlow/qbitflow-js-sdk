@@ -15,8 +15,9 @@ import type {
 
 /**
  * A refund of a payment (`pay@…`) or a subscription bill (`sub-hist@…`): a customer's request the
- * merchant approves or rejects, or a refund the merchant starts (`refunds.create`). It is also the
- * data of the `refund.requested`, `refund.approved` and `refund.rejected` events.
+ * merchant approves or rejects, or a refund the merchant sent from the dashboard (recorded once its
+ * transfer confirmed: `approved`, nothing before). Refunds are read only here. It is also the data
+ * of the `refund.requested`, `refund.approved` and `refund.rejected` events.
  */
 export interface Refund {
 	/** The refund's id (`refund@…`). */
@@ -29,12 +30,11 @@ export interface Refund {
 	 */
 	reason?: string;
 	/**
-	 * `pending` (not answered yet: a request, or a merchant's refund not sent), `approved` (its
-	 * transfer confirmed), `rejected` or `cancelled` (a merchant's refund dropped before it was
-	 * sent). `failed` is declared but never set.
+	 * `pending` (a customer's request not answered yet), `approved` (its transfer confirmed) or
+	 * `rejected`. `failed` is declared but never set.
 	 */
 	status: RefundStatus;
-	/** When it was requested (or started by the merchant). */
+	/** When it was requested (or prepared by the merchant). */
 	createdAt: string;
 	/**
 	 * The merchant's message to the customer (why it rejected the request, or a note on a refund
@@ -51,7 +51,7 @@ export interface Refund {
 	txHash?: string;
 	/**
 	 * `customer` (requested by the customer, the merchant answers) or `merchant` (sent by the
-	 * merchant without a request; until it is sent, a draft that blocks nothing).
+	 * merchant without a request, from the dashboard: recorded once confirmed, `approved`).
 	 */
 	initiatedBy: RefundInitiator;
 	/**
@@ -95,8 +95,9 @@ export interface Refund {
 	/** The refund transfer on the chain's explorer, once sent. */
 	explorerUrl?: string;
 	/**
-	 * Where the refund transfer stands while the refund is pending and it was sent: being
-	 * confirmed, or its last attempt failed (API reads only, never in webhooks).
+	 * Where the refund transfer stands while the request is pending and it was sent (approved, or
+	 * answered by the merchant's own refund): being confirmed, or its last attempt failed (API
+	 * reads only, never in webhooks).
 	 */
 	approval?: RefundApproval;
 	/** The refunded transaction's customer (API reads only). */
@@ -107,7 +108,7 @@ export interface Refund {
 	customer?: CustomerSummary;
 }
 
-/** Where a pending refund's transfer stands once sent. */
+/** Where a pending request's refund transfer stands once sent. */
 export interface RefundApproval {
 	/**
 	 * `waitingConfirmation` (sent, being confirmed on-chain) or `created` (its last attempt failed:
@@ -120,30 +121,11 @@ export interface RefundApproval {
 	lastAttempt?: Attempt;
 }
 
-/** Starts a refund (`refunds.create`): a pending refund the merchant signs in the dashboard. */
-export interface CreateRefundParams {
-	/**
-	 * Required: the space's payment (`pay@…`) or bill (`sub-hist@…`) to refund, or its bare
-	 * UUID.
-	 */
-	txUuid: string;
-	/**
-	 * The share of what the customer paid to send back, a percent **string** (`"50"`): above 0, at
-	 * most 100, at most 2 decimals (absent or `''` = `"100"`: everything the customer paid,
-	 * network fee included).
-	 */
-	refundPercent?: string;
-	/** Why the merchant refunds (optional, at most 500 characters). */
-	reason?: string;
-	/** A note to the customer (optional, at most 500 characters). */
-	merchantMessage?: string;
-}
-
 /** Filters `refunds.list`. */
 export interface RefundListParams extends PageParams {
 	/**
 	 * Only the refunds in one of these statuses (at most 5 of `pending`, `approved`, `rejected`,
-	 * `cancelled`, `failed`), sent as a repeated `?status=`; absent or `[]`: every status.
+	 * `failed`), sent as a repeated `?status=`; absent or `[]`: every status.
 	 * `['pending']` lists the ones awaiting an answer.
 	 */
 	status?: RefundStatus[];

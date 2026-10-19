@@ -110,7 +110,7 @@ export interface CustomerSummary {
 export interface RefundSummary {
 	/** The refund (`refund@…`). */
 	uuid: string;
-	/** `pending`, `approved`, `rejected` or `cancelled`. */
+	/** `pending`, `approved` or `rejected`. */
 	status: RefundStatus;
 	/** `customer` (a request) or `merchant`. */
 	initiatedBy: RefundInitiator;
@@ -125,9 +125,9 @@ export interface RefundSummary {
 	amountMinUnits: string;
 	/** The same in USD, at the payment's time (a decimal string); absent when unknown. */
 	amountUsd?: string;
-	/** When it was requested or started. */
+	/** When it was requested or prepared. */
 	createdAt: string;
-	/** When it was approved (confirmed), rejected or cancelled; absent while pending. */
+	/** When it was approved (confirmed) or rejected; absent while pending. */
 	respondedAt?: string;
 }
 

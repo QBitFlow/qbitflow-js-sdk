@@ -46,7 +46,7 @@ something with a fixed reference handles the conflict of a second run, or expire
 | `npm run catalog` | `QBITFLOW_API_KEY` (it creates the product once, and opens then expires a checkout for it) |
 | `npm run payments` | `QBITFLOW_API_KEY`; `PAYMENT_UUID` (`pay@…`), else the first payment listed |
 | `npm run subscriptions` | `QBITFLOW_API_KEY`; `SUBSCRIPTION_UUID` (`sub@…`), else the first active one; `TEST_BILL=1` to bill it now (test mode); `CANCEL=1` to stop it at the end of its period |
-| `npm run refunds` | `QBITFLOW_API_KEY`; `PAYMENT_UUID` (`pay@…`) to refund half of that payment |
+| `npm run refunds` | `QBITFLOW_API_KEY` (it lists the pending refunds and reads one) |
 | `npm run marketplace` | an organization key in `QBITFLOW_API_KEY`. Without `MEMBER_UUID`: lists members and invitations, `INVITE=1` invites `seller@example.com`, `REVOKE_INVITATION_UUID` revokes an invitation. With `MEMBER_UUID` (a member's `userUuid`): reads them and acts for them; `SET_FEE=1`, `TRUST=1`, `REMOVE=1` change them |
 | `npm run webhooks` | `QBITFLOW_API_KEY`; `CREATE_ENDPOINT=1` to register an endpoint and write its secret to `./qbitflow-webhook-secret` |
 | `npm run webhook-handler` | `QBITFLOW_WEBHOOK_SECRET` (the `whsec_…` secret `webhooks.endpoints.create` returned); `QBITFLOW_API_KEY` for the follow-up reads. Listens on `:8080`, `POST /webhooks/qbitflow` |

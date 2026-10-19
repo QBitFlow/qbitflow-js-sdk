@@ -54,7 +54,6 @@ export const METHODS: Record<string, Call> = {
 
 	'refunds.list': (c, a, o) => c.refunds.list(a.params, o),
 	'refunds.get': (c, a, o) => c.refunds.get(a.uuid, o),
-	'refunds.create': (c, a, o) => c.refunds.create(a.params, o),
 
 	'members.list': (c, a, o) => c.members.list(a.params, o),
 	'members.get': (c, a, o) => c.members.get(a.userUuid, o),

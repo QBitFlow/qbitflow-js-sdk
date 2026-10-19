@@ -57,7 +57,7 @@ export interface RequestOptions {
 	 */
 	onBehalfOf?: string;
 	/**
-	 * The `Idempotency-Key` of one of the 7 idempotent creates (the SDK otherwise generates a UUID
+	 * The `Idempotency-Key` of one of the 6 idempotent creates (the SDK otherwise generates a UUID
 	 * v4 per call), e.g. to retry a create across processes: 1 to 255 printable ASCII characters
 	 * without spaces. Other methods ignore it.
 	 */
@@ -84,7 +84,7 @@ export interface Endpoint {
 	/** Encoded as JSON (absent: no body, no `Content-Type`). */
 	body?: unknown;
 	/**
-	 * One of the 7 idempotent creates: sends an `Idempotency-Key` (generated per call, or the
+	 * One of the 6 idempotent creates: sends an `Idempotency-Key` (generated per call, or the
 	 * option's) and is retried like a read. Other writes never are.
 	 */
 	idempotent?: boolean;

@@ -67,7 +67,7 @@ npm install qbitflow@^3
 | `new QBitFlow({ apiKey, baseUrl, timeout, maxRetries })` (`QBitFlowConfig`) | the same (`ClientConfig`; the options alone are `ClientOptions`) |
 | `timeout` (`0` meant the default) | `timeout`: each attempt, in ms (default 30000, must be positive); bound the whole call, retries included, with a `signal` |
 | `maxRetries` (`0` meant the default: 3) | `maxRetries` (default 3); **`0` disables retries** |
-| every method retried on 5xx and network errors, POSTs included | only reads and the 7 idempotent creates are retried ([README](README.md#retries-and-idempotency)) |
+| every method retried on 5xx and network errors, POSTs included | only reads and the 6 idempotent creates are retried ([README](README.md#retries-and-idempotency)) |
 | — | `onBehalfOf` and `fetch` options |
 | `client.<service>.onBehalfOf(userId: number)` | `client.onBehalfOf(userUuid: string)` (a client for every service), or the `{ onBehalfOf }` request option |
 | `client.getApiKey()`, `client.getBaseUrl()` | removed: keep your own configuration; `await client.me()` describes the key |
@@ -140,7 +140,6 @@ optional may be left out.
 | `refunds.getAllInactive({ limit, cursor })` | `refunds.list({ status: [RefundStatus.Approved, RefundStatus.Rejected] })`, `refunds.iterate` | one list, filtered by `status` (repeatable, up to 5) |
 | `refunds.getByTransaction(txUuid)` | `refunds.list({ txUuid })` | or `payment.refund` / `bill.refund` (a `RefundSummary`) |
 | — | `refunds.get(refundUuid)` | new: `GET /refunds/:uuid` |
-| — | `refunds.create(CreateRefundParams)` | new: `POST /refunds`, a pending refund you sign in the dashboard (`refundPercent` a string, `'50'`) |
 
 ### Customers and products
 
@@ -353,7 +352,7 @@ cancel an order on it.
 | `TransactionShortType` | removed |
 | `TransactionStatusValue` | `CheckoutSessionStatusValue` (above) |
 | `RefundStatus.REFUSED` (`refused`) | `RefundStatus.Rejected` (`rejected`, the value the API sends) |
-| `RefundStatus.FAILED` | `RefundStatus.Failed` (declared, never set); + `RefundStatus.Cancelled` (`cancelled`: your draft dropped before it was sent) |
+| `RefundStatus.FAILED` | `RefundStatus.Failed` (declared, never set); `RefundStatus.Pending` is a customer's request |
 | `UserRole.ADMIN`, `UserRole.USER` | `Role.Admin`, `Role.User` (+ `Role.Owner`, `Role.Handle`) |
 | `CombinedPayment.source` `'subscription_history'` | `Transaction.type` `TransactionKind.Bill` (`bill`) |
 | `AccountingEvent.type` (a string union) | `AccountingEventType` (`subscription_history` → `AccountingEventType.Bill`, `bill`) |
@@ -616,7 +615,7 @@ build, these names changed: `checkoutSessions.getStatus` → `get`; `payments.li
 `iterateCombined` → `transactions.list` / `iterate` (`CombinedPayment` → `Transaction`,
 `CombinedPaymentListParams` → `TransactionListParams`, `source` → `type`, `CombinedPaymentSource`
 → `TransactionKind`); `subscriptions.executeTestBilling` → `testBill` (`BillingState` →
-`TestBill`); `refunds.initiate` → `create` (`InitiateRefundParams` → `CreateRefundParams`);
+`TestBill`); `refunds.initiate` is removed (refunds are read only: a merchant's refund is sent from the dashboard);
 `refunds.listInactive` / `iterateInactive` → `refunds.list` / `iterate` with `status`;
 `wallets.listSupportedCurrencies` → `listAcceptedCurrencies` (`SupportedCurrenciesParams` →
 `AcceptedCurrenciesParams`); `currencies.listAvailable` / `listMain` → `currencies.list` (`main`);

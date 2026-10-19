@@ -23,7 +23,7 @@ import {
 } from 'qbitflow';
 
 // docs:start retries-idempotency
-// Reads and the 7 creates are retried on network errors, 5xx and 429, waiting 1 s, 2 s, 4 s…
+// Reads and the 6 creates are retried on network errors, 5xx and 429, waiting 1 s, 2 s, 4 s…
 // (default: 3 retries; 0 turns them off). timeout bounds each attempt, in milliseconds.
 const client = QBitFlow.fromEnv({ maxRetries: 5, timeout: 15_000 });
 
