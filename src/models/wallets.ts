@@ -4,68 +4,80 @@
  * @module
  */
 
-import type { Currency } from './common.js';
+import type { Currency, TokenAmount } from './common.js';
 
-/** A wallet of a space on one chain, with its token wallets. */
+/**
+ * A space's receiving address on one chain (`currency`, its native coin), with the currencies it
+ * accepts on that chain (`tokenWallets`). Its mode is the space's. Wallets are added and removed
+ * in the dashboard.
+ */
 export interface Wallet {
 	/** The wallet's id. */
 	uuid: string;
 	/** When it was added. */
 	createdAt: string;
-	/** The wallet's address. */
-	publicKey: string;
+	/** The wallet's address on its chain (EVM: `0x…`, Solana: base58). */
+	address: string;
 	/** True in test mode. */
 	test: boolean;
 	/** The member whose wallet it is; absent for the organization's own. */
 	userUuid?: string;
-	/** The tokens enabled on it. */
+	/** The currencies it accepts on its chain; `[]` when none. */
 	tokenWallets: TokenWallet[];
-	/** The chain's native coin. */
-	currencyId: number;
-	/** That native coin. */
+	/** The chain, by its native coin. */
 	currency: Currency;
 }
 
-/** A token enabled on a wallet. */
+/** A currency a wallet accepts on its chain: a token (USDC on Base) or the chain's native coin. */
 export interface TokenWallet {
 	/** The token wallet's id. */
 	uuid: string;
-	/** When it was enabled. */
+	/** When the wallet started accepting it. */
 	createdAt: string;
-	/** The token's currency id. */
-	tokenId: number;
-	/** The token's currency. */
-	token: Currency;
+	/** The currency accepted. */
+	currency: Currency;
 	/** The wallet it belongs to. */
 	walletUuid: string;
-	/** Its balance; set only by `wallets.list` with `withBalances`. */
+	/**
+	 * What the wallet holds of the currency, read on its chain now: set only by `wallets.list`
+	 * with `withBalances`, and absent when the chain couldn't be read.
+	 */
 	balance?: Balance;
 }
 
-/** A token wallet's balance. */
-export interface Balance {
-	/** The token (e.g. `SOL:USDC`). */
-	currency: string;
-	/** The balance in the token (a decimal string). */
-	balance: string;
-	/** The same in USD. */
-	balanceUsd: number;
+/**
+ * What a wallet holds of a currency, read on its chain now. `amount`, `amountMinUnits` and
+ * `amountUsd` (its value at today's price; absent when QBitFlow has no price it can trust right
+ * now) come from {@link TokenAmount}.
+ *
+ * ```json
+ * {"currency": {…}, "amount": "12.5", "amountMinUnits": "12500000", "amountUsd": "12.5"}
+ * ```
+ */
+export interface Balance extends TokenAmount {
+	/** The currency held. */
+	currency: Currency;
 }
 
 /** `wallets.list`'s options. */
 export interface WalletListParams {
-	/** Add each token wallet's balance. */
+	/** Add each token wallet's balance (read on-chain: slower). */
 	withBalances?: boolean;
 }
 
-/** `wallets.listSupportedCurrencies`' options. */
-export interface SupportedCurrenciesParams {
-	/** Read a member's (organization key); absent for the request's space. */
+/** `wallets.listAcceptedCurrencies`' options. */
+export interface AcceptedCurrenciesParams {
+	/**
+	 * Read a member's (an organization key; 403 otherwise, also with `onBehalfOf`); absent for
+	 * the request's space.
+	 */
 	userUuid?: string;
 }
 
-/** `currencies.listAvailable`'s and `currencies.listMain`'s options. */
+/** `currencies.list`'s options. */
 export interface CurrencyListParams {
-	/** List the testnet currencies (whatever the key's mode). */
+	/** List the test networks' currencies (whatever the key's mode); absent or `false`: mainnet. */
 	test?: boolean;
+	/** List only the chains' native coins (ETH, BASE, SOL), no tokens. */
+	main?: boolean;
 }

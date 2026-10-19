@@ -39,9 +39,12 @@ if (process.env.CREATE_ENDPOINT === '1') {
 }
 
 // docs:start events-list
-// Newest first; one page (iterate walks them all).
+// Newest first, each exactly as delivered; one page (iterate walks them all).
 const page = await client.webhooks.events.list({ type: EventType.PaymentCompleted, limit: 10 });
 for (const event of page.items) {
 	console.log(`${event.id} ${event.type} at ${event.createdAt}`);
+}
+if (page.hasMore) {
+	console.log(`more: pass ${page.nextCursor} as cursor`); // opaque, never an event id
 }
 // docs:end events-list

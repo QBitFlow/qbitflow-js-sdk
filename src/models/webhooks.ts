@@ -5,6 +5,7 @@
  */
 
 import type { EndpointDisabledReason, EventType, WebhookPayloadVersion } from '../enums.js';
+import type { PageParams } from './common.js';
 import type { Event } from './events.js';
 
 /** A webhook endpoint of a space. */
@@ -15,19 +16,26 @@ export interface WebhookEndpoint {
 	test: boolean;
 	/** Where the events are posted. */
 	url: string;
-	/** The event types it receives; empty: every type. */
+	/**
+	 * The event types it receives (stored sorted, without duplicates); `[]`: every type, including
+	 * types added later.
+	 */
 	events: EventType[];
 	/** True for an organization endpoint that also receives its members' events. */
 	includeMembers: boolean;
-	/** `v2` (the event envelope), or `v1` for an endpoint migrated from v1. */
+	/** The payload it receives: `v2` (the event envelope), the only version. */
 	payloadVersion: WebhookPayloadVersion;
-	/** A note for the dashboard. */
-	description: string;
+	/** A note for the dashboard; absent when none. */
+	description?: string;
 	/** When it was created. */
 	createdAt: string;
 	/** When its secret last changed. */
 	rotatedAt?: string;
-	/** When it was disabled; absent while enabled. */
+	/**
+	 * When it was disabled (it receives nothing): after 3 days without a successful delivery
+	 * (live mode only), or by its owner; absent while enabled. `update` with `enabled: true`
+	 * enables it again.
+	 */
 	disabledAt?: string;
 	/**
 	 * Why: `failing` (live mode only: a test-mode endpoint is never disabled for failing), `owner`
@@ -78,8 +86,12 @@ export interface DeliveryAttempt {
 	attempt: number;
 	/** True when the endpoint answered with a 2xx. */
 	delivered: boolean;
-	/** True when it was not posted (a member's endpoint with `members.webhooks` off). */
-	skipped?: boolean;
+	/**
+	 * True when it was not posted: a member's endpoint while the organization's `members.webhooks`
+	 * policy was off for them (never retried; not counted against the endpoint's health). The API
+	 * leaves it out when false.
+	 */
+	skipped: boolean;
 	/** The endpoint's answer; absent when it didn't answer. */
 	statusCode?: number;
 	/** Why it wasn't delivered. */
@@ -94,7 +106,10 @@ export interface DeliveryAttempt {
 export interface CreateWebhookEndpointParams {
 	/** Required: where the events are posted (https and a public host in live mode). */
 	url: string;
-	/** The event types to receive (at most 20, not `webhook.test`); absent or empty: every type. */
+	/**
+	 * The event types to receive (at most 20, not `webhook.test`; an unknown type is the API's
+	 * 400); absent or `[]`: every type, including types added later.
+	 */
 	events?: EventType[];
 	/**
 	 * Make an organization endpoint receive its members' events too (absent: `true` for an
@@ -107,28 +122,39 @@ export interface CreateWebhookEndpointParams {
 
 /** Updates a webhook endpoint (`webhooks.endpoints.update`): fields left out are unchanged. */
 export interface UpdateWebhookEndpointParams {
-	/** The new URL. */
+	/** The new URL (absent or `''` = unchanged). */
 	url?: string;
-	/** Replaces the event types; `[]` means every type. */
+	/**
+	 * Replaces the event types (at most 20, not `webhook.test`): absent leaves them unchanged,
+	 * `[]` means every type.
+	 */
 	events?: EventType[];
-	/** Whether an organization endpoint receives its members' events. */
+	/** Changes whether an organization endpoint receives its members' events. */
 	includeMembers?: boolean;
-	/** The new note; `''` clears it. */
+	/** The new note; `''` clears it, absent leaves it unchanged. */
 	description?: string;
-	/** `v2` moves an endpoint migrated from v1 to the event envelope (never back). */
+	/**
+	 * The payload it receives: `v2`, the only version today (anything else is refused); absent
+	 * leaves it unchanged.
+	 */
 	payloadVersion?: WebhookPayloadVersion;
-	/** `false` pauses the endpoint; `true` enables it again. */
+	/**
+	 * `false` pauses the endpoint (it receives nothing, deliveries in progress stop); `true`
+	 * enables it again, also after it was disabled for failing.
+	 */
 	enabled?: boolean;
 }
 
-/** Filters `webhooks.events.list` (page size: server default 20, max 100). */
-export interface EventListParams {
-	/** The page size (0 or absent = the server's default). */
-	limit?: number;
-	/** The previous page's `nextCursor` (`evt_…`); absent for the first page. */
-	cursor?: string;
-	/** Only the events of this type. */
+/** Pages `webhooks.endpoints.list`. */
+export type EndpointListParams = PageParams;
+
+/** Filters `webhooks.events.list`. */
+export interface EventListParams extends PageParams {
+	/**
+	 * Only the events of this type. Not checked against the SDK's known types (newer ones appear
+	 * over time); an unknown type is the API's 400.
+	 */
 	type?: EventType;
-	/** Add the members' events (organization space only). */
+	/** Add the members' events (organization space only; 400 from a member's). */
 	includeMembers?: boolean;
 }

@@ -6,12 +6,14 @@
  * types, with the policy all four QBitFlow SDKs share (behaviour §6):
  *
  * - **Lenient on absence**: an absent or `null` value where the field is required decodes to its
- *   zero value (`''`, `0`, `false`, `[]`, a zero object, the zero time `0001-01-01T00:00:00Z`);
- *   an optional field is left out; a nullable one is `null`. Never an error.
+ *   zero value (`''`, `0`, `false`, `[]`, `{}`, a zero object, the zero time
+ *   `0001-01-01T00:00:00Z`); an optional field is left out (the API never sends `null`). Never an
+ *   error.
  * - **Strict on type**: a value of the wrong JSON type (a string for a number, an object for a
  *   list, a fractional or negative number for an unsigned integer, a string that is not an RFC
  *   3339 timestamp…) fails: a `ServerError` for an API answer, a `ValidationError` for a webhook
- *   body (the caller's input).
+ *   body (the caller's input). A JSON number where the model has a decimal string (money, token
+ *   amounts, percents) is the wrong type too.
  * - Unknown keys are kept; enum values the SDK does not know stay raw strings. Decimal strings
  *   stay strings.
  *
@@ -178,6 +180,28 @@ export function list<T>(item: Schema<T>): Schema<T[]> {
 		},
 	};
 }
+
+/**
+ * A map of string values (merchant `metadata`): absent/null → `{}`, otherwise a JSON object whose
+ * every value is a string (a `null` value decodes to `''`, as Go's decoder stores it).
+ */
+export const stringMap: Schema<Record<string, string>> = {
+	expected: 'an object of strings',
+	decode(value, path, ctx) {
+		if (isAbsent(value)) return {};
+		if (!isPlainObject(value)) throw ctx.fail(path, this.expected, value);
+		const out: Record<string, string> = {};
+		for (const [key, item] of Object.entries(value)) {
+			if (item === null) {
+				out[key] = '';
+				continue;
+			}
+			if (typeof item !== 'string') throw ctx.fail(childPath(path, key), 'a string', item);
+			out[key] = item;
+		}
+		return out;
+	},
+};
 
 /** The field decoders of an object schema: exactly one per property of `T`. */
 export type Fields<T> = { [K in keyof T]-?: Schema<T[K]> };

@@ -1,7 +1,7 @@
 /**
  * Opens a subscription checkout session for order-1043 (monthly, with a 7-day trial), lists the
- * active subscriptions, reads one with its access, walks its bills, and optionally bills it now
- * (test mode) or cancels it at the end of its paid period.
+ * active subscriptions, reads one with its access, walks its bills, tags it with metadata, and
+ * optionally bills it now (test mode) or cancels it at the end of its paid period.
  *
  *     QBITFLOW_API_KEY=sk_… [QBITFLOW_BASE_URL=…] [SUBSCRIPTION_UUID=sub@…] [TEST_BILL=1] [CANCEL=1] npx tsx subscriptions.ts
  */
@@ -24,7 +24,7 @@ async function createCheckout(client: QBitFlow): Promise<void> {
 	const session = await client.checkoutSessions.createSubscription({
 		productName: 'T-shirt',
 		description: 'Blue, size M',
-		price: 4.99, // USD per period
+		priceUsd: '4.99', // USD per period, a decimal string
 		frequency: { value: 1, unit: DurationUnit.Months },
 		trialPeriod: { value: 7, unit: DurationUnit.Days },
 		reference: 'order-1043',
@@ -81,17 +81,27 @@ if (!subscriptionUuid) {
 
 // Every bill, newest first (the iterator fetches the pages lazily).
 for await (const bill of client.subscriptions.iterateBills(subscriptionUuid, { limit: 50 })) {
-	console.log(
-		`  bill ${bill.uuid}: ${bill.amount} USD for ${bill.periodStart ?? '—'} → ${bill.periodEnd ?? '—'}`
-	);
+	console.log(`  bill ${bill.uuid}: ${bill.amountUsd} USD, paid until ${bill.periodEnd ?? '—'}`);
+}
+
+{
+	// docs:start subscriptions-update
+	// Metadata is merged into the subscription's: '' deletes a key, keys not named are kept. It
+	// is the only thing a merchant edits on a subscription; webhooks carry it.
+	const updated = await client.subscriptions.update(subscriptionUuid, {
+		metadata: { plan: 'pro', coupon: '' },
+	});
+	console.log(updated.metadata.plan);
+	// docs:end subscriptions-update
 }
 
 if (process.env.TEST_BILL === '1') {
 	// docs:start subscriptions-test-bill
 	// Test mode only: runs the next billing now, with live's statuses and webhooks. A ConflictError
-	// payment_not_due before nextBillingDate.
-	const state = await client.subscriptions.executeTestBilling(subscriptionUuid);
-	console.log(`billing ${state.stage}: ${state.outcome ?? 'running'} ${state.failureCode ?? ''}`);
+	// payment_not_due before nextBillingAt; a BadRequestError test_mode_only for a live one.
+	const bill = await client.subscriptions.testBill(subscriptionUuid);
+	// billUuid is sub-hist@…: the id its subscription.billed carries once paid.
+	console.log(bill.billUuid, bill.stage, bill.outcome ?? 'running', bill.failureCode ?? '');
 	// docs:end subscriptions-test-bill
 }
 

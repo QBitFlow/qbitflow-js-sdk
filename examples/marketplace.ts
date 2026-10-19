@@ -13,12 +13,12 @@ async function invite(client: QBitFlow): Promise<void> {
 	// docs:start members-invite
 	const created = await client.invitations.create({
 		email: 'seller@example.com',
-		trustLayer: true, // hold their payments until you trust them
-		organizationFeePercent: 10, // your commission on their payments
+		holdFunds: true, // hold their payments until you trust them (always sent)
+		organizationFeePercent: '10', // your commission on their payments: '0' to '50' %
 		redirectUrl: 'https://shop.example.com/sellers/welcome',
 	});
 	// The link is also emailed. They are a member once they accepted (the member.joined webhook).
-	console.log(`invitation ${created.invitation.uuid}: ${created.link}`);
+	console.log(`invitation ${created.uuid}: ${created.link}`);
 	// docs:end members-invite
 }
 
@@ -44,9 +44,9 @@ async function listAll(client: QBitFlow): Promise<void> {
 	const invitationUuid = process.env.REVOKE_INVITATION_UUID;
 	if (invitationUuid) {
 		// docs:start invitations-revoke
-		// Only before it is accepted: the link stops working.
-		const invitation = await client.invitations.revoke(invitationUuid);
-		console.log(`invitation for ${invitation.email}: ${invitation.status}`); // revoked
+		// Only before it is accepted: its link stops working (204, nothing returned).
+		await client.invitations.revoke(invitationUuid);
+		console.log(`revoked ${invitationUuid}`);
 		// docs:end invitations-revoke
 	}
 }
@@ -56,7 +56,7 @@ async function ownHeldFunds(client: QBitFlow): Promise<void> {
 	// docs:start members-own-held-funds
 	// With a member's key, or a client.onBehalfOf(memberUuid) client. Empty for the organization.
 	const held = await client.members.getOwnHeldFunds();
-	console.log(`held for me: ${held.totalAmount} USD over ${held.ledgers.length} payments`);
+	console.log(`held for me: ${held.totalUsd} USD over ${held.ledgers.length} lines`);
 	// docs:end members-own-held-funds
 }
 
@@ -64,8 +64,9 @@ async function ownHeldFunds(client: QBitFlow): Promise<void> {
 async function manage(client: QBitFlow, memberUuid: string): Promise<void> {
 	// docs:start members-get
 	const member = await client.members.get(memberUuid);
-	console.log(`${member.name} ${member.lastName} <${member.email}>`);
+	console.log(`${member.firstName} ${member.lastName ?? ''} <${member.email}>`);
 	console.log(`fee ${member.organizationFeePercent} %, trusted: ${member.trustedAt ?? 'no'}`);
+	for (const currency of member.acceptedCurrencies) console.log(`  accepts ${currency.code}`);
 	// docs:end members-get
 
 	// docs:start client-on-behalf-of
@@ -73,37 +74,42 @@ async function manage(client: QBitFlow, memberUuid: string): Promise<void> {
 	// On-Behalf-Of. It shares client's configuration.
 	const seller = client.onBehalfOf(memberUuid);
 	const products = await seller.products.list();
-	console.log(`${products.length} products in the seller's space`);
+	console.log(`${products.items.length} products on the first page of the seller's space`);
 	// docs:end client-on-behalf-of
 
 	// docs:start members-wallets
 	// Where the member is paid. Without a wallet, their checkouts answer 409 merchant_not_ready.
 	const wallets = await client.wallets.listForMember(memberUuid);
 	for (const wallet of wallets) {
-		console.log(`${wallet.currency.symbol}: ${wallet.publicKey}`);
+		console.log(`${wallet.currency.chain}: ${wallet.address}`);
 	}
 	// docs:end members-wallets
 
 	// docs:start members-held-funds
-	// What the organization holds for its members (their payments while untrusted).
+	// What the organization holds for its members (their payments while untrusted), the longest
+	// held first.
 	const all = await client.members.listHeldFunds();
-	for (const summary of all) {
-		console.log(`${summary.userUuid}: ${summary.totalAmount} USD owed`);
+	for (const owed of all) {
+		console.log(`${owed.userUuid}: ${owed.totalUsd} USD owed over ${owed.count} lines`);
 	}
 
 	const held = await client.members.getHeldFunds(memberUuid);
 	for (const ledger of held.ledgers) {
-		console.log(`  ${ledger.type} ${ledger.amount} USD`);
+		// owed: what the line counts for in a release (negative for a refund).
+		console.log(
+			`  ${ledger.type} ${ledger.owed} ${ledger.currency.symbol} (${ledger.owedUsd} USD)`
+		);
 	}
-	console.log(`held for this member: ${held.totalAmount} USD`);
+	console.log(`held for this member: ${held.totalUsd} USD`);
 	// docs:end members-held-funds
 
 	await ownHeldFunds(seller); // the same total, from the seller's side
 
 	if (process.env.SET_FEE === '1') {
 		// docs:start members-update
-		// Applies to their new checkouts: one already created keeps its fee.
-		const updated = await client.members.update(memberUuid, { organizationFeePercent: 10 });
+		// A percent string ('0' to '50'). Applies to their new checkouts: one already created keeps
+		// its fee.
+		const updated = await client.members.update(memberUuid, { organizationFeePercent: '10' });
 		console.log(`fee now ${updated.organizationFeePercent} %`);
 		// docs:end members-update
 	}

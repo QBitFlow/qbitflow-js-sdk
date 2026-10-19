@@ -272,6 +272,8 @@ export class WebhookSignatureError extends ApiError {
 /** Error codes the SDK branches on. @internal */
 export const CODE_VALIDATION_FAILED = 'validation_failed';
 /** @internal */
+export const CODE_NOT_FOUND = 'not_found';
+/** @internal */
 export const CODE_IDEMPOTENCY_KEY_IN_USE = 'idempotency_key_in_use';
 /** @internal */
 export const CODE_IDEMPOTENCY_KEY_REUSED = 'idempotency_key_reused';

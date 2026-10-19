@@ -20,94 +20,129 @@ import type {
 	WebhookPayloadVersion,
 } from '../enums.js';
 import type { PaymentSessionData, SubscriptionSessionData } from './checkout.js';
-import type { Currency, TxMetadata } from './common.js';
+import type { Currency, TransferSettlement } from './common.js';
 import type { LedgerEntry, Member } from './members.js';
 import type { Bill, Payment } from './payments.js';
 import type { Refund } from './refunds.js';
 import type { Subscription } from './subscriptions.js';
 
-/** `payment.completed`'s data: the payment, confirmed. */
+/**
+ * `payment.completed`'s data: the payment, confirmed, as `payments.get` returns it to its owner
+ * (its refund state excepted: API reads only), and its customer page. Fulfil the order: `uuid` is
+ * the checkout session's `pay@…`, `reference` and `metadata` yours.
+ */
 export interface PaymentCompleted extends Payment {
 	/** The payment's page for its customer. */
 	managementPageLink?: string;
 }
 
-/** `subscription.created`'s data (status `active`, or `trial`). */
-export interface SubscriptionCreated extends Subscription {
-	/** The subscription's management page for its customer. */
-	managementPageLink?: string;
+/**
+ * `subscription.billed`'s data: the bill paid, and its subscription as the bill leaves it. Access
+ * is paid until `bill.periodEnd`, unless `subscription.status` is `cancelled` (a charge that
+ * landed just after a cancellation: record it, grant nothing).
+ */
+export interface SubscriptionBilled {
+	/**
+	 * The bill paid (as `subscriptions.getBill` returns it): its currency, settlement, and the
+	 * period it pays, `periodStart` → `periodEnd`.
+	 */
+	bill: Bill;
+	/**
+	 * The subscription once the bill is paid: `active` (`stopped`, `paused` or `cancelled` if that
+	 * happened while the charge was on its way), its next bill, its allowance, its reference and
+	 * its metadata.
+	 */
+	subscription: Subscription;
 }
 
-/** `subscription.billed`'s data: the paid bill. */
-export interface SubscriptionBilled extends Bill {
-	/** The subscription's merchant reference, if it has one. */
-	subscriptionReference?: string;
-	/** The subscription's status once the bill is paid. */
-	subscriptionStatus: SubscriptionStatus;
-}
-
-/** `subscription.statusChanged`'s data. */
+/**
+ * `subscription.statusChanged`'s data: the subscription with its new `status`, and the one
+ * before. Every status change sends it, once.
+ */
 export interface SubscriptionStatusChanged extends Subscription {
 	/** The status before the change. */
 	previousStatus: SubscriptionStatus;
-	/** The subscription's management page for its customer. */
-	managementPageLink?: string;
 }
 
-/** `subscription.actionRequiredChanged`'s data. */
+/**
+ * `subscription.actionRequiredChanged`'s data: the subscription with its new `actionRequired`
+ * (absent: nothing to do anymore), and the one before. Its `managementPageLink` is where the
+ * customer acts.
+ */
 export interface SubscriptionActionRequiredChanged extends Subscription {
 	/** What its customer had to do before (absent: nothing). */
 	previousActionRequired?: ActionRequired;
-	/** The subscription's management page for its customer. */
-	managementPageLink?: string;
 }
 
-/** `subscription.billingFailed`'s data: a bill attempt failed. */
+/**
+ * `subscription.billingFailed`'s data: the subscription as a failed bill attempt leaves it, and
+ * the failure. Its `managementPageLink` is where the customer fixes it. Sent once per failed
+ * attempt (`pastDue`), and once when a bill above the customer's maximum starts waiting for a new
+ * one (`maxAmountExceeded`: no attempt spent).
+ */
 export interface SubscriptionBillingFailed extends Subscription {
-	/** `insufficientBalance`, `allowanceExhausted`, `approvalRevoked`, `maxAmountExceeded` or `other`. */
+	/**
+	 * What the customer does: `insufficientBalance` (add funds to the wallet),
+	 * `allowanceExhausted` (top up the allowance), `approvalRevoked` (approve the token again),
+	 * `maxAmountExceeded` (sign a new maximum) or `other` (the network refused the charge).
+	 */
 	reason: BillingFailureReason;
-	/** The charge's error code (e.g. `insufficient_funds`). */
+	/** The charge's error code (e.g. `insufficient_funds`, `insufficient_allowance`). */
 	failureCode?: string;
-	/** The bill that failed (`sub-hist@…`: its id once paid). */
+	/** The bill that failed: the `sub-hist@…` its `subscription.billed` has once it is paid. */
 	billUuid: string;
-	/** The bill, in USD (a decimal **string**, unlike `subscription.upcomingBill`'s). */
+	/** The bill, in USD, a decimal string: its `priceUsd` plus its `fees` lines. */
 	amountUsd: string;
-	/** This bill's failed attempts so far, this one included. */
+	/** This bill's failed attempts so far, this one included (`maxAmountExceeded` spends none). */
 	attempt: number;
-	/** The attempts left. */
+	/**
+	 * The attempts left (retried 1, 3, 5 and 7 days after the first failed attempt). 0: this was
+	 * the last; its cancellation follows (`subscription.statusChanged`).
+	 */
 	remainingAttempts: number;
-	/** When the bill is tried again at the latest. */
+	/**
+	 * When the bill is tried again at the latest (`maxAmountExceeded`: when it stops waiting for a
+	 * new maximum); absent after the last attempt.
+	 */
 	nextAttemptAt?: string;
-	/** The subscription's management page, where its customer fixes it. */
-	managementPageLink?: string;
 }
 
-/** `subscription.upcomingBill`'s data: a bill (or a trial's end) is near. */
+/**
+ * `subscription.upcomingBill`'s data: a bill (or a trial's end) is near, sent once per bill some
+ * days before (3 by default). Remind the customer when `balanceSufficient` or
+ * `allowanceSufficient` is false, or when `trialEnding`.
+ */
 export interface SubscriptionUpcomingBill extends Subscription {
 	/** When it is billed (for a trial: when the trial ends). */
-	billingDate: string;
+	billingAt: string;
+	/** What the bill charges, in USD, a decimal string: its `priceUsd` plus its `fees` lines. */
+	amountUsd: string;
 	/**
-	 * The bill, in USD (a **number**, unlike `subscription.billingFailed`'s): its `priceUsd` plus
-	 * its `fees` lines.
+	 * True when the trial ends then: the customer confirms the subscription (its
+	 * `managementPageLink`) to be billed.
 	 */
-	amountUsd: number;
-	/** True when the trial ends then: the customer must confirm it to be billed. */
 	trialEnding: boolean;
-	/** Whether the wallet holds the bill; absent for a trial. */
+	/**
+	 * Whether the wallet holds the bill at today's price; absent for a trial, or when it couldn't
+	 * be checked.
+	 */
 	balanceSufficient?: boolean;
-	/** Whether the remaining allowance covers the bill; absent for a trial. */
+	/** Whether the remaining allowance covers the bill; absent for a trial, or without a price. */
 	allowanceSufficient?: boolean;
 }
 
-/** `member.joined`'s data: the member, and the invitation they accepted. */
+/**
+ * `member.joined`'s data: the member, in the mode they joined, and the invitation they accepted.
+ * Store `userUuid` for `onBehalfOf`.
+ */
 export interface MemberJoined extends Member {
-	/** The invitation they accepted (`invitations.create`'s). */
+	/** The invitation they accepted (`invitations.create`'s `uuid`): match the event to it. */
 	invitationUuid: string;
 }
 
 /**
  * `heldFunds.released`'s data: the transfer paying a member the funds the organization held for
- * them, and the lines it settled.
+ * them (in the member's space: the envelope's `userUuid`), and the lines it settled.
  */
 export interface HeldFundsReleased {
 	/** The transfer's id (`transfer@…`). */
@@ -118,14 +153,14 @@ export interface HeldFundsReleased {
 	from: string;
 	/** The member's wallet. */
 	to: string;
-	/** The amount, in USD. */
-	amount: number;
-	/** The amount in the token's min units (a decimal string). */
+	/** What the member received, in the currency's units, exact: the sum of the lines' `owed`. */
+	amount: string;
+	/** The same in the currency's smallest unit. */
 	amountMinUnits: string;
+	/** The same in USD, at the release's price. */
+	amountUsd: string;
 	/** The currency paid in. */
-	currencyId: number;
-	/** That currency. */
-	currency: Currency | null;
+	currency: Currency;
 	/** The transaction's hash. */
 	txHash: string;
 	/** The chain. */
@@ -140,9 +175,13 @@ export interface HeldFundsReleased {
 	received: boolean;
 	/** `heldFundsRelease`. */
 	type: TransferType;
-	/** The transaction's network fees and block. */
-	txMetadata: TxMetadata;
-	/** The held-funds lines it settled. */
+	/** The transfer's transaction: its block and what it cost its sender. */
+	settlement: TransferSettlement;
+	/**
+	 * The lines it settled, oldest first: the payments and bills it paid (positive) and the
+	 * refunds of them it took off (negative, type `refund`), each with what it counted for
+	 * (`owed`, `owedMinUnits`, `owedUsd`).
+	 */
 	ledgers: LedgerEntry[];
 }
 
@@ -166,9 +205,9 @@ export interface EventEnvelope<T extends string, D> {
 	id: string;
 	/** The event's type. */
 	type: T;
-	/** The payload version (`v2`). */
+	/** The payload version: `v2`, the only one. */
 	version: WebhookPayloadVersion;
-	/** When it happened. */
+	/** When it happened (at most millisecond precision). */
 	createdAt: string;
 	/** True when it happened in test mode. */
 	test: boolean;
@@ -179,7 +218,12 @@ export interface EventEnvelope<T extends string, D> {
 }
 
 export type PaymentCompletedEvent = EventEnvelope<'payment.completed', PaymentCompleted>;
-export type SubscriptionCreatedEvent = EventEnvelope<'subscription.created', SubscriptionCreated>;
+/**
+ * `subscription.created`: the subscription (status `active`, or `trial`), as `subscriptions.get`
+ * returns it, its `managementPageLink` included. Grant access until `currentPeriodEnd`.
+ */
+export type SubscriptionCreatedEvent = EventEnvelope<'subscription.created', Subscription>;
+/** `subscription.billed`: the bill paid and its subscription (`data.bill`, `data.subscription`). */
 export type SubscriptionBilledEvent = EventEnvelope<'subscription.billed', SubscriptionBilled>;
 export type SubscriptionStatusChangedEvent = EventEnvelope<
 	'subscription.statusChanged',
@@ -197,19 +241,29 @@ export type SubscriptionUpcomingBillEvent = EventEnvelope<
 	'subscription.upcomingBill',
 	SubscriptionUpcomingBill
 >;
-/** `refund.requested`: a pending refund. */
+/**
+ * `refund.requested`: a new pending refund, a customer's request (`initiatedBy` `customer`) or a
+ * merchant's own (`refunds.create`).
+ */
 export type RefundRequestedEvent = EventEnvelope<'refund.requested', Refund>;
-/** `refund.completed`: an approved refund. */
-export type RefundCompletedEvent = EventEnvelope<'refund.completed', Refund>;
-/** `refund.denied`: a rejected refund. */
-export type RefundDeniedEvent = EventEnvelope<'refund.denied', Refund>;
+/**
+ * `refund.approved` (was `refund.completed`): the refund, approved, its transfer confirmed
+ * (`txHash`, `settlement.transaction`); `refundPercent` and `amount` are the share actually paid
+ * back.
+ */
+export type RefundApprovedEvent = EventEnvelope<'refund.approved', Refund>;
+/**
+ * `refund.rejected` (was `refund.denied`): a customer's request rejected by whoever decides it. A
+ * decision, final.
+ */
+export type RefundRejectedEvent = EventEnvelope<'refund.rejected', Refund>;
 export type MemberJoinedEvent = EventEnvelope<'member.joined', MemberJoined>;
 export type MemberRemovedEvent = EventEnvelope<'member.removed', Member>;
 export type HeldFundsReleasedEvent = EventEnvelope<'heldFunds.released', HeldFundsReleased>;
 /**
  * `checkout.expired`: the expired session, a payment's or a subscription's (chosen by its
  * `txType`; tell them apart with `webhooks.isSubscriptionSession`). An unknown `txType` decodes
- * as a payment's.
+ * as a payment's (the raw object is kept).
  */
 export type CheckoutExpiredEvent = EventEnvelope<
 	'checkout.expired',
@@ -237,8 +291,8 @@ export type KnownEvent =
 	| SubscriptionBillingFailedEvent
 	| SubscriptionUpcomingBillEvent
 	| RefundRequestedEvent
-	| RefundCompletedEvent
-	| RefundDeniedEvent
+	| RefundApprovedEvent
+	| RefundRejectedEvent
 	| MemberJoinedEvent
 	| MemberRemovedEvent
 	| HeldFundsReleasedEvent

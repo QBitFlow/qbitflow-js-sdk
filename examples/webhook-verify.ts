@@ -48,7 +48,7 @@ const body = JSON.stringify({
 	data: {
 		uuid: 'pay@0192f1c2-2222-7c4d-9e5f-6a7b8c9d0e1f',
 		reference: 'order-1042',
-		amount: 4.99,
+		amountUsd: '4.99', // money is a decimal string
 	},
 });
 const header = webhooks.sign(body, signingSecret);

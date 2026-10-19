@@ -12,7 +12,6 @@ import {
 	WebhookSignatureError,
 } from '../src/errors';
 import type { RequestOptions } from '../src/transport';
-import { MODEL_FIXTURES } from './fixtures/models';
 import {
 	closeServers,
 	collect,
@@ -33,19 +32,83 @@ const MEMBER = '019eca82-5680-7b00-8000-0000000000b1';
 const UUID_A = '019eca82-5680-7b00-8000-0000000000c1';
 const UUID_B = '019eca82-5680-7b00-8000-0000000000c2';
 const PAY_ID = 'pay@019eca82-5680-7b00-8000-0000000000d1';
+const PAY_ID_Q = 'pay%40019eca82-5680-7b00-8000-0000000000d1';
 const SUB_ID = 'sub@019eca82-5680-7b00-8000-0000000000d2';
+const SUB_ID_Q = 'sub%40019eca82-5680-7b00-8000-0000000000d2';
 const BILL_ID = 'sub-hist@019eca82-5680-7b00-8000-0000000000d3';
+const REFUND_ID = 'refund@019eca82-5680-7b00-8000-0000000000d4';
 const EVENT_ID = 'evt_bd1a913d-188e-5ac5-a2d6-5fd25cd67301';
-const ODD_REF = 'a/b c@d'; // a reference that needs escaping
-const ODD_REF_ES = 'a%2Fb%20c@d'; // … as sent
+const REF = 'crm:42@shop.x'; // a reference with characters a query escapes
+const REF_Q = 'reference=crm%3A42%40shop.x'; // … as sent
+const CURSOR = 'djF8MDFhMGY3NTUtZjIwMC03MDAwLTgwMDAtMDAwMDAwMDAwMDA4';
 const AFTER = '2026-09-01T12:00:00+02:00';
 const AFTER_Q = '2026-09-01T12%3A00%3A00%2B02%3A00';
 const BEFORE = new Date(Date.UTC(2026, 9, 1, 0, 0, 0, 500));
 const BEFORE_Q = '2026-10-01T00%3A00%3A00.500Z';
+const AT = '2026-10-01T12:00:00Z';
 
-const fx = (name: string) => MODEL_FIXTURES[name];
-const page = (item: string) => `{"items":[${item}],"nextCursor":"${UUID_B}"}`;
-const list = (item: string) => `[${item}]`;
+// Response fixtures, shaped like the docs' examples (a price paid in BASE:USDC).
+const CUR = `{"id":8,"code":"BASE:USDC","symbol":"USDC","name":"USD Coin","chain":"BASE","decimals":6,"address":"0x8335","mainCurrencyId":3,"test":false}`;
+const NATIVE = `{"id":3,"code":"BASE","symbol":"BASE","name":"Base","chain":"BASE","decimals":18,"test":false}`;
+const SETTLEMENT = `{"feePercent":"0.99","split":{"platform":{"amount":"0.099","amountMinUnits":"99000"},
+	"merchant":{"amount":"9.901","amountMinUnits":"9901000","amountUsd":"9.901"}},
+	"transaction":{"blockNumber":"52468103","fee":{"amount":"0.00000114","amountMinUnits":"1140000000000"}}}`;
+const FEES = `[{"type":"custom","label":"VAT (20%)","description":"French VAT","amountUsd":"1.30"},
+	{"type":"processingFee","label":"Processing fee","amountUsd":"0.20"}]`;
+const product = (reference = 'pro') =>
+	`{"uuid":"p-1","name":"Pro","priceUsd":"9.99","createdAt":"${AT}","isActive":true,"reference":"${reference}",
+	"metadata":{"sku":"PRO-1"},"subscription":{"frequency":{"value":1,"unit":"months"},"minPeriods":3},"test":false}`;
+const customer = (reference = 'crm-1') =>
+	`{"uuid":"c-1","firstName":"Ada","email":"ada@example.com","verified":true,"reference":"${reference}",
+	"metadata":{"crm":"42"},"createdAt":"${AT}","test":true,"userUuid":"m-1"}`;
+const payment = (reference = 'order-1') =>
+	`{"uuid":"pay@1","createdAt":"${AT}","from":"0xf","to":"0xt","amount":"10","amountMinUnits":"10000000",
+	"amountUsd":"10","currency":${CUR},"txHash":"0xh","test":false,"reference":"${reference}","priceUsd":"8.5",
+	"fees":${FEES},"productName":"Pro","metadata":{"orderId":"order-1"},"settlement":${SETTLEMENT}}`;
+const subscription = (reference = 'order-1043') =>
+	`{"uuid":"sub@1","reference":"${reference}","createdAt":"${AT}","updatedAt":"${AT}","to":"0xt","currency":${CUR},
+	"frequency":{"value":1,"unit":"months"},"status":"active","currentPeriodEnd":"2026-10-31T12:00:00Z",
+	"priceUsd":"9.99","fees":[],"allowance":{"amount":"110","amountMinUnits":"110000000","remainingPeriods":11},
+	"metadata":{"plan":"pro"},"test":false}`;
+const BILL = `{"uuid":"sub-hist@1","createdAt":"${AT}","from":"0xf","to":"0xt","amount":"9.99","amountMinUnits":"9990000",
+	"amountUsd":"9.99","currency":${CUR},"txHash":"0xh","test":false,"productName":"Pro","subscriptionUuid":"sub@1",
+	"settlement":${SETTLEMENT},"periodStart":"${AT}","periodEnd":"2026-10-31T12:00:00Z"}`;
+const TRANSACTION = `{"type":"bill","uuid":"sub-hist@1","createdAt":"${AT}","from":"0xf","to":"0xt","productName":"Pro",
+	"fees":[],"amount":"9.99","amountMinUnits":"9990000","amountUsd":"9.99","currency":${CUR},"txHash":"0xh",
+	"subscriptionUuid":"sub@1","metadata":{},"test":true,"settlement":${SETTLEMENT}}`;
+const FAILURE = `{"uuid":"f-1","kind":"bill","txUuid":"sub-hist@1","attempt":2,"code":"insufficient_funds",
+	"category":"insufficientBalance","attempted":"9.99","attemptedMinUnits":"9990000","attemptedUsd":"9.99",
+	"currency":${CUR},"from":"0xf","createdAt":"${AT}","test":false}`;
+const CREATED_SESSION = `{"link":"https://qbitflow.app/checkout?uuid=pay@1","uuid":"pay@1","expiresAt":"2026-10-02T12:00:00Z"}`;
+const SESSION_STATUS = `{"uuid":"pay@1","status":"created","lastAttempt":{"status":"failed","code":"insufficient_funds","at":"${AT}"},
+	"expiresAt":"2026-10-02T12:00:00Z"}`;
+const TEST_BILL = `{"billUuid":"sub-hist@1","stage":"done","outcome":"paid","attempts":0,"txHash":"0xh"}`;
+const REFUND = `{"uuid":"refund@1","txUuid":"pay@1","status":"pending","createdAt":"${AT}","test":false,
+	"initiatedBy":"merchant","held":false,"paid":"10.0042","paidMinUnits":"10004200","refundPercent":"50",
+	"amount":"5.0021","amountMinUnits":"5002100","currency":${CUR},
+	"approval":{"status":"waitingConfirmation","txHash":"0xa"}}`;
+const MEMBER_FX = `{"userUuid":"m-1","firstName":"Ada","email":"a@b.co","test":false,"organizationFeePercent":"7.5",
+	"joinedAt":"${AT}","acceptedCurrencies":[${CUR}],"spaceUuid":"s-1"}`;
+const HELD_FUNDS = `{"ledgers":[{"txUuid":"refund@1","type":"refund","description":"Refund of payment pay@1",
+	"refundedTxUuid":"pay@1","amountUsd":"10.0042","currency":${CUR},"owed":"-10.0042","owedMinUnits":"-10004200",
+	"owedUsd":"-10.0042","createdAt":"${AT}"}],"totalUsd":"-10.0042"}`;
+const MEMBER_HELD_FUNDS = `{"userUuid":"m-1","totalUsd":"98.5","count":2,"oldestAt":"2026-09-28T12:00:00Z"}`;
+const INVITATION = `{"uuid":"i-1","test":true,"email":"a@b.co","role":"user","holdFunds":true,"organizationFeePercent":"2.5",
+	"expiresAt":"2026-10-08T12:00:00Z","createdAt":"${AT}","status":"pending"}`;
+const CREATED_INVITATION = `{"uuid":"i-1","test":true,"email":"a@b.co","role":"user","holdFunds":true,
+	"expiresAt":"2026-10-08T12:00:00Z","createdAt":"${AT}","status":"pending","link":"https://qbitflow.app/invite?token=x"}`;
+const WALLET = `{"uuid":"w-1","createdAt":"${AT}","address":"0xpk","test":false,"tokenWallets":[{"uuid":"tw-1",
+	"createdAt":"${AT}","currency":${CUR},"walletUuid":"w-1","balance":{"currency":${CUR},"amount":"12.5",
+	"amountMinUnits":"12500000","amountUsd":"12.5"}}],"currency":${NATIVE}}`;
+const ACCOUNTING_EVENT = `{"txTimeUtc":"2026-09-13T19:23:26.62Z","type":"refund","chain":"BASE","currency":"USDC",
+	"currencyDecimals":6,"grossAmountUsd":"-10.0042","netAmount":"-10.0042","txUuid":"refund@1","relatedTxUuid":"pay@0"}`;
+const ENDPOINT = `{"uuid":"e-1","test":true,"url":"https://x.io/hook","events":["payment.completed"],"includeMembers":true,
+	"payloadVersion":"v2","createdAt":"${AT}","secret":"whsec_x"}`;
+
+/** A page of one item that claims more. */
+const page = (item: string) => `{"items":[${item}],"hasMore":true,"nextCursor":"${CURSOR}"}`;
+/** A bounded list's one page. */
+const items = (...list: string[]) => `{"items":[${list.join(',')}],"hasMore":false}`;
 const EVT = readFileSync(join(__dirname, 'fixtures', 'events', 'webhook.test.json'), 'utf8');
 
 interface RouteCase {
@@ -63,23 +126,42 @@ interface RouteCase {
 	check?: (v: any) => void;
 }
 
+const isVoid = (v: unknown) => expect(v).toBeUndefined();
+
 const ROUTES: RouteCase[] = [
 	// Products.
 	{
 		name: 'products.list',
-		call: (c, o) => c.products.list({ includeHidden: true, subscription: false }, o),
+		call: (c, o) =>
+			c.products.list(
+				{
+					limit: 2,
+					cursor: CURSOR,
+					includeHidden: true,
+					subscription: false,
+					reference: 'pro',
+				},
+				o
+			),
 		method: 'GET',
-		path: '/product',
-		query: 'includeHidden=true&subscription=false',
-		reply: list(fx('Product')),
-		check: (v) => expect([v.length, v[0].uuid, !!v[0].subscription]).toEqual([1, 'p-1', true]),
+		path: '/products',
+		query: `cursor=${CURSOR}&includeHidden=true&limit=2&reference=pro&subscription=false`,
+		reply: page(product()),
+		check: (v) =>
+			expect([v.items.length, v.items[0].priceUsd, v.hasMore, v.nextCursor]).toEqual([
+				1,
+				'9.99',
+				true,
+				CURSOR,
+			]),
 	},
 	{
 		name: 'products.list no params',
 		call: (c, o) => c.products.list(undefined, o),
 		method: 'GET',
-		path: '/product',
-		reply: '[]',
+		path: '/products',
+		reply: '{"items":[],"hasMore":false}',
+		check: (v) => expect(v).toEqual({ items: [], hasMore: false }),
 	},
 	{
 		name: 'products.create',
@@ -87,63 +169,73 @@ const ROUTES: RouteCase[] = [
 			c.products.create(
 				{
 					name: 'Pro',
-					price: 9.99,
+					priceUsd: '9.90',
 					reference: 'pro',
 					subscription: {
 						frequency: { value: 1, unit: 'months' },
 						trialPeriod: { value: 0 },
 						minPeriods: 3,
 					},
+					metadata: { sku: 'PRO-1' },
 				},
 				o
 			),
 		method: 'POST',
-		path: '/product',
+		path: '/products',
 		idempotent: true,
 		status: 201,
 		body: {
 			name: 'Pro',
-			price: 9.99,
+			priceUsd: '9.90', // a decimal string, sent verbatim
 			reference: 'pro',
 			subscription: {
 				frequency: { value: 1, unit: 'months' },
 				trialPeriod: { value: 0 },
 				minPeriods: 3,
 			},
+			metadata: { sku: 'PRO-1' },
 		},
-		reply: fx('Product'),
-		check: (v) => expect([v.uuid, v.price]).toEqual(['p-1', 9.99]),
+		reply: product(),
+		check: (v) =>
+			expect([v.uuid, v.priceUsd, v.metadata]).toEqual(['p-1', '9.99', { sku: 'PRO-1' }]),
 	},
 	{
 		name: 'products.get',
 		call: (c, o) => c.products.get(UUID_A, o),
 		method: 'GET',
-		path: `/product/uuid/${UUID_A}`,
-		reply: fx('Product'),
+		path: `/products/${UUID_A}`,
+		reply: product(),
 	},
 	{
 		name: 'products.getByReference',
-		call: (c, o) => c.products.getByReference(ODD_REF, o),
+		call: (c, o) => c.products.getByReference(REF, o),
 		method: 'GET',
-		path: `/product/reference/${ODD_REF_ES}`,
-		reply: fx('Product'),
+		path: '/products',
+		query: REF_Q,
+		reply: items(product('other'), product(REF)),
+		check: (v) => expect(v.reference).toBe(REF),
 	},
 	{
 		name: 'products.update',
 		call: (c, o) =>
-			c.products.update(UUID_A, { description: '', price: 12, isActive: false }, o),
-		method: 'PUT',
-		path: `/product/${UUID_A}`,
-		body: { description: '', price: 12, isActive: false },
-		reply: fx('Product'),
+			c.products.update(
+				UUID_A,
+				{ description: '', priceUsd: '12', isActive: false, metadata: { old: '' } },
+				o
+			),
+		method: 'PATCH',
+		path: `/products/${UUID_A}`,
+		body: { description: '', priceUsd: '12', isActive: false, metadata: { old: '' } },
+		reply: product(),
 	},
 	{
 		name: 'products.delete',
 		call: (c, o) => c.products.delete(UUID_A, o),
 		method: 'DELETE',
-		path: `/product/${UUID_A}`,
-		reply: '{"message":"Product deleted successfully"}',
-		check: (v) => expect(v).toBeUndefined(),
+		path: `/products/${UUID_A}`,
+		status: 204,
+		reply: '',
+		check: isVoid,
 	},
 
 	// Customers.
@@ -152,77 +244,92 @@ const ROUTES: RouteCase[] = [
 		call: (c, o) =>
 			c.customers.create(
 				{
-					name: 'Ada',
+					firstName: 'Ada',
 					lastName: 'Lovelace',
 					email: 'ada@example.com',
 					phoneNumber: '+33 6 12 34 56 78',
 					reference: 'crm-1',
+					metadata: { crm: '42' },
 				},
 				o
 			),
 		method: 'POST',
-		path: '/customer',
+		path: '/customers',
 		idempotent: true,
 		status: 201,
 		body: {
-			name: 'Ada',
+			firstName: 'Ada',
 			lastName: 'Lovelace',
 			email: 'ada@example.com',
 			phoneNumber: '+33 6 12 34 56 78',
 			reference: 'crm-1',
+			metadata: { crm: '42' },
 		},
-		reply: fx('Customer'),
-		check: (v) => expect([v.uuid, v.verified, v.userUuid]).toEqual(['c-1', true, 'm-1']),
+		reply: customer(),
+		check: (v) =>
+			expect([v.uuid, v.firstName, v.verified, v.metadata.crm]).toEqual([
+				'c-1',
+				'Ada',
+				true,
+				'42',
+			]),
 	},
 	{
 		name: 'customers.update',
 		call: (c, o) =>
-			c.customers.update(UUID_A, { email: 'new@example.com', phoneNumber: '' }, o),
-		method: 'PUT',
-		path: `/customer/${UUID_A}`,
-		body: { email: 'new@example.com', phoneNumber: '' },
-		reply: fx('Customer'),
+			c.customers.update(
+				UUID_A,
+				{ email: 'new@example.com', lastName: '', phoneNumber: '', address: '' },
+				o
+			),
+		method: 'PATCH',
+		path: `/customers/${UUID_A}`,
+		body: { email: 'new@example.com', lastName: '', phoneNumber: '', address: '' },
+		reply: customer(),
 	},
 	{
 		name: 'customers.list',
 		call: (c, o) =>
 			c.customers.list(
-				{ limit: 5, cursor: UUID_A, email: 'ada+1@example.com', verified: true },
+				{
+					limit: 5,
+					cursor: CURSOR,
+					email: 'ada+1@example.com',
+					reference: 'crm-1',
+					verified: true,
+				},
 				o
 			),
 		method: 'GET',
-		path: '/customer/all',
-		query: `cursor=${UUID_A}&email=ada%2B1%40example.com&limit=5&verified=true`,
-		reply: page(fx('Customer')),
-		check: (v) => expect([v.items.length, v.hasMore, v.nextCursor]).toEqual([1, true, UUID_B]),
+		path: '/customers',
+		query: `cursor=${CURSOR}&email=ada%2B1%40example.com&limit=5&reference=crm-1&verified=true`,
+		reply: page(customer()),
+		check: (v) => expect([v.items.length, v.hasMore, v.nextCursor]).toEqual([1, true, CURSOR]),
 	},
 	{
 		name: 'customers.get',
 		call: (c, o) => c.customers.get(UUID_A, o),
 		method: 'GET',
-		path: `/customer/uuid/${UUID_A}`,
-		reply: fx('Customer'),
-	},
-	{
-		name: 'customers.getByEmail',
-		call: (c, o) => c.customers.getByEmail('ada+1@example.com', o),
-		method: 'GET',
-		path: '/customer/email/ada+1@example.com',
-		reply: fx('Customer'),
+		path: `/customers/${UUID_A}`,
+		reply: customer(),
 	},
 	{
 		name: 'customers.getByReference',
-		call: (c, o) => c.customers.getByReference(ODD_REF, o),
+		call: (c, o) => c.customers.getByReference(REF, o),
 		method: 'GET',
-		path: `/customer/reference/${ODD_REF_ES}`,
-		reply: fx('Customer'),
+		path: '/customers',
+		query: REF_Q,
+		reply: items(customer(REF)),
+		check: (v) => expect([v.uuid, v.reference]).toEqual(['c-1', REF]),
 	},
 	{
 		name: 'customers.delete',
 		call: (c, o) => c.customers.delete(UUID_A, o),
 		method: 'DELETE',
-		path: `/customer/uuid/${UUID_A}`,
-		reply: '{"message":"Customer deleted successfully"}',
+		path: `/customers/${UUID_A}`,
+		status: 204,
+		reply: '',
+		check: isVoid,
 	},
 
 	// Checkout sessions.
@@ -234,30 +341,37 @@ const ROUTES: RouteCase[] = [
 					reference: 'order-1',
 					productName: 'T-shirt',
 					description: 'Blue',
-					price: 4.5,
+					priceUsd: '4.50',
 					successUrl: 'https://shop.example/ok?id={{UUID}}',
 					cancelUrl: 'https://shop.example/ko',
 					customerReference: 'crm-1',
 					expiresInMinutes: 30,
+					metadata: { orderId: 'order-1' },
 				},
 				o
 			),
 		method: 'POST',
-		path: '/transaction/session-checkout/new/payment',
+		path: '/checkout-sessions/payment',
 		idempotent: true,
 		status: 201,
 		body: {
 			reference: 'order-1',
 			productName: 'T-shirt',
 			description: 'Blue',
-			price: 4.5,
+			priceUsd: '4.50',
 			successUrl: 'https://shop.example/ok?id={{UUID}}',
 			cancelUrl: 'https://shop.example/ko',
 			customerReference: 'crm-1',
 			expiresInMinutes: 30,
+			metadata: { orderId: 'order-1' },
 		},
-		reply: fx('CheckoutSession'),
-		check: (v) => expect([v.uuid, !!v.link, !!v.expiresAt]).toEqual(['pay@1', true, true]),
+		reply: CREATED_SESSION,
+		check: (v) =>
+			expect([v.uuid, !!v.link, v.expiresAt]).toEqual([
+				'pay@1',
+				true,
+				'2026-10-02T12:00:00Z',
+			]),
 	},
 	{
 		name: 'checkoutSessions.createPayment with fees',
@@ -271,7 +385,7 @@ const ROUTES: RouteCase[] = [
 							{
 								label: 'Shipping',
 								description: 'Standard, 3 to 5 days',
-								amountUsd: 0.75,
+								amountUsd: '0.75',
 							},
 							{ label: 'VAT (20%)', amountUsd: '19.90' },
 						],
@@ -280,7 +394,7 @@ const ROUTES: RouteCase[] = [
 				o
 			),
 		method: 'POST',
-		path: '/transaction/session-checkout/new/payment',
+		path: '/checkout-sessions/payment',
 		idempotent: true,
 		status: 201,
 		body: {
@@ -288,12 +402,12 @@ const ROUTES: RouteCase[] = [
 			fees: {
 				processingFee: true,
 				items: [
-					{ label: 'Shipping', description: 'Standard, 3 to 5 days', amountUsd: 0.75 },
+					{ label: 'Shipping', description: 'Standard, 3 to 5 days', amountUsd: '0.75' },
 					{ label: 'VAT (20%)', amountUsd: '19.90' },
 				],
 			},
 		},
-		reply: fx('CheckoutSession'),
+		reply: CREATED_SESSION,
 	},
 	{
 		name: 'checkoutSessions.createSubscription',
@@ -309,7 +423,7 @@ const ROUTES: RouteCase[] = [
 				o
 			),
 		method: 'POST',
-		path: '/transaction/session-checkout/new/subscription',
+		path: '/checkout-sessions/subscription',
 		idempotent: true,
 		status: 201,
 		body: {
@@ -319,7 +433,7 @@ const ROUTES: RouteCase[] = [
 			trialPeriod: { value: 14, unit: 'days' },
 			minPeriods: 0,
 		},
-		reply: fx('CheckoutSession'),
+		reply: CREATED_SESSION,
 	},
 	{
 		name: 'checkoutSessions.createSubscription with fees',
@@ -327,29 +441,31 @@ const ROUTES: RouteCase[] = [
 			c.checkoutSessions.createSubscription(
 				{
 					productName: 'Pro',
-					price: 9.99,
+					priceUsd: '9.99',
 					frequency: { value: 1, unit: 'months' },
+					metadata: { plan: 'pro' },
 					fees: {
 						processingFee: true,
-						items: [{ label: 'VAT (20%)', description: 'French VAT', amountUsd: 2 }],
+						items: [{ label: 'VAT (20%)', description: 'French VAT', amountUsd: '2' }],
 					},
 				},
 				o
 			),
 		method: 'POST',
-		path: '/transaction/session-checkout/new/subscription',
+		path: '/checkout-sessions/subscription',
 		idempotent: true,
 		status: 201,
 		body: {
 			productName: 'Pro',
-			price: 9.99,
+			priceUsd: '9.99',
+			metadata: { plan: 'pro' },
 			frequency: { value: 1, unit: 'months' },
 			fees: {
 				processingFee: true,
-				items: [{ label: 'VAT (20%)', description: 'French VAT', amountUsd: 2 }],
+				items: [{ label: 'VAT (20%)', description: 'French VAT', amountUsd: '2' }],
 			},
 		},
-		reply: fx('CheckoutSession'),
+		reply: CREATED_SESSION,
 	},
 	{
 		name: 'checkoutSessions.createSubscription processing fee off',
@@ -359,98 +475,111 @@ const ROUTES: RouteCase[] = [
 				o
 			),
 		method: 'POST',
-		path: '/transaction/session-checkout/new/subscription',
+		path: '/checkout-sessions/subscription',
 		idempotent: true,
 		status: 201,
 		body: { productUuid: UUID_A, fees: { processingFee: false } },
-		reply: fx('CheckoutSession'),
+		reply: CREATED_SESSION,
 	},
 	{
-		name: 'checkoutSessions.getStatus',
-		call: (c, o) => c.checkoutSessions.getStatus(PAY_ID, o),
+		name: 'checkoutSessions.get',
+		call: (c, o) => c.checkoutSessions.get(PAY_ID, o),
 		method: 'GET',
-		path: `/transaction/session-checkout/${PAY_ID}/status`,
-		reply: fx('CheckoutSessionStatus'),
-		check: (v) => expect([v.status, !!v.lastAttempt]).toEqual(['created', true]),
+		path: `/checkout-sessions/${PAY_ID}`,
+		reply: SESSION_STATUS,
+		check: (v) =>
+			expect([v.status, !!v.lastAttempt, v.expiresAt]).toEqual([
+				'created',
+				true,
+				'2026-10-02T12:00:00Z',
+			]),
 	},
 	{
 		name: 'checkoutSessions.expire',
 		call: (c, o) => c.checkoutSessions.expire(SUB_ID, o),
 		method: 'POST',
-		path: `/transaction/session-checkout/${SUB_ID}/expire`,
-		reply: `{"uuid":"${SUB_ID}","status":"expired"}`,
-		check: (v) => expect(v.status).toBe('expired'),
+		path: `/checkout-sessions/${SUB_ID}/expire`,
+		reply: `{"uuid":"${SUB_ID}","status":"expired","expiresAt":"${AT}"}`,
+		check: (v) => expect([v.status, v.expiresAt]).toEqual(['expired', AT]),
 	},
 
-	// Payments and failures.
+	// Payments, transactions and failures.
 	{
 		name: 'payments.list',
 		call: (c, o) =>
 			c.payments.list(
 				{
 					limit: 50,
-					cursor: UUID_A,
+					cursor: CURSOR,
 					customerUuid: UUID_B,
 					productUuid: UUID_A,
 					createdAfter: AFTER,
 					createdBefore: BEFORE,
 					userUuid: MEMBER,
+					reference: 'order-1',
 					refunded: false,
 				},
 				o
 			),
 		method: 'GET',
-		path: '/transaction/payments',
-		query: `createdAfter=${AFTER_Q}&createdBefore=${BEFORE_Q}&cursor=${UUID_A}&customerUuid=${UUID_B}&limit=50&productUuid=${UUID_A}&refunded=false&userUuid=${MEMBER}`,
-		reply: page(fx('Payment')),
+		path: '/payments',
+		query: `createdAfter=${AFTER_Q}&createdBefore=${BEFORE_Q}&cursor=${CURSOR}&customerUuid=${UUID_B}&limit=50&productUuid=${UUID_A}&reference=order-1&refunded=false&userUuid=${MEMBER}`,
+		reply: page(payment()),
 		check: (v) =>
-			expect([v.items.length, v.items[0].uuid, !!v.items[0].currency]).toEqual([
-				1,
+			expect([v.items[0].uuid, v.items[0].amount, v.items[0].currency.code]).toEqual([
 				'pay@1',
-				true,
+				'10',
+				'BASE:USDC',
 			]),
-	},
-	{
-		name: 'payments.listCombined',
-		call: (c, o) =>
-			c.payments.listCombined(
-				{
-					includeMembers: true,
-					refunded: true,
-					source: 'subscriptionHistory',
-					subscriptionUuid: SUB_ID,
-				},
-				o
-			),
-		method: 'GET',
-		path: '/transaction/payments/combined',
-		query: 'includeMembers=true&refunded=true&source=subscriptionHistory&subscriptionUuid=sub%40019eca82-5680-7b00-8000-0000000000d2',
-		reply: page(fx('CombinedPayment')),
-		check: (v) => expect(v.items[0].source).toBe('subscriptionHistory'),
 	},
 	{
 		name: 'payments.get',
 		call: (c, o) => c.payments.get(PAY_ID, { includeMembers: true }, o),
 		method: 'GET',
-		path: `/transaction/payment/${PAY_ID}`,
+		path: `/payments/${PAY_ID}`,
 		query: 'includeMembers=true',
-		reply: fx('Payment'),
+		reply: payment(),
 		check: (v) =>
-			expect([v.reference, !!v.metadata.organizationFee]).toEqual(['order-1', true]),
+			expect([v.reference, v.amountUsd, v.priceUsd, v.settlement.feePercent]).toEqual([
+				'order-1',
+				'10',
+				'8.5',
+				'0.99',
+			]),
 	},
 	{
 		name: 'payments.get bare UUID',
 		call: (c, o) => c.payments.get(PAY_ID.slice(4), undefined, o),
 		method: 'GET',
-		path: `/transaction/payment/${PAY_ID.slice(4)}`,
-		reply: fx('Payment'),
+		path: `/payments/${PAY_ID.slice(4)}`,
+		reply: payment(),
 	},
 	{
 		name: 'payments.getByReference',
-		call: (c, o) => c.payments.getByReference(ODD_REF, o),
+		call: (c, o) => c.payments.getByReference(REF, o),
 		method: 'GET',
-		path: `/transaction/payment/reference/${ODD_REF_ES}`,
-		reply: fx('Payment'),
+		path: '/payments',
+		query: REF_Q,
+		reply: items(payment(REF)),
+		check: (v) => expect(v.reference).toBe(REF),
+	},
+	{
+		name: 'transactions.list',
+		call: (c, o) =>
+			c.transactions.list(
+				{ includeMembers: true, refunded: true, type: 'bill', subscriptionUuid: SUB_ID },
+				o
+			),
+		method: 'GET',
+		path: '/transactions',
+		query: `includeMembers=true&refunded=true&subscriptionUuid=${SUB_ID_Q}&type=bill`,
+		reply: page(TRANSACTION),
+		check: (v) =>
+			expect([v.items[0].type, v.items[0].amountUsd, v.items[0].metadata]).toEqual([
+				'bill',
+				'9.99',
+				{},
+			]),
 	},
 	{
 		name: 'failures.list',
@@ -465,10 +594,10 @@ const ROUTES: RouteCase[] = [
 				o
 			),
 		method: 'GET',
-		path: '/transaction/failures',
-		query: 'category=allowanceExhausted&kind=bill&limit=3&subscriptionUuid=sub%40019eca82-5680-7b00-8000-0000000000d2',
-		reply: page(fx('Failure')),
-		check: (v) => expect(v.items[0].kind).toBe('bill'),
+		path: '/payment-failures',
+		query: `category=allowanceExhausted&kind=bill&limit=3&subscriptionUuid=${SUB_ID_Q}`,
+		reply: page(FAILURE),
+		check: (v) => expect([v.items[0].kind, v.items[0].attempted]).toEqual(['bill', '9.99']),
 	},
 
 	// Subscriptions.
@@ -485,32 +614,56 @@ const ROUTES: RouteCase[] = [
 				o
 			),
 		method: 'GET',
-		path: '/transaction/subscriptions',
+		path: '/subscriptions',
 		query: `createdAfter=${AFTER_Q}&customerUuid=${UUID_B}&reference=crm%3A42&status=pastDue`,
-		reply: page(fx('Subscription')),
-		check: (v) => expect([v.items[0].status, !!v.items[0].dunning]).toEqual(['stopped', true]),
+		reply: page(subscription()),
+		check: (v) =>
+			expect([v.items[0].status, v.items[0].allowance.remainingPeriods]).toEqual([
+				'active',
+				11,
+			]),
 	},
 	{
 		name: 'subscriptions.get',
 		call: (c, o) => c.subscriptions.get(SUB_ID, undefined, o),
 		method: 'GET',
-		path: `/transaction/subscription/${SUB_ID}`,
-		reply: fx('Subscription'),
+		path: `/subscriptions/${SUB_ID}`,
+		reply: subscription(),
 	},
 	{
 		name: 'subscriptions.getByReference',
-		call: (c, o) => c.subscriptions.getByReference(ODD_REF, o),
+		call: (c, o) => c.subscriptions.getByReference(REF, o),
 		method: 'GET',
-		path: `/transaction/subscription/reference/subscription/${ODD_REF_ES}`,
-		reply: fx('Subscription'),
+		path: '/subscriptions',
+		query: REF_Q,
+		reply: items(subscription(REF)),
+		check: (v) => expect(v.reference).toBe(REF),
+	},
+	{
+		name: 'subscriptions.update',
+		call: (c, o) =>
+			c.subscriptions.update(SUB_ID, { metadata: { plan: 'pro-annual', coupon: '' } }, o),
+		method: 'PATCH',
+		path: `/subscriptions/${SUB_ID}`,
+		body: { metadata: { plan: 'pro-annual', coupon: '' } },
+		reply: subscription(),
+		check: (v) => expect(v.metadata).toEqual({ plan: 'pro' }),
+	},
+	{
+		name: 'subscriptions.update without metadata',
+		call: (c, o) => c.subscriptions.update(SUB_ID, {}, o),
+		method: 'PATCH',
+		path: `/subscriptions/${SUB_ID}`,
+		body: {},
+		reply: subscription(),
 	},
 	{
 		name: 'subscriptions.listBills',
-		call: (c, o) => c.subscriptions.listBills(SUB_ID, { limit: 100, cursor: UUID_A }, o),
+		call: (c, o) => c.subscriptions.listBills(SUB_ID, { limit: 100, cursor: CURSOR }, o),
 		method: 'GET',
-		path: `/transaction/subscription/${SUB_ID}/bills`,
-		query: `cursor=${UUID_A}&limit=100`,
-		reply: page(fx('Bill')),
+		path: `/subscriptions/${SUB_ID}/bills`,
+		query: `cursor=${CURSOR}&limit=100`,
+		reply: page(BILL),
 		check: (v) =>
 			expect([v.items[0].uuid, v.items[0].subscriptionUuid]).toEqual(['sub-hist@1', 'sub@1']),
 	},
@@ -518,159 +671,200 @@ const ROUTES: RouteCase[] = [
 		name: 'subscriptions.getBill',
 		call: (c, o) => c.subscriptions.getBill(BILL_ID, { includeMembers: true }, o),
 		method: 'GET',
-		path: `/transaction/subscription/bill/${BILL_ID}`,
+		path: `/bills/${BILL_ID}`,
 		query: 'includeMembers=true',
-		reply: fx('Bill'),
-	},
-	{
-		name: 'subscriptions.getPublicHistory',
-		call: (c, o) => c.subscriptions.getPublicHistory(SUB_ID, o),
-		method: 'GET',
-		path: `/transaction/subscription/history/${SUB_ID}`,
-		reply: '[{"uuid":"sub-hist@1","createdAt":"2026-10-01T12:00:00+02:00","amount":9.99,"periodStart":"2026-10-01T12:00:00Z"}]',
-		check: (v) =>
-			expect([v.length, v[0].amount, v[0].customerUuid, v[0].metadata.feePercent]).toEqual([
-				1,
-				9.99,
-				undefined,
-				0,
-			]),
+		reply: BILL,
+		check: (v) => expect([v.amount, v.periodEnd]).toEqual(['9.99', '2026-10-31T12:00:00Z']),
 	},
 	{
 		name: 'subscriptions.cancel 202',
 		call: (c, o) => c.subscriptions.cancel(SUB_ID, { immediate: false }, o),
 		method: 'POST',
-		path: `/transaction/subscription/processing/force-cancel/${SUB_ID}`,
+		path: `/subscriptions/${SUB_ID}/cancel`,
 		query: 'immediate=false',
 		status: 202,
-		reply: fx('Subscription'),
+		reply: subscription(),
 		check: (v) => expect([v.pending, v.subscription.uuid]).toEqual([true, 'sub@1']),
 	},
 	{
 		name: 'subscriptions.cancel 200',
 		call: (c, o) => c.subscriptions.cancel(SUB_ID, undefined, o),
 		method: 'POST',
-		path: `/transaction/subscription/processing/force-cancel/${SUB_ID}`,
+		path: `/subscriptions/${SUB_ID}/cancel`,
 		reply: '{"uuid":"sub@1","status":"cancelled","cancellationReason":"merchant"}',
 		check: (v) => expect([v.pending, v.subscription.status]).toEqual([false, 'cancelled']),
 	},
 	{
-		name: 'subscriptions.executeTestBilling',
-		call: (c, o) => c.subscriptions.executeTestBilling(SUB_ID, o),
+		name: 'subscriptions.testBill',
+		call: (c, o) => c.subscriptions.testBill(SUB_ID, o),
 		method: 'POST',
-		path: `/transaction/subscription/processing/execute-billing/${SUB_ID}`,
-		reply: fx('BillingState'),
-		check: (v) => expect([v.stage, v.outcome]).toEqual(['done', 'paid']),
+		path: `/subscriptions/${SUB_ID}/test-bill`,
+		reply: TEST_BILL,
+		check: (v) =>
+			expect([v.billUuid, v.stage, v.outcome]).toEqual(['sub-hist@1', 'done', 'paid']),
 	},
 
 	// Refunds.
 	{
 		name: 'refunds.list',
-		// limit and cursor are listInactive's: never sent here.
 		call: (c, o) =>
-			c.refunds.list({ limit: 5, cursor: UUID_A, includeMembers: false, held: true }, o),
+			c.refunds.list(
+				{
+					limit: 5,
+					cursor: CURSOR,
+					status: ['pending', 'cancelled'],
+					txUuid: PAY_ID,
+					includeMembers: false,
+					held: true,
+				},
+				o
+			),
 		method: 'GET',
-		path: '/transaction/refunds/all',
-		query: 'held=true&includeMembers=false',
-		reply: list(fx('Refund')),
+		path: '/refunds',
+		// The statuses are a repeated key, in the order given.
+		query: `cursor=${CURSOR}&held=true&includeMembers=false&limit=5&status=pending&status=cancelled&txUuid=${PAY_ID_Q}`,
+		reply: page(REFUND),
 		check: (v) =>
-			expect([v.length, !!v[0].approval, v[0].status]).toEqual([1, true, 'pending']),
+			expect([v.items.length, !!v.items[0].approval, v.items[0].refundPercent]).toEqual([
+				1,
+				true,
+				'50',
+			]),
 	},
 	{
-		name: 'refunds.listInactive',
-		call: (c, o) => c.refunds.listInactive({ limit: 5, cursor: UUID_A, userUuid: MEMBER }, o),
+		name: 'refunds.list no status',
+		call: (c, o) => c.refunds.list({ status: [], userUuid: MEMBER }, o),
 		method: 'GET',
-		path: '/transaction/refunds/all/inactive',
-		query: `cursor=${UUID_A}&limit=5&userUuid=${MEMBER}`,
-		reply: page(fx('Refund')),
+		path: '/refunds',
+		query: `userUuid=${MEMBER}`,
+		reply: page(REFUND),
 	},
 	{
-		name: 'refunds.initiate',
+		name: 'refunds.get',
+		call: (c, o) => c.refunds.get(REFUND_ID, o),
+		method: 'GET',
+		path: `/refunds/${REFUND_ID}`,
+		reply: REFUND,
+		check: (v) =>
+			expect([v.uuid, v.status, v.amount, v.currency.symbol]).toEqual([
+				'refund@1',
+				'pending',
+				'5.0021',
+				'USDC',
+			]),
+	},
+	{
+		name: 'refunds.create',
 		call: (c, o) =>
-			c.refunds.initiate(
+			c.refunds.create(
 				{
 					txUuid: BILL_ID,
-					refundPercent: 50.5,
+					refundPercent: '50.50',
 					reason: 'Damaged',
 					merchantMessage: 'Sorry',
 				},
 				o
 			),
 		method: 'POST',
-		path: '/transaction/refunds/initiate',
+		path: '/refunds',
 		idempotent: true,
 		status: 201,
-		body: { txUuid: BILL_ID, refundPercent: 50.5, reason: 'Damaged', merchantMessage: 'Sorry' },
-		reply: fx('Refund'),
+		body: {
+			txUuid: BILL_ID,
+			refundPercent: '50.50',
+			reason: 'Damaged',
+			merchantMessage: 'Sorry',
+		},
+		reply: REFUND,
 		check: (v) => expect([v.uuid, v.txUuid]).toEqual(['refund@1', 'pay@1']),
+	},
+	{
+		name: 'refunds.create minimal',
+		call: (c, o) => c.refunds.create({ txUuid: PAY_ID, refundPercent: '' }, o),
+		method: 'POST',
+		path: '/refunds',
+		idempotent: true,
+		status: 201,
+		body: { txUuid: PAY_ID }, // '' = the default, 100: not sent
+		reply: REFUND,
 	},
 
 	// Members.
 	{
 		name: 'members.list',
-		call: (c, o) => c.members.list({ limit: 20, cursor: MEMBER }, o),
+		call: (c, o) => c.members.list({ limit: 20, cursor: CURSOR }, o),
 		method: 'GET',
 		path: '/members',
-		query: `cursor=${MEMBER}&limit=20`,
-		reply: page(fx('Member')),
+		query: `cursor=${CURSOR}&limit=20`,
+		reply: page(MEMBER_FX),
 		check: (v) =>
-			expect([v.items[0].userUuid, v.items[0].acceptedCurrencyIds.length]).toEqual([
-				'm-1',
-				3,
-			]),
+			expect([
+				v.items[0].userUuid,
+				v.items[0].firstName,
+				v.items[0].acceptedCurrencies[0].code,
+			]).toEqual(['m-1', 'Ada', 'BASE:USDC']),
 	},
 	{
 		name: 'members.get',
 		call: (c, o) => c.members.get(MEMBER, o),
 		method: 'GET',
 		path: `/members/${MEMBER}`,
-		reply: fx('Member'),
+		reply: MEMBER_FX,
 	},
 	{
 		name: 'members.update',
-		call: (c, o) => c.members.update(MEMBER, { organizationFeePercent: 0 }, o),
-		method: 'PUT',
+		call: (c, o) => c.members.update(MEMBER, { organizationFeePercent: '0' }, o),
+		method: 'PATCH',
 		path: `/members/${MEMBER}`,
-		body: { organizationFeePercent: 0 },
-		reply: fx('Member'),
+		body: { organizationFeePercent: '0' },
+		reply: MEMBER_FX,
+		check: (v) => expect(v.organizationFeePercent).toBe('7.5'),
 	},
 	{
 		name: 'members.remove',
 		call: (c, o) => c.members.remove(MEMBER, o),
 		method: 'DELETE',
 		path: `/members/${MEMBER}`,
-		reply: '{"message":"Member removed"}',
+		status: 204,
+		reply: '',
+		check: isVoid,
 	},
 	{
 		name: 'members.trust',
 		call: (c, o) => c.members.trust(MEMBER, o),
 		method: 'POST',
 		path: `/members/${MEMBER}/trust`,
-		reply: `{"userUuid":"${MEMBER}","trustedAt":"2026-10-07T10:00:00+02:00"}`,
-		check: (v) => expect(v.trustedAt).toBe('2026-10-07T10:00:00+02:00'),
+		reply: `{"userUuid":"${MEMBER}","trustedAt":"2026-10-07T10:00:00Z"}`,
+		check: (v) => expect(v.trustedAt).toBe('2026-10-07T10:00:00Z'),
 	},
 	{
 		name: 'members.listHeldFunds',
 		call: (c, o) => c.members.listHeldFunds(o),
 		method: 'GET',
 		path: '/members/held-funds',
-		reply: list(fx('MemberHeldFundsSummary')),
-		check: (v) => expect([v.length, v[0].count]).toEqual([1, 2]),
+		reply: items(MEMBER_HELD_FUNDS),
+		check: (v) => expect([v.length, v[0].count, v[0].totalUsd]).toEqual([1, 2, '98.5']),
 	},
 	{
 		name: 'members.getHeldFunds',
 		call: (c, o) => c.members.getHeldFunds(MEMBER, o),
 		method: 'GET',
 		path: `/members/${MEMBER}/held-funds`,
-		reply: fx('HeldFunds'),
-		check: (v) => expect([v.ledgers.length, v.totalAmount]).toEqual([1, -10.0042]),
+		reply: HELD_FUNDS,
+		check: (v) =>
+			expect([v.ledgers.length, v.ledgers[0].owed, v.totalUsd]).toEqual([
+				1,
+				'-10.0042',
+				'-10.0042',
+			]),
 	},
 	{
 		name: 'members.getOwnHeldFunds',
 		call: (c, o) => c.members.getOwnHeldFunds(o),
 		method: 'GET',
-		path: '/user/held-funds',
-		reply: '{"ledgers":[],"totalAmount":0}',
+		path: '/held-funds',
+		reply: '{"ledgers":[],"totalUsd":"0"}',
+		check: (v) => expect(v).toEqual({ ledgers: [], totalUsd: '0' }),
 	},
 
 	// Invitations.
@@ -680,8 +874,8 @@ const ROUTES: RouteCase[] = [
 			c.invitations.create(
 				{
 					email: 'seller@example.com',
-					trustLayer: true,
-					organizationFeePercent: 2.5,
+					holdFunds: true,
+					organizationFeePercent: '2.5',
 					redirectUrl: 'https://shop.example/welcome',
 				},
 				o
@@ -693,38 +887,47 @@ const ROUTES: RouteCase[] = [
 		body: {
 			email: 'seller@example.com',
 			role: 'user',
-			trustLayer: true,
-			organizationFeePercent: 2.5,
+			holdFunds: true,
+			organizationFeePercent: '2.5',
 			redirectUrl: 'https://shop.example/welcome',
 		},
-		reply: fx('InvitationCreated'),
-		check: (v) => expect([!!v.link, v.invitation.status]).toEqual([true, 'pending']),
+		reply: CREATED_INVITATION,
+		// Flat: the invitation's fields and its link.
+		check: (v) =>
+			expect([v.uuid, v.status, v.holdFunds, !!v.link]).toEqual([
+				'i-1',
+				'pending',
+				true,
+				true,
+			]),
 	},
 	{
 		name: 'invitations.create minimal',
-		call: (c, o) => c.invitations.create({ email: 'seller@example.com', trustLayer: false }, o),
+		call: (c, o) => c.invitations.create({ email: 'seller@example.com', holdFunds: false }, o),
 		method: 'POST',
 		path: '/invitations',
 		idempotent: true,
 		status: 201,
-		body: { email: 'seller@example.com', role: 'user', trustLayer: false },
-		reply: fx('InvitationCreated'),
+		body: { email: 'seller@example.com', role: 'user', holdFunds: false },
+		reply: CREATED_INVITATION,
 	},
 	{
 		name: 'invitations.list',
-		call: (c, o) => c.invitations.list({ status: 'pending' }, o),
+		call: (c, o) => c.invitations.list({ status: 'pending', limit: 10 }, o),
 		method: 'GET',
 		path: '/invitations',
-		query: 'status=pending',
-		reply: page(fx('Invitation')),
+		query: 'limit=10&status=pending',
+		reply: page(INVITATION),
+		check: (v) => expect(v.items[0].organizationFeePercent).toBe('2.5'),
 	},
 	{
 		name: 'invitations.revoke',
 		call: (c, o) => c.invitations.revoke(UUID_A, o),
 		method: 'DELETE',
 		path: `/invitations/${UUID_A}`,
-		reply: fx('Invitation'),
-		check: (v) => expect(v.uuid).toBe('i-1'),
+		status: 204,
+		reply: '',
+		check: isVoid,
 	},
 
 	// Wallets.
@@ -732,26 +935,31 @@ const ROUTES: RouteCase[] = [
 		name: 'wallets.list',
 		call: (c, o) => c.wallets.list({ withBalances: true }, o),
 		method: 'GET',
-		path: '/wallet/user',
+		path: '/wallets',
 		query: 'withBalances=true',
-		reply: list(fx('Wallet')),
-		check: (v) => expect([v.length, !!v[0].tokenWallets[0].balance]).toEqual([1, true]),
+		reply: items(WALLET),
+		check: (v) =>
+			expect([v.length, v[0].address, v[0].tokenWallets[0].balance.amount]).toEqual([
+				1,
+				'0xpk',
+				'12.5',
+			]),
 	},
 	{
 		name: 'wallets.listForMember',
 		call: (c, o) => c.wallets.listForMember(MEMBER, o),
 		method: 'GET',
-		path: `/wallet/user/${MEMBER}`,
-		reply: list(fx('Wallet')),
+		path: `/members/${MEMBER}/wallets`,
+		reply: items(WALLET),
 	},
 	{
-		name: 'wallets.listSupportedCurrencies',
-		call: (c, o) => c.wallets.listSupportedCurrencies({ userUuid: MEMBER }, o),
+		name: 'wallets.listAcceptedCurrencies',
+		call: (c, o) => c.wallets.listAcceptedCurrencies({ userUuid: MEMBER }, o),
 		method: 'GET',
-		path: '/wallet/supported-currencies',
+		path: '/wallets/accepted-currencies',
 		query: `userUuid=${MEMBER}`,
-		reply: list(fx('Currency')),
-		check: (v) => expect([v.length, !!v[0].mainCurrency]).toEqual([1, true]),
+		reply: items(CUR, NATIVE),
+		check: (v) => expect(v.map((x: any) => x.code)).toEqual(['BASE:USDC', 'BASE']),
 	},
 
 	// Accounting.
@@ -761,8 +969,14 @@ const ROUTES: RouteCase[] = [
 		method: 'GET',
 		path: '/accounting/export',
 		query: 'format=json&from=2026-09-01&to=2026-09-30',
-		reply: list(fx('AccountingEvent')),
-		check: (v) => expect([v.length, v[0].type]).toEqual([1, 'refund']),
+		reply: items(ACCOUNTING_EVENT),
+		check: (v) =>
+			expect([v.length, v[0].type, v[0].txUuid, v[0].grossAmountUsd]).toEqual([
+				1,
+				'refund',
+				'refund@1',
+				'-10.0042',
+			]),
 	},
 	{
 		name: 'accounting.exportCsv',
@@ -771,9 +985,9 @@ const ROUTES: RouteCase[] = [
 		path: '/accounting/export',
 		query: 'format=csv&from=2026-09-01&to=2026-09-30',
 		accept: 'text/csv, application/json',
-		reply: 'paymentUuid,type\npay@1,payment\n',
+		reply: 'txUuid,type\npay@1,payment\n',
 		contentType: 'text/csv',
-		check: (v) => expect(v).toBe('paymentUuid,type\npay@1,payment\n'),
+		check: (v) => expect(v).toBe('txUuid,type\npay@1,payment\n'),
 	},
 
 	// Webhooks.
@@ -783,15 +997,29 @@ const ROUTES: RouteCase[] = [
 		method: 'POST',
 		path: '/webhooks/verify',
 		body: { endpointUuid: UUID_A, body: '{"id":"evt_1"}', signature: 't=1790856000,v1=abc' },
-		reply: '{"message":"Signature valid"}',
+		reply: '{"valid":true}',
+		check: isVoid,
 	},
 	{
 		name: 'webhooks.endpoints.list',
-		call: (c, o) => c.webhooks.endpoints.list(o),
+		call: (c, o) => c.webhooks.endpoints.list({ limit: 5, cursor: CURSOR }, o),
 		method: 'GET',
 		path: '/webhooks/endpoints',
-		reply: list(fx('WebhookEndpointCreated')),
-		check: (v) => expect([v.length, v[0].url]).toEqual([1, 'https://x.io/hook']),
+		query: `cursor=${CURSOR}&limit=5`,
+		reply: page(ENDPOINT),
+		check: (v) =>
+			expect([v.items.length, v.items[0].url, v.hasMore]).toEqual([
+				1,
+				'https://x.io/hook',
+				true,
+			]),
+	},
+	{
+		name: 'webhooks.endpoints.list no params',
+		call: (c, o) => c.webhooks.endpoints.list(undefined, o),
+		method: 'GET',
+		path: '/webhooks/endpoints',
+		reply: '{"items":[],"hasMore":false}',
 	},
 	{
 		name: 'webhooks.endpoints.create',
@@ -815,7 +1043,7 @@ const ROUTES: RouteCase[] = [
 			includeMembers: false,
 			description: 'Shop',
 		},
-		reply: fx('WebhookEndpointCreated'),
+		reply: ENDPOINT,
 		check: (v) => expect([v.secret, v.uuid]).toEqual(['whsec_x', 'e-1']),
 	},
 	{
@@ -823,7 +1051,7 @@ const ROUTES: RouteCase[] = [
 		call: (c, o) => c.webhooks.endpoints.get(UUID_A, o),
 		method: 'GET',
 		path: `/webhooks/endpoints/${UUID_A}`,
-		reply: fx('WebhookEndpointCreated'),
+		reply: ENDPOINT,
 	},
 	{
 		name: 'webhooks.endpoints.update',
@@ -833,31 +1061,33 @@ const ROUTES: RouteCase[] = [
 				{ events: [], description: '', payloadVersion: 'v2', enabled: true },
 				o
 			),
-		method: 'PUT',
+		method: 'PATCH',
 		path: `/webhooks/endpoints/${UUID_A}`,
 		body: { events: [], description: '', payloadVersion: 'v2', enabled: true },
-		reply: fx('WebhookEndpointCreated'),
+		reply: ENDPOINT,
 	},
 	{
 		name: 'webhooks.endpoints.delete',
 		call: (c, o) => c.webhooks.endpoints.delete(UUID_A, o),
 		method: 'DELETE',
 		path: `/webhooks/endpoints/${UUID_A}`,
-		reply: '{"message":"Endpoint deleted"}',
+		status: 204,
+		reply: '',
+		check: isVoid,
 	},
 	{
 		name: 'webhooks.events.list',
 		call: (c, o) =>
 			c.webhooks.events.list(
-				{ limit: 2, cursor: EVENT_ID, type: 'webhook.test', includeMembers: true },
+				{ limit: 2, cursor: CURSOR, type: 'webhook.test', includeMembers: true },
 				o
 			),
 		method: 'GET',
 		path: '/webhooks/events',
-		query: `cursor=${EVENT_ID}&includeMembers=true&limit=2&type=webhook.test`,
-		reply: `{"items":[${EVT}],"nextCursor":null}`,
+		query: `cursor=${CURSOR}&includeMembers=true&limit=2&type=webhook.test`,
+		reply: `{"items":[${EVT}],"hasMore":false}`,
 		check: (v) => {
-			expect([v.items.length, v.hasMore]).toEqual([1, false]);
+			expect([v.items.length, v.hasMore, v.nextCursor]).toEqual([1, false, undefined]);
 			expect(v.items[0].type).toBe('webhook.test');
 			expect(v.items[0].data.endpointUuid).toBeTruthy();
 		},
@@ -885,46 +1115,48 @@ const ROUTES: RouteCase[] = [
 							delivered: true,
 							statusCode: 200,
 							durationMs: 12,
-							attemptedAt: '2026-10-01T12:00:01+02:00',
+							attemptedAt: '2026-10-01T12:00:01Z',
 						},
 					],
 				},
 			],
 		}),
 		check: (v) => {
+			const attempt = v.deliveries[0].attempts[0];
 			expect([
 				v.id,
 				v.type,
 				v.deliveries.length,
-				v.deliveries[0].attempts.length,
 				v.deliveries[0].delivered,
-			]).toEqual([EVENT_ID, 'webhook.test', 1, 1, true]);
+				attempt.skipped,
+			]).toEqual([EVENT_ID, 'webhook.test', 1, true, false]);
 		},
 	},
 
 	// Currencies.
 	{
-		name: 'currencies.listAvailable',
-		call: (c, o) => c.currencies.listAvailable({ test: true }, o),
+		name: 'currencies.list',
+		call: (c, o) => c.currencies.list({ test: true, main: true }, o),
 		method: 'GET',
-		path: '/utils/all-available-currencies',
-		query: 'test=true',
-		reply: list(fx('Currency')),
+		path: '/currencies',
+		query: 'main=true&test=true',
+		reply: items(NATIVE),
+		check: (v) => expect([v.length, v[0].code, v[0].address]).toEqual([1, 'BASE', undefined]),
 	},
 	{
-		name: 'currencies.listMain',
-		call: (c, o) => c.currencies.listMain(undefined, o),
+		name: 'currencies.list no params',
+		call: (c, o) => c.currencies.list(undefined, o),
 		method: 'GET',
-		path: '/utils/all-main-currencies',
-		reply: list(fx('Currency')),
+		path: '/currencies',
+		reply: items(CUR),
 	},
 	{
 		name: 'currencies.get',
 		call: (c, o) => c.currencies.get(8, o),
 		method: 'GET',
-		path: '/utils/currency/id/8',
-		reply: fx('Currency'),
-		check: (v) => expect([v.id, v.symbol]).toEqual([8, 'USDC']),
+		path: '/currencies/8',
+		reply: CUR,
+		check: (v) => expect([v.id, v.code, v.chain]).toEqual([8, 'BASE:USDC', 'BASE']),
 	},
 ];
 
@@ -1021,7 +1253,7 @@ describe('retry policy per method', () => {
 			'customers.create',
 			'invitations.create',
 			'products.create',
-			'refunds.initiate',
+			'refunds.create',
 			'webhooks.endpoints.create',
 		]);
 	});
@@ -1055,7 +1287,26 @@ describe('errors reach the caller typed', () => {
 		const c3 = testClient(ts3).client;
 		expect(await rejection(c3.subscriptions.cancel(SUB_ID))).toBeInstanceOf(NotFoundError);
 		expect(await rejection(c3.products.delete(UUID_A))).toBeInstanceOf(NotFoundError);
+		expect(await rejection(c3.invitations.revoke(UUID_A))).toBeInstanceOf(NotFoundError);
 		expect(await rejection(collect(c3.customers.iterate()))).toBeInstanceOf(NotFoundError);
+		expect(await rejection(c3.products.getByReference('pro'))).toBeInstanceOf(NotFoundError);
+		expect(await rejection(c3.wallets.list())).toBeInstanceOf(NotFoundError);
+	});
+
+	it('a test bill of a live subscription is a BadRequestError test_mode_only', async () => {
+		const ts = await testServer(
+			staticReply(400, '{"error":"test mode only","code":"test_mode_only"}')
+		);
+		const err = (await rejection(
+			testClient(ts).client.subscriptions.testBill(SUB_ID)
+		)) as BadRequestError;
+		expect([err instanceof BadRequestError, err.code]).toEqual([true, 'test_mode_only']);
+		expect(ts.recorded).toHaveLength(1); // never retried
+	});
+
+	it('a 204 delete ignores any body; a 200 one too', async () => {
+		const ts = await testServer((_req, res) => reply(res, 200, '{"message":"deleted"}'));
+		await expect(testClient(ts).client.customers.delete(UUID_A)).resolves.toBeUndefined();
 	});
 
 	it('a 2xx without the subscription is a ServerError', async () => {
@@ -1070,47 +1321,71 @@ describe('errors reach the caller typed', () => {
 });
 
 describe('validation before the request', () => {
+	const cursor201 = 'c'.repeat(201);
 	const cases: Array<[string, string, (c: QBitFlow) => Promise<unknown>]> = [
 		['products.get empty', 'uuid', (c) => c.products.get('')],
 		['products.get not uuid', 'uuid', (c) => c.products.get('42')],
 		['products.update', 'uuid', (c) => c.products.update('../x', {})],
 		['products.delete', 'uuid', (c) => c.products.delete('')],
-		['products.getByReference', 'reference', (c) => c.products.getByReference('  ')],
-		['products.getByReference dots', 'reference', (c) => c.products.getByReference('..')],
+		['products.getByReference blank', 'reference', (c) => c.products.getByReference('  ')],
+		['products.getByReference space', 'reference', (c) => c.products.getByReference('a b')],
+		['products.getByReference slash', 'reference', (c) => c.products.getByReference('a/b')],
+		[
+			'products.getByReference 101',
+			'reference',
+			(c) => c.products.getByReference('r'.repeat(101)),
+		],
+		['products.list reference', 'reference', (c) => c.products.list({ reference: 'a b' })],
+		['products.list cursor', 'cursor', (c) => c.products.list({ cursor: cursor201 })],
 		['customers.get', 'uuid', (c) => c.customers.get(`pay@${UUID_A}`)],
 		['customers.update', 'uuid', (c) => c.customers.update('', {})],
 		['customers.delete', 'uuid', (c) => c.customers.delete('x')],
-		['customers.getByEmail', 'email', (c) => c.customers.getByEmail('')],
 		['customers.getByReference', 'reference', (c) => c.customers.getByReference('')],
-		['checkoutSessions.getStatus', 'uuid', (c) => c.checkoutSessions.getStatus('')],
+		['customers.list reference', 'reference', (c) => c.customers.list({ reference: 'a b' })],
+		['checkoutSessions.get', 'uuid', (c) => c.checkoutSessions.get('')],
 		['checkoutSessions.expire', 'uuid', (c) => c.checkoutSessions.expire('cs_123')],
 		['payments.get', 'uuid', (c) => c.payments.get('pay@123')],
 		['payments.getByReference', 'reference', (c) => c.payments.getByReference('')],
+		['payments.list reference', 'reference', (c) => c.payments.list({ reference: 'o 1' })],
 		['subscriptions.get', 'uuid', (c) => c.subscriptions.get(`bad@${UUID_A}`)],
 		['subscriptions.getByReference', 'reference', (c) => c.subscriptions.getByReference('')],
+		['subscriptions.update uuid', 'uuid', (c) => c.subscriptions.update('sub-1', {})],
+		[
+			'subscriptions.update metadata key',
+			'metadata',
+			(c) => c.subscriptions.update(SUB_ID, { metadata: { 'a/b': 'v' } }),
+		],
+		[
+			'subscriptions.update metadata value',
+			'metadata.k',
+			(c) => c.subscriptions.update(SUB_ID, { metadata: { k: 'a\tb' } }),
+		],
 		['subscriptions.listBills', 'uuid', (c) => c.subscriptions.listBills('')],
 		['subscriptions.getBill', 'billUuid', (c) => c.subscriptions.getBill('1')],
-		[
-			'subscriptions.getPublicHistory',
-			'subscriptionUuid',
-			(c) => c.subscriptions.getPublicHistory(''),
-		],
 		['subscriptions.cancel', 'uuid', (c) => c.subscriptions.cancel('', { immediate: true })],
-		[
-			'subscriptions.executeTestBilling',
-			'uuid',
-			(c) => c.subscriptions.executeTestBilling('sub'),
-		],
+		['subscriptions.testBill', 'uuid', (c) => c.subscriptions.testBill('sub')],
+		['refunds.get empty', 'uuid', (c) => c.refunds.get('')],
+		['refunds.get not an id', 'uuid', (c) => c.refunds.get('refund-1')],
 		['members.get', 'userUuid', (c) => c.members.get('')],
-		['members.update', 'userUuid', (c) => c.members.update('1', { organizationFeePercent: 0 })],
+		[
+			'members.update',
+			'userUuid',
+			(c) => c.members.update('1', { organizationFeePercent: '0' }),
+		],
 		['members.remove', 'userUuid', (c) => c.members.remove('')],
 		['members.trust', 'userUuid', (c) => c.members.trust('x')],
 		['members.getHeldFunds', 'userUuid', (c) => c.members.getHeldFunds('')],
+		['members.list cursor', 'cursor', (c) => c.members.list({ cursor: cursor201 })],
 		['invitations.revoke', 'uuid', (c) => c.invitations.revoke('')],
 		['wallets.listForMember', 'userUuid', (c) => c.wallets.listForMember('1')],
 		['webhooks.endpoints.get', 'uuid', (c) => c.webhooks.endpoints.get('')],
 		['webhooks.endpoints.update', 'uuid', (c) => c.webhooks.endpoints.update('x', {})],
 		['webhooks.endpoints.delete', 'uuid', (c) => c.webhooks.endpoints.delete('')],
+		[
+			'webhooks.endpoints.list cursor',
+			'cursor',
+			(c) => c.webhooks.endpoints.list({ cursor: cursor201 }),
+		],
 		['webhooks.events.get', 'id', (c) => c.webhooks.events.get('')],
 		[
 			'webhooks.verifyRemote uuid',
@@ -1143,6 +1418,11 @@ describe('validation before the request', () => {
 		['customers.create no params', '', (c) => c.customers.create(undefined as never)],
 		['customers.update no params', '', (c) => c.customers.update(UUID_A, null as never)],
 		[
+			'subscriptions.update no params',
+			'',
+			(c) => c.subscriptions.update(SUB_ID, undefined as never),
+		],
+		[
 			'checkoutSessions.createPayment no params',
 			'',
 			(c) => c.checkoutSessions.createPayment(undefined as never),
@@ -1152,7 +1432,7 @@ describe('validation before the request', () => {
 			'',
 			(c) => c.checkoutSessions.createSubscription(undefined as never),
 		],
-		['refunds.initiate no params', '', (c) => c.refunds.initiate(undefined as never)],
+		['refunds.create no params', '', (c) => c.refunds.create(undefined as never)],
 		['members.update no params', '', (c) => c.members.update(MEMBER, undefined as never)],
 		['invitations.create no params', '', (c) => c.invitations.create(undefined as never)],
 		[
@@ -1165,12 +1445,41 @@ describe('validation before the request', () => {
 			'',
 			(c) => c.webhooks.endpoints.update(UUID_A, undefined as never),
 		],
-		['products.create price', 'price', (c) => c.products.create({ name: 'Pro', price: -1 })],
+		[
+			'products.create priceUsd negative',
+			'priceUsd',
+			(c) => c.products.create({ name: 'Pro', priceUsd: '-1' }),
+		],
+		[
+			'products.create priceUsd 3 decimals',
+			'priceUsd',
+			(c) => c.products.create({ name: 'Pro', priceUsd: '9.999' }),
+		],
+		[
+			'products.create priceUsd a number',
+			'priceUsd',
+			(c) => c.products.create({ name: 'Pro', priceUsd: 9.99 as never }),
+		],
+		[
+			'products.create metadata',
+			'metadata',
+			(c) => c.products.create({ name: 'Pro', priceUsd: '1', metadata: { 'a b': 'v' } }),
+		],
 		['products.update name', 'name', (c) => c.products.update(UUID_A, { name: '<b>' })],
+		[
+			'products.update priceUsd',
+			'priceUsd',
+			(c) => c.products.update(UUID_A, { priceUsd: '1e2' }),
+		],
 		[
 			'customers.create email',
 			'email',
-			(c) => c.customers.create({ name: 'Ada', email: 'ada' }),
+			(c) => c.customers.create({ firstName: 'Ada', email: 'ada' }),
+		],
+		[
+			'customers.create firstName',
+			'firstName',
+			(c) => c.customers.create({ firstName: '', email: 'ada@example.com' }),
 		],
 		[
 			'customers.update phone',
@@ -1183,6 +1492,11 @@ describe('validation before the request', () => {
 			'productUuid',
 			(c) =>
 				c.checkoutSessions.createPayment({ productUuid: UUID_A, productReference: 'pro' }),
+		],
+		[
+			'checkoutSessions.createPayment inline without price',
+			'priceUsd',
+			(c) => c.checkoutSessions.createPayment({ productName: 'T-shirt' }),
 		],
 		[
 			'checkoutSessions.createSubscription frequency',
@@ -1199,7 +1513,16 @@ describe('validation before the request', () => {
 			(c) =>
 				c.checkoutSessions.createSubscription({
 					productUuid: UUID_A,
-					fees: { items: [{ label: '', amountUsd: 2 }] },
+					fees: { items: [{ label: '', amountUsd: '2' }] },
+				}),
+		],
+		[
+			'checkoutSessions.createPayment fee amount a number',
+			'fees.items[0].amountUsd',
+			(c) =>
+				c.checkoutSessions.createPayment({
+					productUuid: UUID_A,
+					fees: { items: [{ label: 'VAT', amountUsd: 2 as never }] },
 				}),
 		],
 		[
@@ -1207,39 +1530,75 @@ describe('validation before the request', () => {
 			'userUuid',
 			(c) => c.payments.list({ includeMembers: true, userUuid: MEMBER }),
 		],
+		['transactions.list type', 'type', (c) => c.transactions.list({ type: 'refund' })],
 		[
-			'payments.listCombined source',
-			'source',
-			(c) => c.payments.listCombined({ source: 'bills' }),
+			'transactions.list subscriptionUuid',
+			'subscriptionUuid',
+			(c) => c.transactions.list({ subscriptionUuid: 'sub-1' }),
 		],
 		['failures.list kind', 'kind', (c) => c.failures.list({ kind: 'refund' })],
 		[
-			'subscriptions.list status',
-			'status',
-			(c) => c.subscriptions.list({ status: 'lowOnFunds' }),
+			'subscriptions.list reference',
+			'reference',
+			(c) => c.subscriptions.list({ reference: 'c 1' }),
 		],
 		['refunds.list userUuid', 'userUuid', (c) => c.refunds.list({ userUuid: '1' })],
 		[
-			'refunds.listInactive exclusive',
+			'refunds.list exclusive',
 			'userUuid',
-			(c) => c.refunds.listInactive({ includeMembers: true, userUuid: MEMBER }),
+			(c) => c.refunds.list({ includeMembers: true, userUuid: MEMBER }),
 		],
 		[
-			'refunds.initiate percent',
-			'refundPercent',
-			(c) => c.refunds.initiate({ txUuid: PAY_ID, refundPercent: 0 }),
+			'refunds.list status unknown',
+			'status[1]',
+			(c) => c.refunds.list({ status: ['approved', 'denied'] }),
 		],
+		[
+			'refunds.list status 6',
+			'status',
+			(c) =>
+				c.refunds.list({
+					status: ['pending', 'approved', 'rejected', 'cancelled', 'failed', 'pending'],
+				}),
+		],
+		['refunds.list txUuid', 'txUuid', (c) => c.refunds.list({ txUuid: 'order-1' })],
+		[
+			'refunds.create percent zero',
+			'refundPercent',
+			(c) => c.refunds.create({ txUuid: PAY_ID, refundPercent: '0' }),
+		],
+		[
+			'refunds.create percent above 100',
+			'refundPercent',
+			(c) => c.refunds.create({ txUuid: PAY_ID, refundPercent: '100.01' }),
+		],
+		['refunds.create txUuid', 'txUuid', (c) => c.refunds.create({ txUuid: '' })],
 		[
 			'members.update fee',
 			'organizationFeePercent',
-			(c) => c.members.update(MEMBER, { organizationFeePercent: 51 }),
+			(c) => c.members.update(MEMBER, { organizationFeePercent: '51' }),
+		],
+		[
+			'members.update fee required',
+			'organizationFeePercent',
+			(c) => c.members.update(MEMBER, {} as never),
 		],
 		['invitations.create email', 'email', (c) => c.invitations.create({} as never)],
+		[
+			'invitations.create fee',
+			'organizationFeePercent',
+			(c) =>
+				c.invitations.create({
+					email: 'a@b.co',
+					holdFunds: true,
+					organizationFeePercent: '2.555',
+				}),
+		],
 		['invitations.list status', 'status', (c) => c.invitations.list({ status: 'open' })],
 		[
-			'wallets.listSupportedCurrencies',
+			'wallets.listAcceptedCurrencies',
 			'userUuid',
-			(c) => c.wallets.listSupportedCurrencies({ userUuid: 'x' }),
+			(c) => c.wallets.listAcceptedCurrencies({ userUuid: 'x' }),
 		],
 		[
 			'accounting.exportJson order',
@@ -1262,9 +1621,14 @@ describe('validation before the request', () => {
 			(c) => c.webhooks.endpoints.update(UUID_A, { events: ['webhook.test'] }),
 		],
 		[
-			'webhooks.events.list type',
-			'type',
-			(c) => c.webhooks.events.list({ type: 'payment.failed' }),
+			'webhooks.endpoints.update payload version',
+			'payloadVersion',
+			(c) => c.webhooks.endpoints.update(UUID_A, { payloadVersion: 'v1' }),
+		],
+		[
+			'webhooks.events.list cursor',
+			'cursor',
+			(c) => c.webhooks.events.list({ cursor: cursor201 }),
 		],
 		[
 			'iterator: bad subscription id',
@@ -1275,6 +1639,11 @@ describe('validation before the request', () => {
 			'iterator: bad onBehalfOf',
 			'onBehalfOf',
 			(c) => collect(c.members.iterate(undefined, { onBehalfOf: 'x' })),
+		],
+		[
+			'iterator: bad refund status',
+			'status[0]',
+			(c) => collect(c.refunds.iterate({ status: ['completed'] })),
 		],
 	];
 
@@ -1385,8 +1754,16 @@ describe('every iterator', () => {
 		]
 	> = [
 		[
+			'products.iterate',
+			'/products',
+			'includeHidden=true&limit=2',
+			uuidItem,
+			(c) => c.products.iterate({ limit: 2, includeHidden: true }),
+			(v) => v.uuid,
+		],
+		[
 			'customers.iterate',
-			'/customer/all',
+			'/customers',
 			'email=a%40b.co&limit=2&verified=false',
 			uuidItem,
 			(c) => c.customers.iterate({ limit: 2, email: 'a@b.co', verified: false }),
@@ -1394,23 +1771,23 @@ describe('every iterator', () => {
 		],
 		[
 			'payments.iterate',
-			'/transaction/payments',
+			'/payments',
 			`createdAfter=${AFTER_Q}&limit=2`,
 			uuidItem,
 			(c) => c.payments.iterate({ limit: 2, createdAfter: AFTER }),
 			(v) => v.uuid,
 		],
 		[
-			'payments.iterateCombined',
-			'/transaction/payments/combined',
-			'source=payment',
+			'transactions.iterate',
+			'/transactions',
+			'type=payment',
 			uuidItem,
-			(c) => c.payments.iterateCombined({ source: 'payment' }),
+			(c) => c.transactions.iterate({ type: 'payment' }),
 			(v) => v.uuid,
 		],
 		[
 			'failures.iterate',
-			'/transaction/failures',
+			'/payment-failures',
 			'category=reverted',
 			uuidItem,
 			(c) => c.failures.iterate({ category: 'reverted' }),
@@ -1418,7 +1795,7 @@ describe('every iterator', () => {
 		],
 		[
 			'subscriptions.iterate',
-			'/transaction/subscriptions',
+			'/subscriptions',
 			'includeMembers=true&status=active',
 			uuidItem,
 			(c) => c.subscriptions.iterate({ includeMembers: true, status: 'active' }),
@@ -1426,18 +1803,18 @@ describe('every iterator', () => {
 		],
 		[
 			'subscriptions.iterateBills',
-			`/transaction/subscription/${SUB_ID}/bills`,
+			`/subscriptions/${SUB_ID}/bills`,
 			'limit=100',
 			uuidItem,
 			(c) => c.subscriptions.iterateBills(SUB_ID, { limit: 100 }),
 			(v) => v.uuid,
 		],
 		[
-			'refunds.iterateInactive',
-			'/transaction/refunds/all/inactive',
-			'held=false',
+			'refunds.iterate',
+			'/refunds',
+			'held=false&status=approved&status=rejected',
 			uuidItem,
-			(c) => c.refunds.iterateInactive({ held: false }),
+			(c) => c.refunds.iterate({ held: false, status: ['approved', 'rejected'] }),
 			(v) => v.uuid,
 		],
 		[
@@ -1457,6 +1834,14 @@ describe('every iterator', () => {
 			(v) => v.uuid,
 		],
 		[
+			'webhooks.endpoints.iterate',
+			'/webhooks/endpoints',
+			'limit=1',
+			uuidItem,
+			(c) => c.webhooks.endpoints.iterate({ limit: 1 }),
+			(v) => v.uuid,
+		],
+		[
 			'webhooks.events.iterate',
 			'/webhooks/events',
 			'type=payment.completed',
@@ -1471,8 +1856,12 @@ describe('every iterator', () => {
 		const ts = await testServer((req, res) => {
 			const cursor = new URLSearchParams(req.query).get('cursor') ?? '';
 			if (cursor === '')
-				reply(res, 200, `{"items":[${item(0)},${item(1)}],"nextCursor":"id1"}`);
-			else if (cursor === 'id1') reply(res, 200, `{"items":[${item(2)}],"nextCursor":null}`);
+				reply(
+					res,
+					200,
+					`{"items":[${item(0)},${item(1)}],"hasMore":true,"nextCursor":"id1"}`
+				);
+			else if (cursor === 'id1') reply(res, 200, `{"items":[${item(2)}],"hasMore":false}`);
 			else reply(res, 400, '{"error":"bad cursor","code":"validation_failed"}');
 		});
 		const { client } = testClient(ts);
@@ -1494,7 +1883,7 @@ describe('every iterator', () => {
 	it('an error ends the walk after the items before it', async () => {
 		const ts = await testServer((req, res) => {
 			if (!req.query.includes('cursor'))
-				reply(res, 200, '{"items":[{"uuid":"id0"}],"nextCursor":"id0x"}');
+				reply(res, 200, '{"items":[{"uuid":"id0"}],"hasMore":true,"nextCursor":"id0x"}');
 			else reply(res, 401, '{"error":"unauthorized","code":"unauthorized"}');
 		});
 		const got: string[] = [];
@@ -1505,5 +1894,221 @@ describe('every iterator', () => {
 		);
 		expect(err).toBeInstanceOf(AuthenticationError);
 		expect(got).toEqual(['id0']);
+	});
+});
+
+describe('getByReference', () => {
+	const methods: Array<[string, string, (c: QBitFlow, r: string) => Promise<any>, string]> = [
+		['products', '/products', (c, r) => c.products.getByReference(r), 'product'],
+		['customers', '/customers', (c, r) => c.customers.getByReference(r), 'customer'],
+		['payments', '/payments', (c, r) => c.payments.getByReference(r), 'payment'],
+		[
+			'subscriptions',
+			'/subscriptions',
+			(c, r) => c.subscriptions.getByReference(r),
+			'subscription',
+		],
+	];
+
+	it.each(methods)('%s: runs the list filter and returns the item', async (_n, path, call) => {
+		const ts = await testServer(
+			staticReply(200, `{"items":[{"uuid":"x-1","reference":"order-1042"}],"hasMore":false}`)
+		);
+		const v = await call(testClient(ts).client, 'order-1042');
+		expect([v.uuid, v.reference]).toEqual(['x-1', 'order-1042']);
+		expect(ts.recorded.map((r) => [r.method, r.path, r.query])).toEqual([
+			['GET', path, 'reference=order-1042'],
+		]);
+	});
+
+	it.each(methods)(
+		'%s: no item is a NotFoundError (404, not_found) with the request id',
+		async (_n, _path, call, what) => {
+			const ts = await testServer((_req, res) =>
+				reply(res, 200, '{"items":[],"hasMore":false}', { 'X-Request-Id': 'req-77' })
+			);
+			const err = (await rejection(
+				call(testClient(ts).client, 'order-1042')
+			)) as NotFoundError;
+			expect(err).toBeInstanceOf(NotFoundError);
+			expect([err.status, err.code, err.requestId, err.details]).toEqual([
+				404,
+				'not_found',
+				'req-77',
+				{},
+			]);
+			expect(err.rawMessage).toBe(`no ${what} with this reference`);
+			expect(ts.recorded).toHaveLength(1);
+		}
+	);
+
+	it('compares the reference exactly: a server that ignored the filter finds nothing', async () => {
+		const ts = await testServer(
+			staticReply(
+				200,
+				`{"items":[${product('ORDER-1042')},${product('order-1042 ')},${product('other')}],"hasMore":false}`
+			)
+		);
+		expect(
+			await rejection(testClient(ts).client.products.getByReference('order-1042'))
+		).toBeInstanceOf(NotFoundError);
+	});
+
+	it('sends a reference of dots in the query (no path segment to resolve)', async () => {
+		const ts = await testServer(staticReply(200, items(subscription('..'))));
+		expect((await testClient(ts).client.subscriptions.getByReference('..')).reference).toBe(
+			'..'
+		);
+		expect([ts.recorded[0].path, ts.recorded[0].query]).toEqual([
+			'/subscriptions',
+			'reference=..',
+		]);
+	});
+
+	it('picks the matching item among several', async () => {
+		const ts = await testServer(
+			staticReply(200, items(customer('crm-0'), customer('crm-1'), customer('crm-2')))
+		);
+		const v = await testClient(ts).client.customers.getByReference('crm-1');
+		expect(v.reference).toBe('crm-1');
+	});
+
+	it('a body that is not a page finds nothing; a bare array is a ServerError', async () => {
+		const ts = await testServer(staticReply(200, product('pro')));
+		expect(
+			await rejection(testClient(ts).client.products.getByReference('pro'))
+		).toBeInstanceOf(NotFoundError);
+		const ts2 = await testServer(staticReply(200, `[${product('pro')}]`));
+		expect(
+			await rejection(testClient(ts2).client.products.getByReference('pro'))
+		).toBeInstanceOf(ServerError);
+	});
+
+	it('is a read: retried on a 503, without an Idempotency-Key', async () => {
+		const ts = await testServer((_req, res, n) => {
+			if (n === 0) reply(res, 503, '{"error":"unavailable","code":"network_unavailable"}');
+			else reply(res, 200, items(payment('order-1042')));
+		});
+		const v = await testClient(ts).client.payments.getByReference('order-1042', {
+			idempotencyKey: 'ignored',
+		});
+		expect(v.reference).toBe('order-1042');
+		expect(ts.recorded).toHaveLength(2);
+		for (const r of ts.recorded) expect(r.headers['idempotency-key']).toBeUndefined();
+	});
+});
+
+describe('bounded lists', () => {
+	const methods: Array<[string, string, (c: QBitFlow) => Promise<any[]>, string, string]> = [
+		[
+			'wallets.list',
+			'/wallets',
+			(c) => c.wallets.list({ withBalances: true }),
+			'withBalances=true',
+			WALLET,
+		],
+		[
+			'wallets.listForMember',
+			`/members/${MEMBER}/wallets`,
+			(c) => c.wallets.listForMember(MEMBER),
+			'',
+			WALLET,
+		],
+		[
+			'wallets.listAcceptedCurrencies',
+			'/wallets/accepted-currencies',
+			(c) => c.wallets.listAcceptedCurrencies({ userUuid: MEMBER }),
+			`userUuid=${MEMBER}`,
+			CUR,
+		],
+		[
+			'currencies.list',
+			'/currencies',
+			(c) => c.currencies.list({ main: true }),
+			'main=true',
+			CUR,
+		],
+		[
+			'members.listHeldFunds',
+			'/members/held-funds',
+			(c) => c.members.listHeldFunds(),
+			'',
+			MEMBER_HELD_FUNDS,
+		],
+		[
+			'accounting.exportJson',
+			'/accounting/export',
+			(c) => c.accounting.exportJson('2026-01-01', '2026-03-31'),
+			'format=json&from=2026-01-01&to=2026-03-31',
+			ACCOUNTING_EVENT,
+		],
+	];
+
+	it.each(methods)(
+		'%s follows a nextCursor that claims more, the filters kept',
+		async (_n, path, call, query, item) => {
+			const ts = await testServer((req, res) => {
+				const cursor = new URLSearchParams(req.query).get('cursor');
+				if (cursor === null)
+					reply(res, 200, `{"items":[${item}],"hasMore":true,"nextCursor":"c1"}`);
+				else reply(res, 200, `{"items":[${item},${item}],"hasMore":false}`);
+			});
+			expect(await call(testClient(ts).client)).toHaveLength(3);
+			expect(ts.recorded.map((r) => [r.method, r.path])).toEqual([
+				['GET', path],
+				['GET', path],
+			]);
+			expect(ts.recorded[0].query).toBe(query);
+			const second = new URLSearchParams(ts.recorded[1].query);
+			expect(second.get('cursor')).toBe('c1');
+			second.delete('cursor');
+			expect(Object.fromEntries(second)).toEqual(
+				Object.fromEntries(new URLSearchParams(query))
+			);
+		}
+	);
+
+	it.each<[string, string[]]>([
+		['hasMore without a nextCursor', ['{"items":[ITEM],"hasMore":true}']],
+		[
+			'a nextCursor that does not move',
+			[
+				'{"items":[ITEM],"hasMore":true,"nextCursor":"c1"}',
+				'{"items":[ITEM],"hasMore":true,"nextCursor":"c1"}',
+			],
+		],
+		[
+			'an empty page that claims more',
+			[
+				'{"items":[ITEM],"hasMore":true,"nextCursor":"c1"}',
+				'{"items":[],"hasMore":true,"nextCursor":"c2"}',
+			],
+		],
+	])('stops on %s', async (_n, pages) => {
+		const ts = await testServer((_req, res, n) =>
+			reply(res, 200, pages[Math.min(n, pages.length - 1)].replace('ITEM', CUR))
+		);
+		const got = await testClient(ts).client.currencies.list();
+		expect(ts.recorded).toHaveLength(pages.length);
+		expect(got).toHaveLength(pages.filter((p) => p.includes('ITEM')).length);
+	});
+
+	it('an absent or null items is an empty list; a bare array is a ServerError', async () => {
+		const ts = await testServer(staticReply(200, '{"items":null,"hasMore":false}'));
+		expect(await testClient(ts).client.wallets.list()).toEqual([]);
+		const ts2 = await testServer(staticReply(200, `[${CUR}]`));
+		expect(await rejection(testClient(ts2).client.currencies.list())).toBeInstanceOf(
+			ServerError
+		);
+	});
+
+	it('an error on a later page is thrown', async () => {
+		const ts = await testServer((_req, res, n) => {
+			if (n === 0) reply(res, 200, `{"items":[${CUR}],"hasMore":true,"nextCursor":"c1"}`);
+			else reply(res, 401, '{"error":"unauthorized","code":"unauthorized"}');
+		});
+		expect(await rejection(testClient(ts).client.currencies.list())).toBeInstanceOf(
+			AuthenticationError
+		);
 	});
 });

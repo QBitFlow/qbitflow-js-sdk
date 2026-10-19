@@ -39,7 +39,8 @@ QBitFlow SDKs share:
 - **client-side validation**: every rule, with the wire names of the failing fields;
 - **pagination**: `Page<T>` and the async iterators (lazy, filters kept, stop conditions);
 - **webhooks**: `verify` (the documented vector, secret rotation, tolerance, the header edge
-  cases), `constructEvent`, `parseEvent` on the 15 documented event examples (`tests/fixtures/`),
+  cases), `constructEvent`, `parseEvent` on the 15 documented event examples (`tests/fixtures/`,
+  the Go SDK's `testdata/events`),
   the type guards, and `verifyRemote`;
 - **the webhook router** (`router`): the status matrix of `handle` (valid → 200 with typed data,
   bad or stale signature → 400, not JSON or v1 → 400, unknown type → 200 with `onUnknown` and
@@ -49,7 +50,7 @@ QBitFlow SDKs share:
   header's case;
 - **the integration helpers** (`helpers`): the `webhooks.sign` vector and round trip,
   `waitForCompletion` (completion, expiry, timeout, interval floor, errors, abort), `hasAccess`
-  boundaries, `formatAmount` / `parseAmount`, the 95-day export windows and the CSV header
+  boundaries, `formatAmount` / `parseAmount`, the 92-day export windows (both ends included) and the CSV header
   de-duplication, `QBitFlow.fromEnv`, `Placeholders`;
 - **packaging**: relative imports carry their `.js` extension (ESM build), the `exports` map, and
   `VERSION` = `package.json` = the top CHANGELOG entry.
@@ -58,10 +59,10 @@ QBitFlow SDKs share:
 
 `vectors.test.ts` replays the conformance vectors shared by the Go, JavaScript, Python and PHP SDKs
 (generated with the Go reference SDK): `../.claude/cross-sdk-checks/v3/vectors/*.json` in the SDKs'
-workspace (`signature`, `events`, `validation`, `decoding`, `requests`). Every expected outcome must
-be reproduced, except the JavaScript deviations listed at the top of the file (a path segment made
-only of dots, which `fetch` cannot send, is refused with a `ValidationError`). The suite is skipped
-when the workspace's vectors are not there, e.g. when the package is tested on its own.
+workspace (`signature`, `events`, `validation`, `decoding`, `requests`). Every expected outcome is
+reproduced: there is no JavaScript deviation (a path segment made only of dots, which `fetch` cannot
+send, is refused with a `ValidationError` by every SDK, behaviour §10.2). The suite is skipped when
+the workspace's vectors are not there, e.g. when the package is tested on its own.
 
 ## Live suite
 

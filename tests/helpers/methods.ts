@@ -21,39 +21,40 @@ export const METHODS: Record<string, Call> = {
 	'products.update': (c, a, o) => c.products.update(a.uuid, a.params, o),
 	'products.delete': (c, a, o) => c.products.delete(a.uuid, o),
 
-	'customers.create': (c, a, o) => c.customers.create(a.params, o),
-	'customers.update': (c, a, o) => c.customers.update(a.uuid, a.params, o),
 	'customers.list': (c, a, o) => c.customers.list(a.params, o),
+	'customers.create': (c, a, o) => c.customers.create(a.params, o),
 	'customers.get': (c, a, o) => c.customers.get(a.uuid, o),
-	'customers.getByEmail': (c, a, o) => c.customers.getByEmail(a.email, o),
 	'customers.getByReference': (c, a, o) => c.customers.getByReference(a.reference, o),
+	'customers.update': (c, a, o) => c.customers.update(a.uuid, a.params, o),
 	'customers.delete': (c, a, o) => c.customers.delete(a.uuid, o),
+
+	'currencies.list': (c, a, o) => c.currencies.list(a.params, o),
+	'currencies.get': (c, a, o) => c.currencies.get(a.id, o),
 
 	'checkoutSessions.createPayment': (c, a, o) => c.checkoutSessions.createPayment(a.params, o),
 	'checkoutSessions.createSubscription': (c, a, o) =>
 		c.checkoutSessions.createSubscription(a.params, o),
-	'checkoutSessions.getStatus': (c, a, o) => c.checkoutSessions.getStatus(a.uuid, o),
+	'checkoutSessions.get': (c, a, o) => c.checkoutSessions.get(a.uuid, o),
 	'checkoutSessions.expire': (c, a, o) => c.checkoutSessions.expire(a.uuid, o),
 
 	'payments.list': (c, a, o) => c.payments.list(a.params, o),
-	'payments.listCombined': (c, a, o) => c.payments.listCombined(a.params, o),
 	'payments.get': (c, a, o) => c.payments.get(a.uuid, a.params, o),
 	'payments.getByReference': (c, a, o) => c.payments.getByReference(a.reference, o),
+	'transactions.list': (c, a, o) => c.transactions.list(a.params, o),
 	'failures.list': (c, a, o) => c.failures.list(a.params, o),
 
 	'subscriptions.list': (c, a, o) => c.subscriptions.list(a.params, o),
 	'subscriptions.get': (c, a, o) => c.subscriptions.get(a.uuid, a.params, o),
 	'subscriptions.getByReference': (c, a, o) => c.subscriptions.getByReference(a.reference, o),
+	'subscriptions.update': (c, a, o) => c.subscriptions.update(a.uuid, a.params, o),
 	'subscriptions.listBills': (c, a, o) => c.subscriptions.listBills(a.uuid, a.params, o),
 	'subscriptions.getBill': (c, a, o) => c.subscriptions.getBill(a.billUuid, a.params, o),
-	'subscriptions.getPublicHistory': (c, a, o) =>
-		c.subscriptions.getPublicHistory(a.subscriptionUuid, o),
 	'subscriptions.cancel': (c, a, o) => c.subscriptions.cancel(a.uuid, a.params, o),
-	'subscriptions.executeTestBilling': (c, a, o) => c.subscriptions.executeTestBilling(a.uuid, o),
+	'subscriptions.testBill': (c, a, o) => c.subscriptions.testBill(a.uuid, o),
 
 	'refunds.list': (c, a, o) => c.refunds.list(a.params, o),
-	'refunds.listInactive': (c, a, o) => c.refunds.listInactive(a.params, o),
-	'refunds.initiate': (c, a, o) => c.refunds.initiate(a.params, o),
+	'refunds.get': (c, a, o) => c.refunds.get(a.uuid, o),
+	'refunds.create': (c, a, o) => c.refunds.create(a.params, o),
 
 	'members.list': (c, a, o) => c.members.list(a.params, o),
 	'members.get': (c, a, o) => c.members.get(a.userUuid, o),
@@ -70,44 +71,21 @@ export const METHODS: Record<string, Call> = {
 
 	'wallets.list': (c, a, o) => c.wallets.list(a.params, o),
 	'wallets.listForMember': (c, a, o) => c.wallets.listForMember(a.userUuid, o),
-	'wallets.listSupportedCurrencies': (c, a, o) => c.wallets.listSupportedCurrencies(a.params, o),
+	'wallets.listAcceptedCurrencies': (c, a, o) => c.wallets.listAcceptedCurrencies(a.params, o),
 
 	'accounting.exportJson': (c, a, o) => c.accounting.exportJson(a.from, a.to, o),
 	'accounting.exportCsv': (c, a, o) => c.accounting.exportCsv(a.from, a.to, o),
 
 	'webhooks.verifyRemote': (c, a, o) =>
 		c.webhooks.verifyRemote(a.endpointUuid, a.rawBody, a.signatureHeader, o),
-	'webhooks.endpoints.list': (c, _a, o) => c.webhooks.endpoints.list(o),
+	'webhooks.endpoints.list': (c, a, o) => c.webhooks.endpoints.list(a.params, o),
 	'webhooks.endpoints.create': (c, a, o) => c.webhooks.endpoints.create(a.params, o),
 	'webhooks.endpoints.get': (c, a, o) => c.webhooks.endpoints.get(a.uuid, o),
 	'webhooks.endpoints.update': (c, a, o) => c.webhooks.endpoints.update(a.uuid, a.params, o),
 	'webhooks.endpoints.delete': (c, a, o) => c.webhooks.endpoints.delete(a.uuid, o),
 	'webhooks.events.list': (c, a, o) => c.webhooks.events.list(a.params, o),
 	'webhooks.events.get': (c, a, o) => c.webhooks.events.get(a.id, o),
-
-	'currencies.listAvailable': (c, a, o) => c.currencies.listAvailable(a.params, o),
-	'currencies.listMain': (c, a, o) => c.currencies.listMain(a.params, o),
-	'currencies.get': (c, a, o) => c.currencies.get(a.id, o),
 };
-
-const NON_FINITE: Record<string, number> = {
-	NaN: Number.NaN,
-	Infinity: Number.POSITIVE_INFINITY,
-	'-Infinity': Number.NEGATIVE_INFINITY,
-};
-const NUMERIC_KEYS = new Set(['price', 'refundPercent', 'organizationFeePercent', 'amountUsd']);
-
-/** The vectors write non-finite numbers as strings: turns them back into numbers. */
-export function revive(value: any, key = ''): any {
-	if (typeof value === 'string' && NUMERIC_KEYS.has(key) && value in NON_FINITE) {
-		return NON_FINITE[value];
-	}
-	if (Array.isArray(value)) return value.map((v) => revive(v));
-	if (value !== null && typeof value === 'object') {
-		return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, revive(v, k)]));
-	}
-	return value;
-}
 
 /** Calls `method` on `client` (or on `client.onBehalfOf(clientOpts.onBehalfOf)`). */
 export async function invoke(
@@ -123,7 +101,7 @@ export async function invoke(
 		clientOpts && 'onBehalfOf' in clientOpts
 			? client.onBehalfOf(clientOpts.onBehalfOf as string)
 			: client;
-	return call(target, revive(args), options);
+	return call(target, args, options);
 }
 
 /** Reads `path` (`items[0].metadata.fee`, `[0].name`, `data.amountUsd`, `''`) on `value`. */

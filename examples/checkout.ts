@@ -6,7 +6,7 @@
  *     QBITFLOW_API_KEY=sk_… [QBITFLOW_BASE_URL=…] [WAIT=1] npx tsx checkout.ts
  *
  * In production, fulfil the order on the payment.completed webhook (see webhook-handler.ts);
- * getStatus and waitForCompletion are for success pages, scripts and back-office jobs.
+ * get and waitForCompletion are for success pages, scripts and back-office jobs.
  */
 import { CheckoutSessionStatusValue, Placeholders, QBitFlow } from 'qbitflow';
 
@@ -20,7 +20,7 @@ const client = QBitFlow.fromEnv();
 const session = await client.checkoutSessions.createPayment({
 	productName: 'T-shirt',
 	description: 'Blue, size M',
-	price: 4.99, // USD
+	priceUsd: '4.99', // USD, a decimal string, never a float
 	reference: 'order-1042', // your order id: unique per space
 	successUrl: `https://shop.example.com/orders/success?uuid=${Placeholders.UUID}`,
 	cancelUrl: 'https://shop.example.com/orders/cancel',
@@ -38,12 +38,12 @@ console.log(`Redirect the customer to ${session.link}`);
 	const session = await client.checkoutSessions.createPayment({
 		productName: 'T-shirt',
 		description: 'Blue, size M',
-		price: 3.99, // USD
+		priceUsd: '3.99', // USD
 		reference: 'order-1044',
 		successUrl: `https://shop.example.com/orders/success?uuid=${Placeholders.UUID}`,
 		cancelUrl: 'https://shop.example.com/orders/cancel',
 		fees: {
-			items: [{ label: 'Shipping', description: 'Standard, 3 to 5 days', amountUsd: 0.75 }],
+			items: [{ label: 'Shipping', description: 'Standard, 3 to 5 days', amountUsd: '0.75' }],
 			processingFee: true, // omitted: your checkout.customerPaysProcessingFee setting decides
 		},
 	});
@@ -57,7 +57,7 @@ console.log(`Redirect the customer to ${session.link}`);
 const sessionUuid = session.uuid;
 
 // docs:start checkout-status
-const status = await client.checkoutSessions.getStatus(sessionUuid);
+const status = await client.checkoutSessions.get(sessionUuid);
 switch (status.status) {
 	case CheckoutSessionStatusValue.Completed:
 		console.log(`paid, tx ${status.txHash}`);
@@ -77,7 +77,7 @@ switch (status.status) {
 
 if (process.env.WAIT === '1') {
 	// docs:start wait-for-completion
-	// Polls getStatus until the session is completed or expired. When the timeout comes first,
+	// Polls get until the session is completed or expired. When the timeout comes first,
 	// it returns the last status seen: check it.
 	const final = await client.checkoutSessions.waitForCompletion(sessionUuid, {
 		timeout: 10 * 60_000, // ms
@@ -92,7 +92,7 @@ if (process.env.WAIT === '1') {
 }
 
 // Still waiting for the customer: give up on this demo order.
-const latest = await client.checkoutSessions.getStatus(sessionUuid);
+const latest = await client.checkoutSessions.get(sessionUuid);
 if (latest.status !== CheckoutSessionStatusValue.Created) process.exit(0);
 
 // docs:start checkout-expire

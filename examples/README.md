@@ -6,17 +6,17 @@ imports from `'qbitflow'` and reads its configuration from the environment: neve
 | File | Shows |
 |---|---|
 | [`client-setup.ts`](client-setup.ts) | a client from the constructor, checked with `me()`; clients from the environment (`QBitFlow.fromEnv`) |
-| [`checkout.ts`](checkout.ts) | a payment checkout with an inline product, its status (`getStatus`), `waitForCompletion`, its expiry; a checkout with fees (a shipping line, the processing fee) |
+| [`checkout.ts`](checkout.ts) | a payment checkout with an inline product, its status (`get`), `waitForCompletion`, its expiry; a checkout with fees (a shipping line, the processing fee) |
 | [`catalog.ts`](catalog.ts) | a product (`tshirt-blue-m`), the products and one page of customers, a checkout for the product by its reference |
-| [`payments.ts`](payments.ts) | a page of payments with a filter, one by id and by reference, every payment with `for await`, `formatAmount` / `parseAmount` |
-| [`subscriptions.ts`](subscriptions.ts) | a subscription checkout with a trial, a subscription and `hasAccess`, its bills with `for await`, test billing, cancel at period end |
-| [`refunds.ts`](refunds.ts) | a partial refund of a payment, the active refunds |
+| [`payments.ts`](payments.ts) | a page of payments with a filter, one by id and by reference, every payment with `for await`, the transactions feed (payments and bills), `formatAmount` / `parseAmount` |
+| [`subscriptions.ts`](subscriptions.ts) | a subscription checkout with a trial, a subscription and `hasAccess`, its bills with `for await`, its metadata (`update`), a test bill, cancel at period end |
+| [`refunds.ts`](refunds.ts) | a partial refund of a payment, the pending refunds, one refund by id |
 | [`marketplace.ts`](marketplace.ts) | invite a seller, the members and invitations, revoke one; for a member: `onBehalfOf`, wallets, held funds, fee, trust, removal |
 | [`webhooks.ts`](webhooks.ts) | a webhook endpoint and its signing secret, the event log |
 | [`webhook-handler.ts`](webhook-handler.ts) | a `node:http` receiver built on `webhooks.router`: typed handlers per event type, `onUnknown`, `onError`, deduplication on `event.id`, `hasAccess`, `formatAmount` |
 | [`webhook-verify.ts`](webhook-verify.ts) | the lower level: `webhooks.constructEvent` on deliveries signed with `webhooks.sign` (offline) |
 | [`errors-and-retries.ts`](errors-and-retries.ts) | retries and an idempotency key derived from the order, the error classes with `instanceof`, `isRetryable`, an `AbortSignal` |
-| [`accounting.ts`](accounting.ts) | the year 2026 exported as JSON and as CSV, over the 95-day limit |
+| [`accounting.ts`](accounting.ts) | the year 2026 exported as JSON and as CSV, over the 92-day limit (both days included) |
 | [`currencies.ts`](currencies.ts) | the currencies customers can pay with |
 
 The `// docs:start <id>` … `// docs:end <id>` regions of these programs are the code snippets of

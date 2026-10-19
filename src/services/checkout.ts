@@ -1,12 +1,12 @@
 import { type Core, path } from '../core.js';
 import type {
-	CheckoutSession,
 	CheckoutSessionStatus,
+	CreatedCheckoutSession,
 	CreatePaymentSessionParams,
 	CreateSubscriptionSessionParams,
 } from '../models/checkout.js';
 import { createPaymentSessionBody, createSubscriptionSessionBody } from '../params.js';
-import { CheckoutSessionSchema, CheckoutSessionStatusSchema } from '../schemas.js';
+import { CheckoutSessionStatusSchema, CreatedCheckoutSessionSchema } from '../schemas.js';
 import type { RequestOptions } from '../transport.js';
 import { fieldError, NetworkError } from '../errors.js';
 import { checkPathTxId } from '../validate.js';
@@ -38,91 +38,99 @@ function waitDuration(field: string, value: unknown, fallback: number): number {
 
 /**
  * Creates checkout sessions (one-time payments and subscriptions), reads their status and
- * expires them (`/transaction/session-checkout…`). Reach it as `client.checkoutSessions`.
+ * expires them (`/checkout-sessions…`). Reach it as `client.checkoutSessions`.
  */
 export class CheckoutSessionsService {
 	/** @internal */
 	constructor(private readonly core: Core) {}
 
 	/**
-	 * Opens a one-time payment checkout session (`POST /transaction/session-checkout/new/payment`,
-	 * 201): its `link`, its `pay@…` id and its expiry. Sends an `Idempotency-Key` and is retried on
-	 * transient failures.
+	 * Opens a one-time payment checkout session (`POST /checkout-sessions/payment`, 201) and
+	 * returns its `link`, its `pay@…` id and its expiry. Sends an `Idempotency-Key` and is retried
+	 * on transient failures.
 	 *
 	 * Send the customer to `link`. The payment exists, with the same id, once the customer's
-	 * transaction is confirmed: fulfil on the `payment.completed` webhook (or `getStatus`
+	 * transaction is confirmed: fulfil on the `payment.completed` webhook (or {@link get}
 	 * `completed`), give up on `checkout.expired`. `successUrl` and `cancelUrl` may carry
-	 * `{{UUID}}` and `{{TRANSACTION_TYPE}}`, filled in on redirect.
+	 * `Placeholders.UUID` and `Placeholders.TRANSACTION_TYPE`, filled in on redirect.
 	 *
-	 * Errors: 400 `validation_failed` (test mode caps the price at $5; live mode needs https URLs);
-	 * 404 for an unknown product or customer; 409 `merchant_not_ready` (`details.reason`).
+	 * `fees` (optional) adds lines to the price (a tax, shipping, QBitFlow's processing fee): the
+	 * customer pays the price plus every line (the payment's `amountUsd`), and the network fee on
+	 * top of that. `metadata` is copied onto the payment and into its webhooks.
+	 *
+	 * Errors: 400 `validation_failed` (test mode caps the amount, fees included, at `"5"`,
+	 * `details.max`; live mode needs https URLs); 404 for an unknown product or customer; 409
+	 * `unique_violation` on `reference`; 409 `merchant_not_ready` (`details.reason`) when the
+	 * space's wallets accept no currency; 410 `merchant_closed` for a removed member's or a closed
+	 * organization's space.
 	 */
 	async createPayment(
 		params: CreatePaymentSessionParams,
 		options?: RequestOptions
-	): Promise<CheckoutSession> {
+	): Promise<CreatedCheckoutSession> {
 		const body = createPaymentSessionBody(params);
 		return this.core.call(
-			CheckoutSessionSchema,
-			{
-				method: 'POST',
-				path: '/transaction/session-checkout/new/payment',
-				body,
-				idempotent: true,
-			},
+			CreatedCheckoutSessionSchema,
+			{ method: 'POST', path: '/checkout-sessions/payment', body, idempotent: true },
 			options
 		);
 	}
 
 	/**
-	 * Opens a subscription checkout session (`POST /transaction/session-checkout/new/subscription`,
-	 * 201): its `link`, its `sub@…` id and its expiry. Sends an `Idempotency-Key` and is retried
-	 * on transient failures. The subscription exists once the customer signed (a free trial) or
-	 * paid: act on `subscription.created`. Terms left out come from a subscription product.
+	 * Opens a subscription checkout session (`POST /checkout-sessions/subscription`, 201) and
+	 * returns its `link`, its `sub@…` id and its expiry. Sends an `Idempotency-Key` and is retried
+	 * on transient failures.
+	 *
+	 * The subscription exists, with the same id, once the customer signed (a free trial) or paid:
+	 * act on `subscription.created`. Terms left out come from a subscription product.
 	 *
 	 * `fees` (optional) adds lines to the price, as for {@link createPayment}, locked with it:
-	 * every bill charges the price plus every line (the session's `amount`, the subscription's
-	 * `priceUsd` plus `fees`), and the network fee on top of that.
+	 * every bill charges the price plus every line (the subscription's `priceUsd` plus `fees`),
+	 * and the network fee on top of that.
+	 *
+	 * Errors as {@link createPayment}, plus 400 on `frequency` / `trialPeriod` (the frequency
+	 * minimum is 1 hour live, 5 minutes test) and on `priceUsd` for a live subscription at `"0.25"`
+	 * or less (`details.min`); a member's key needs the `members.subscriptions` policy (403
+	 * `policy_disabled`).
 	 */
 	async createSubscription(
 		params: CreateSubscriptionSessionParams,
 		options?: RequestOptions
-	): Promise<CheckoutSession> {
+	): Promise<CreatedCheckoutSession> {
 		const body = createSubscriptionSessionBody(params);
 		return this.core.call(
-			CheckoutSessionSchema,
-			{
-				method: 'POST',
-				path: '/transaction/session-checkout/new/subscription',
-				body,
-				idempotent: true,
-			},
+			CreatedCheckoutSessionSchema,
+			{ method: 'POST', path: '/checkout-sessions/subscription', body, idempotent: true },
 			options
 		);
 	}
 
 	/**
-	 * Where a checkout session stands (`GET /transaction/session-checkout/:uuid/status`; the
-	 * session's `pay@…` or `sub@…` id): `created`, `waitingConfirmation`, `completed` or `expired`
-	 * (the only final ones). A failed attempt is `created` with `lastAttempt` set: never cancel an
-	 * order on it.
+	 * Where a checkout session stands (`GET /checkout-sessions/:uuid`; `uuid` is the session's
+	 * `pay@…` or `sub@…` id, or its bare UUID): `created` (waiting for its customer),
+	 * `waitingConfirmation`, `completed` or `expired` (the only final ones). It covers both
+	 * phases: the session, then the payment or subscription it created.
+	 *
+	 * A failed attempt is `created` with `lastAttempt` set: the customer may still pay from the
+	 * same checkout, so never cancel an order on it. An expired session answers `expired` for as
+	 * long as QBitFlow keeps the record, then 404 like an unknown id or another space's session.
 	 */
-	async getStatus(uuid: string, options?: RequestOptions): Promise<CheckoutSessionStatus> {
+	async get(uuid: string, options?: RequestOptions): Promise<CheckoutSessionStatus> {
 		checkPathTxId('uuid', uuid);
 		return this.core.call(
 			CheckoutSessionStatusSchema,
-			{ method: 'GET', path: path('/transaction/session-checkout/:/status', ['uuid', uuid]) },
+			{ method: 'GET', path: path('/checkout-sessions/:', ['uuid', uuid]) },
 			options
 		);
 	}
 
 	/**
-	 * Polls {@link getStatus} until the session is `completed` or `expired`, and returns that
+	 * Polls {@link get} until the session is `completed` or `expired`, and returns that
 	 * status. When `timeout` (ms, default 10 minutes; 0 or less: the default) elapses first, it
 	 * returns the last status seen, which is not final: check `.status`. Polls every `interval` ms
 	 * (default 3000, at least 1000); the last pause is shortened to the time left, then one final
 	 * poll is made at the deadline. Each poll takes the request options (`onBehalfOf`,
-	 * `requestId`). `getStatus`'s errors propagate (a `NotFoundError` included); `signal` stops the
+	 * `requestId`). `get`'s errors propagate (a `NotFoundError` included); `signal` stops the
 	 * wait (a `NetworkError`, as for a cancelled request). A `timeout` or `interval` that is not a
 	 * number is a `ValidationError`.
 	 *
@@ -145,7 +153,7 @@ export class CheckoutSessionsService {
 		const { transport } = this.core;
 		const deadline = transport.now() + timeout;
 		for (;;) {
-			const status = await this.getStatus(uuid, requestOptions);
+			const status = await this.get(uuid, requestOptions);
 			if (status.status === 'completed' || status.status === 'expired') return status;
 			const remaining = deadline - transport.now();
 			if (remaining <= 0) return status;
@@ -158,18 +166,17 @@ export class CheckoutSessionsService {
 	}
 
 	/**
-	 * Ends a checkout session now (`POST /transaction/session-checkout/:uuid/expire`) and returns
-	 * its status (`checkout.expired` follows). Not retried. Errors: 409 `tx_already_sent` once
-	 * the customer paid or is paying.
+	 * Ends a checkout session now (`POST /checkout-sessions/:uuid/expire`) and returns its status,
+	 * `expired`, with `expiresAt` the time it was expired (`checkout.expired` follows). Not
+	 * retried.
+	 *
+	 * Errors: 409 `tx_already_sent` once the customer paid or is paying.
 	 */
 	async expire(uuid: string, options?: RequestOptions): Promise<CheckoutSessionStatus> {
 		checkPathTxId('uuid', uuid);
 		return this.core.call(
 			CheckoutSessionStatusSchema,
-			{
-				method: 'POST',
-				path: path('/transaction/session-checkout/:/expire', ['uuid', uuid]),
-			},
+			{ method: 'POST', path: path('/checkout-sessions/:/expire', ['uuid', uuid]) },
 			options
 		);
 	}

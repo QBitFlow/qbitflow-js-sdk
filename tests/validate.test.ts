@@ -5,9 +5,11 @@ import {
 	checkPathRequired,
 	checkPathTxId,
 	checkPathUUID,
+	compareDecimal,
 	isIdempotencyKey,
 	isRequestId,
 	isTxId,
+	MAX_USD,
 	Validator,
 } from '../src/validate';
 
@@ -27,8 +29,9 @@ function fields(fn: () => unknown): string[] {
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-const product = (p: any) => () => P.createProductBody({ name: 'Pro', price: 1, ...p });
-const customer = (p: any) => () => P.createCustomerBody({ name: 'Ada', email: 'a@b.co', ...p });
+const product = (p: any) => () => P.createProductBody({ name: 'Pro', priceUsd: '1', ...p });
+const customer = (p: any) => () =>
+	P.createCustomerBody({ firstName: 'Ada', email: 'a@b.co', ...p });
 const session = (p: any) => () => P.createPaymentSessionBody(p);
 
 describe('rules', () => {
@@ -67,9 +70,17 @@ describe('rules', () => {
 		'😀',
 	])('name bad: %j', (name) => expect(fields(product({ name }))).toEqual(['name']));
 
-	it('lastName', () => {
+	it('firstName and lastName', () => {
 		expect(fields(customer({ lastName: 'L' }))).toEqual([]);
 		expect(fields(customer({ lastName: 'L\n' }))).toEqual(['lastName']);
+		expect(fields(customer({ firstName: 'A' }))).toEqual(['firstName']);
+		expect(fields(customer({ firstName: undefined }))).toEqual(['firstName']);
+		expect(fields(() => P.updateCustomerBody({ firstName: 'A' }))).toEqual(['firstName']);
+		expect(fields(() => P.updateCustomerBody({ lastName: 'L' }))).toEqual([]);
+		expect(fields(() => P.updateCustomerBody({ lastName: 'bidi\u202ex' }))).toEqual([
+			'lastName',
+		]);
+		expect(fields(session({ productName: 'a', priceUsd: '1' }))).toEqual(['productName']);
 	});
 
 	it('text', () => {
@@ -88,7 +99,7 @@ describe('rules', () => {
 		).toEqual(['description']);
 		expect(
 			fields(() =>
-				P.initiateRefundBody({
+				P.createRefundBody({
 					txUuid: `pay@${MEMBER}`,
 					reason: 'Broken, can you refund?',
 					merchantMessage: 'Sorry\nTeam',
@@ -97,7 +108,7 @@ describe('rules', () => {
 		).toEqual([]);
 		expect(
 			fields(() =>
-				P.initiateRefundBody({
+				P.createRefundBody({
 					txUuid: `pay@${MEMBER}`,
 					reason: '{x}',
 					merchantMessage: 'm'.repeat(501),
@@ -118,9 +129,21 @@ describe('rules', () => {
 				session({ productReference: 'bad ref', reference: 'o/1', customerReference: 'c 1' })
 			)
 		).toEqual(['reference', 'productReference', 'customerReference']);
+		// Every ?reference= filter is checked like a created reference (they are lookups now).
 		expect(fields(() => P.subscriptionListQuery({ reference: 'bad ref' }))).toEqual([
 			'reference',
 		]);
+		expect(fields(() => P.productListQuery({ reference: 'bad ref' }))).toEqual(['reference']);
+		expect(fields(() => P.customerListQuery({ reference: 'r'.repeat(101) }))).toEqual([
+			'reference',
+		]);
+		expect(fields(() => P.paymentListQuery({ reference: 'o/1' }))).toEqual(['reference']);
+		expect(fields(() => P.paymentListQuery({ reference: '..' }))).toEqual([]);
+		expect(fields(() => P.referenceQuery('pro-monthly'))).toEqual([]);
+		expect(P.referenceQuery('pro-monthly')).toBe('reference=pro-monthly');
+		for (const r of ['', ' ', 'pro monthly', 'r'.repeat(101), undefined, 42]) {
+			expect(fields(() => P.referenceQuery(r))).toEqual(['reference']);
+		}
 	});
 
 	it('phone', () => {
@@ -157,8 +180,10 @@ describe('rules', () => {
 		]) {
 			expect(fields(customer({ email: e }))).toEqual(['email']);
 		}
-		expect(fields(() => P.createCustomerBody({ name: 'Ada' } as never))).toEqual(['email']);
-		expect(fields(() => P.createInvitationBody({ email: 'nope', trustLayer: false }))).toEqual([
+		expect(fields(() => P.createCustomerBody({ firstName: 'Ada' } as never))).toEqual([
+			'email',
+		]);
+		expect(fields(() => P.createInvitationBody({ email: 'nope', holdFunds: false }))).toEqual([
 			'email',
 		]);
 		expect(fields(() => P.customerListQuery({ email: 'nope' }))).toEqual(['email']);
@@ -186,51 +211,282 @@ describe('rules', () => {
 		}
 		expect(
 			fields(() =>
-				P.createInvitationBody({ email: 'a@b.co', trustLayer: false, redirectUrl: 'nope' })
+				P.createInvitationBody({ email: 'a@b.co', holdFunds: false, redirectUrl: 'nope' })
 			)
 		).toEqual(['redirectUrl']);
 		expect(fields(() => P.createWebhookEndpointBody({} as never))).toEqual(['url']);
 		expect(fields(() => P.updateWebhookEndpointBody({ url: 'x' }))).toEqual(['url']);
 	});
 
-	it('price', () => {
-		for (const price of [0.01, 5, 1e6]) expect(fields(product({ price }))).toEqual([]);
-		for (const price of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, '5']) {
-			expect(fields(product({ price }))).toEqual(['price']);
-		}
-		expect(fields(() => P.updateProductBody({ price: 0 }))).toEqual(['price']);
-		expect(fields(() => P.updateProductBody({}))).toEqual([]);
+	// The usd rule on every money input: a decimal string, digits with at most 2 decimals, above
+	// 0 and at most 1,000,000, compared exactly (no float).
+	const GOOD_USD = [
+		'0.01',
+		'0.1',
+		'1',
+		'4.99',
+		'5',
+		'12.50',
+		'19.9',
+		'1000000',
+		'1000000.00',
+		'0000012.5',
+		'999999.99',
+	];
+	const BAD_USD = [
+		'0',
+		'0.00',
+		'-1',
+		'+1',
+		'1e2',
+		'abc',
+		'.5',
+		'1.',
+		' 1',
+		'1 ',
+		'1.999',
+		'0.001',
+		'0.000001',
+		'1000000.01',
+		'1000001',
+		'1000000000',
+		'1,5',
+		'1_000',
+		'NaN',
+		'Infinity',
+		'٣',
+	];
+	it.each(GOOD_USD)('usd ok: %j', (priceUsd) => {
+		expect(fields(product({ priceUsd }))).toEqual([]);
+		expect(fields(() => P.updateProductBody({ priceUsd }))).toEqual([]);
+		expect(fields(session({ productName: 'Pro', priceUsd }))).toEqual([]);
+	});
+	it.each(BAD_USD)('usd bad: %j', (priceUsd) => {
+		expect(fields(product({ priceUsd }))).toEqual(['priceUsd']);
+		expect(fields(() => P.updateProductBody({ priceUsd }))).toEqual(['priceUsd']);
+		expect(fields(session({ productName: 'Pro', priceUsd }))).toEqual(['priceUsd']);
+		expect(
+			fields(() => P.createSubscriptionSessionBody({ productName: 'Pro', priceUsd }))
+		).toEqual(['priceUsd']);
 	});
 
-	it('percent', () => {
-		for (const p of [0.01, 1.5, 33.33, 100]) {
+	it('usd: required on create, unchanged when empty on update, never a number', () => {
+		expect(fields(product({ priceUsd: undefined }))).toEqual(['priceUsd']);
+		expect(fields(product({ priceUsd: '' }))).toEqual(['priceUsd']);
+		expect(fields(() => P.updateProductBody({ priceUsd: '' }))).toEqual([]);
+		expect(fields(() => P.updateProductBody({}))).toEqual([]);
+		// A float cannot carry "0.1" exactly, and the API answers 400 to a JSON number.
+		for (const priceUsd of [5, 0.01, Number.NaN, Number.POSITIVE_INFINITY, true]) {
+			expect(fields(product({ priceUsd }))).toEqual(['priceUsd']);
+			expect(fields(() => P.updateProductBody({ priceUsd } as never))).toEqual(['priceUsd']);
+			expect(fields(session({ productName: 'Pro', priceUsd }))).toEqual(['priceUsd']);
+		}
+		expect(() => product({ priceUsd: '1.999' })()).toThrow(
+			'priceUsd must be an amount in USD as a decimal string (e.g. "12.50"): above 0, at most 1000000, with at most 2 decimals'
+		);
+		expect(MAX_USD).toBe(1_000_000);
+	});
+
+	it.each<[string, number, number]>([
+		['1000000', 1_000_000, 0],
+		['999999.99', 1_000_000, -1],
+		['1000000.01', 1_000_000, 1],
+		['0.5', 1_000_000, -1],
+		['50', 50, 0],
+		['50.00', 50, 0],
+		['50.01', 50, 1],
+		['0050', 50, 0],
+		['49.99', 50, -1],
+		['100.1', 100, 1],
+		['99', 100, -1],
+		['101', 100, 1],
+		['0', 0, 0],
+		['0.01', 0, 1],
+	])('compareDecimal(%j, %d) = %d (exact, no float)', (value, limit, want) => {
+		expect(compareDecimal(value, limit)).toBe(want);
+	});
+
+	// The percent rule: a decimal string, digits with at most 2 decimals, at most 16 characters,
+	// from 0 (above 0 for a refund) to its maximum, compared exactly.
+	it('percent: refundPercent (0, 100]', () => {
+		const refund = (refundPercent: unknown) => () =>
+			P.createRefundBody({ txUuid: MEMBER, refundPercent } as never);
+		for (const p of ['0.01', '1.5', '33.33', '50', '100', '100.00', '007.5']) {
+			expect(fields(refund(p))).toEqual([]);
+		}
+		for (const p of [
+			'0',
+			'0.00',
+			'-1',
+			'100.01',
+			'101',
+			'1.155',
+			'0.30000000000000004',
+			'1e1',
+			'.5',
+			'5.',
+			'50%',
+			' 5',
+			'00000000000000050', // 17 characters: over the 16-character limit
+			'NaN',
+			'Infinity',
+			50, // never a number
+		]) {
+			expect(fields(refund(p))).toEqual(['refundPercent']);
+		}
+		expect(fields(refund(undefined))).toEqual([]); // the default, 100
+		expect(fields(refund(''))).toEqual([]); // '' = the default, not sent
+	});
+
+	it('percent: organizationFeePercent [0, 50]', () => {
+		const member = (organizationFeePercent: unknown) => () =>
+			P.updateMemberBody({ organizationFeePercent } as never);
+		const invite = (organizationFeePercent: unknown) => () =>
+			P.createInvitationBody({
+				email: 'a@b.co',
+				holdFunds: false,
+				organizationFeePercent,
+			} as never);
+		for (const p of [
+			'0',
+			'0.05',
+			'1.5',
+			'50',
+			'50.00',
+			'000000000000050',
+			'0000000000000050',
+		]) {
+			expect(fields(member(p))).toEqual([]);
+			expect(fields(invite(p))).toEqual([]);
+		}
+		for (const p of ['-0.01', '50.01', '51', '1.234', '1e1', '00000000000000050', 10]) {
+			expect(fields(member(p))).toEqual(['organizationFeePercent']);
+			expect(fields(invite(p))).toEqual(['organizationFeePercent']);
+		}
+		expect(fields(member(undefined))).toEqual(['organizationFeePercent']); // required
+		expect(fields(member(''))).toEqual(['organizationFeePercent']);
+		expect(fields(invite(undefined))).toEqual([]); // the default, 0
+		expect(fields(invite(''))).toEqual([]);
+	});
+
+	describe('metadata', () => {
+		const keys = (n: number) =>
+			Object.fromEntries(Array.from({ length: n }, (_, i) => [`k${i}`, 'v']));
+		const carriers: Record<string, (m: unknown) => () => unknown> = {
+			product: (metadata) => product({ metadata }),
+			'product update': (metadata) => () => P.updateProductBody({ metadata } as never),
+			customer: (metadata) => customer({ metadata }),
+			'customer update': (metadata) => () => P.updateCustomerBody({ metadata } as never),
+			payment: (metadata) => session({ productUuid: MEMBER, metadata }),
+			subscription: (metadata) => () =>
+				P.createSubscriptionSessionBody({ productUuid: MEMBER, metadata } as never),
+			'subscription update': (metadata) => () =>
+				P.updateSubscriptionBody({ metadata } as never),
+		};
+		it.each(Object.keys(carriers))('%s', (name) => {
+			const run = (m: unknown) => fields(carriers[name](m));
+			expect(run(undefined)).toEqual([]);
+			expect(run(null)).toEqual([]);
+			expect(run({})).toEqual([]);
+			expect(run(keys(50))).toEqual([]);
+			expect(run(keys(51))).toEqual(['metadata']);
 			expect(
-				fields(() => P.initiateRefundBody({ txUuid: MEMBER, refundPercent: p }))
+				run({
+					orderId: 'order-1042',
+					'crm:customer': 'C-5521',
+					'a.b_c-d': 'é ☃ 😀',
+					x: '',
+				})
 			).toEqual([]);
-		}
-		const tenth = 0.1;
-		for (const p of [0, -1, 100.01, 1.155, tenth + 0.2, Number.NaN, Number.POSITIVE_INFINITY]) {
-			expect(
-				fields(() => P.initiateRefundBody({ txUuid: MEMBER, refundPercent: p }))
-			).toEqual(['refundPercent']);
-		}
-		for (const p of [0, 0.05, 1.5, 50]) {
-			expect(fields(() => P.updateMemberBody({ organizationFeePercent: p }))).toEqual([]);
-			expect(
-				fields(() =>
-					P.createInvitationBody({
-						email: 'a@b.co',
-						trustLayer: false,
-						organizationFeePercent: p,
-					})
-				)
-			).toEqual([]);
-		}
-		for (const p of [-0.01, 50.01, 1.234]) {
-			expect(fields(() => P.updateMemberBody({ organizationFeePercent: p }))).toEqual([
-				'organizationFeePercent',
+			expect(run({ ['k'.repeat(40)]: 'v' })).toEqual([]);
+			expect(run({ ['k'.repeat(41)]: 'v' })).toEqual(['metadata']);
+			expect(run({ '': 'v' })).toEqual(['metadata']);
+			expect(run({ 'order id': 'v' })).toEqual(['metadata']);
+			expect(run({ 'a/b': 'v' })).toEqual(['metadata']);
+			expect(run({ clé: 'v' })).toEqual(['metadata']);
+			expect(run({ k: '😀'.repeat(500) })).toEqual([]); // code points, not UTF-16 units
+			expect(run({ k: 'é'.repeat(501) })).toEqual(['metadata.k']);
+			expect(run({ k: 'a\u0000b' })).toEqual(['metadata.k']);
+			expect(run({ k: 'a\tb' })).toEqual(['metadata.k']);
+			expect(run({ k: 'a\nb' })).toEqual(['metadata.k']);
+			expect(run({ k: 'a\u202eb' })).toEqual(['metadata.k']);
+			expect(run({ k: 'a\u2066b' })).toEqual(['metadata.k']);
+			expect(run({ k: '<>{}[]`\\|;"~^' })).toEqual([]); // the text rule's characters are fine
+			expect(run({ k: 1 })).toEqual(['metadata.k']);
+			expect(run(['a'])).toEqual(['metadata']);
+			expect(run('k=v')).toEqual(['metadata']);
+			// Several bad keys are one error on metadata (the keys not echoed); bad values each.
+			const several = { 'bad key': 'v', 'worse/key': 'v', a: '\u0001', b: '\u0002' };
+			expect([...new Set(run(several))].sort()).toEqual([
+				'metadata',
+				'metadata.a',
+				'metadata.b',
 			]);
-		}
+			try {
+				carriers[name](several)();
+			} catch (err) {
+				expect((err as Error).message).not.toMatch(/bad key|worse/);
+			}
+		});
+
+		it('is sent as given; an empty map is not sent', () => {
+			expect(P.updateCustomerBody({ metadata: { crm: '', plan: 'pro' } })).toEqual({
+				metadata: { crm: '', plan: 'pro' },
+			});
+			expect(P.updateSubscriptionBody({ metadata: { plan: '', seats: '5' } })).toEqual({
+				metadata: { plan: '', seats: '5' },
+			});
+			expect(P.updateSubscriptionBody({})).toEqual({});
+			expect(P.updateSubscriptionBody({ metadata: {} })).toEqual({});
+			expect(
+				P.createCustomerBody({ firstName: 'Ada', email: 'a@b.co', metadata: { k: 'v' } })
+			).toEqual({ firstName: 'Ada', email: 'a@b.co', metadata: { k: 'v' } });
+			expect(() => P.updateSubscriptionBody(undefined as never)).toThrow(ValidationError);
+		});
+
+		it('fees are reported after the metadata', () => {
+			const err = (() => {
+				try {
+					P.createPaymentSessionBody({
+						productUuid: MEMBER,
+						metadata: { k: '\u0000' },
+						fees: { items: [{ label: 'Tax', amountUsd: '0' }] },
+					});
+				} catch (e) {
+					return e as ValidationError;
+				}
+				throw new Error('expected a ValidationError');
+			})();
+			expect(err.fieldErrors.map((f) => f.field)).toEqual([
+				'metadata.k',
+				'fees.items[0].amountUsd',
+			]);
+		});
+	});
+
+	describe('cursor', () => {
+		const lists: Record<string, (cursor: unknown) => unknown> = {
+			products: (cursor) => P.productListQuery({ cursor } as never),
+			customers: (cursor) => P.customerListQuery({ cursor } as never),
+			payments: (cursor) => P.paymentListQuery({ cursor } as never),
+			transactions: (cursor) => P.transactionListQuery({ cursor } as never),
+			failures: (cursor) => P.failureListQuery({ cursor } as never),
+			subscriptions: (cursor) => P.subscriptionListQuery({ cursor } as never),
+			'bills, members, endpoints': (cursor) => P.pageQuery({ cursor } as never),
+			refunds: (cursor) => P.refundListQuery({ cursor } as never),
+			invitations: (cursor) => P.invitationListQuery({ cursor } as never),
+			events: (cursor) => P.eventListQuery({ cursor } as never),
+		};
+		it.each(Object.keys(lists))('%s: at most 200 characters, opaque', (name) => {
+			const run = (c: unknown) => fields(() => lists[name](c));
+			expect(run('djF8MDE5Y2FkZmQtODkwMA==')).toEqual([]);
+			expect(run('c'.repeat(200))).toEqual([]);
+			expect(run('é'.repeat(200))).toEqual([]);
+			expect(run('😀'.repeat(200))).toEqual([]); // code points
+			expect(run('c'.repeat(201))).toEqual(['cursor']);
+			expect(run(42)).toEqual(['cursor']);
+			expect(String(lists[name]('djF8+/='))).toContain('cursor=djF8%2B%2F%3D');
+		});
 	});
 
 	const month: Duration = { value: 1, unit: 'months' };
@@ -316,15 +572,26 @@ describe('rules', () => {
 	it.each<[string, any, string[]]>([
 		['by uuid', { productUuid: MEMBER }, []],
 		['by reference', { productReference: 'pro-plan' }, []],
-		['inline', { productName: 'Pro', price: 10 }, []],
-		['inline + description', { productName: 'Pro', price: 10, description: 'Lifetime' }, []],
+		['inline', { productName: 'Pro', priceUsd: '10' }, []],
+		[
+			'inline + description',
+			{ productName: 'Pro', priceUsd: '10', description: 'Lifetime' },
+			[],
+		],
 		['nothing', {}, ['productUuid']],
 		['uuid + reference', { productUuid: MEMBER, productReference: 'x' }, ['productUuid']],
-		['uuid + inline', { productUuid: MEMBER, productName: 'Pro', price: 1 }, ['productUuid']],
+		[
+			'uuid + inline',
+			{ productUuid: MEMBER, productName: 'Pro', priceUsd: '1' },
+			['productUuid'],
+		],
+		['reference + price', { productReference: 'pro', priceUsd: '1' }, ['productUuid']],
 		['uuid + description', { productUuid: MEMBER, description: 'x y' }, ['productUuid']],
-		['inline without price', { productName: 'Pro' }, ['price']],
-		['inline without name', { price: 3 }, ['productName']],
-		['inline negative price', { productName: 'Pro', price: -3 }, ['price']],
+		['inline without price', { productName: 'Pro' }, ['priceUsd']],
+		['inline without name', { priceUsd: '3' }, ['productName']],
+		['inline without name, bad price', { priceUsd: '-3' }, ['productName', 'priceUsd']],
+		['inline negative price', { productName: 'Pro', priceUsd: '-3' }, ['priceUsd']],
+		['inline price as a number', { productName: 'Pro', priceUsd: 3 }, ['priceUsd']],
 		['bad uuid', { productUuid: '42' }, ['productUuid']],
 		['bad customer uuid', { productUuid: MEMBER, customerUuid: 'x' }, ['customerUuid']],
 		['expires 10', { productUuid: MEMBER, expiresInMinutes: 10 }, []],
@@ -341,13 +608,15 @@ describe('rules', () => {
 			fields(() =>
 				P.createSubscriptionSessionBody({
 					productName: 'Pro',
-					price: 9.99,
+					priceUsd: '9.99',
 					frequency: { value: 1, unit: 'months' },
 				})
 			)
 		).toEqual([]);
 		expect(
-			fields(() => P.createSubscriptionSessionBody({ productReference: 'pro', price: 9.99 }))
+			fields(() =>
+				P.createSubscriptionSessionBody({ productReference: 'pro', priceUsd: '9.99' })
+			)
 		).toEqual(['productUuid']);
 		expect(() => P.createPaymentSessionBody(undefined as never)).toThrow(ValidationError);
 	});
@@ -362,6 +631,7 @@ describe('rules', () => {
 			`sub-hist@${MEMBER}`,
 			`refund@${MEMBER}`,
 			`transfer@${MEMBER}`,
+			`release@${MEMBER}`,
 		]) {
 			expect(isTxId(id)).toBe(true);
 		}
@@ -377,9 +647,14 @@ describe('rules', () => {
 		]) {
 			expect(isTxId(id)).toBe(false);
 		}
-		expect(fields(() => P.initiateRefundBody({} as never))).toEqual(['txUuid']);
-		expect(fields(() => P.initiateRefundBody({ txUuid: 'order-1' }))).toEqual(['txUuid']);
+		expect(fields(() => P.createRefundBody({} as never))).toEqual(['txUuid']);
+		expect(fields(() => P.createRefundBody({ txUuid: 'order-1' }))).toEqual(['txUuid']);
 		expect(fields(() => P.failureListQuery({ subscriptionUuid: 'sub@nope' }))).toEqual([
+			'subscriptionUuid',
+		]);
+		expect(fields(() => P.refundListQuery({ txUuid: 'pay-1' }))).toEqual(['txUuid']);
+		expect(fields(() => P.refundListQuery({ txUuid: `sub-hist@${MEMBER}` }))).toEqual([]);
+		expect(fields(() => P.transactionListQuery({ subscriptionUuid: 'sub@x' }))).toEqual([
 			'subscriptionUuid',
 		]);
 
@@ -392,8 +667,8 @@ describe('rules', () => {
 		expect(fields(() => checkPathTxId('uuid', `sub@${MEMBER}`))).toEqual([]);
 		expect(fields(() => checkPathTxId('uuid', ''))).toEqual(['uuid']);
 		expect(fields(() => checkPathTxId('uuid', 'x'))).toEqual(['uuid']);
-		expect(fields(() => checkPathRequired('reference', 'a/b'))).toEqual([]);
-		expect(fields(() => checkPathRequired('reference', ' '))).toEqual(['reference']);
+		expect(fields(() => checkPathRequired('id', 'evt_a/b'))).toEqual([]);
+		expect(fields(() => checkPathRequired('id', ' '))).toEqual(['id']);
 	});
 
 	it('filters', () => {
@@ -406,31 +681,64 @@ describe('rules', () => {
 				P.subscriptionListQuery({ customerUuid: 'x', productUuid: 'y', userUuid: 'z' })
 			)
 		).toEqual(['customerUuid', 'productUuid', 'userUuid']);
-		expect(fields(() => P.subscriptionListQuery({ status: 'hibernating' }))).toEqual([
-			'status',
-		]);
+		// Subscription status and events type are not checked: a newer value is sent as is.
+		expect(fields(() => P.subscriptionListQuery({ status: 'hibernating' }))).toEqual([]);
 		expect(fields(() => P.subscriptionListQuery({ status: 'cancelled' }))).toEqual([]);
+		expect(P.subscriptionListQuery({ status: 'hibernating' })).toBe('status=hibernating');
+		// The enum filters the API enforces are checked against the known values.
+		expect(fields(() => P.transactionListQuery({ type: 'subscriptionHistory' }))).toEqual([
+			'type',
+		]);
+		expect(fields(() => P.transactionListQuery({ type: 'refund' }))).toEqual(['type']);
+		expect(fields(() => P.transactionListQuery({ type: 'bill' }))).toEqual([]);
 		expect(
-			fields(() => P.combinedPaymentListQuery({ source: 'subscription_history' }))
-		).toEqual(['source']);
+			fields(() => P.transactionListQuery({ includeMembers: true, userUuid: MEMBER }))
+		).toEqual(['userUuid']);
 		expect(fields(() => P.failureListQuery({ kind: 'refund', category: 'boom' }))).toEqual([
 			'kind',
 			'category',
 		]);
 		expect(fields(() => P.invitationListQuery({ status: 'open' }))).toEqual(['status']);
-		expect(fields(() => P.eventListQuery({ type: 'payment.done' }))).toEqual(['type']);
+		expect(fields(() => P.eventListQuery({ type: 'payment.done' }))).toEqual([]);
 		expect(fields(() => P.eventListQuery({ type: 'webhook.test' }))).toEqual([]);
+		expect(fields(() => P.refundListQuery({ includeMembers: true, userUuid: MEMBER }))).toEqual(
+			['userUuid']
+		);
 		expect(
-			fields(() => P.refundListQuery({ includeMembers: true, userUuid: MEMBER }, true))
-		).toEqual(['userUuid']);
-		expect(
-			fields(() => P.refundListQuery({ includeMembers: false, userUuid: MEMBER }, true))
+			fields(() => P.refundListQuery({ includeMembers: false, userUuid: MEMBER }))
 		).toEqual([]);
-		expect(fields(() => P.supportedCurrenciesQuery({ userUuid: 'x' }))).toEqual(['userUuid']);
+		expect(fields(() => P.acceptedCurrenciesQuery({ userUuid: 'x' }))).toEqual(['userUuid']);
 		expect(fields(() => P.customerListQuery({ limit: 1.5 }))).toEqual(['limit']);
-		for (const fn of [P.paymentListQuery, P.customerListQuery, P.eventListQuery]) {
+		for (const fn of [
+			P.paymentListQuery,
+			P.customerListQuery,
+			P.eventListQuery,
+			P.refundListQuery,
+			P.productListQuery,
+			P.transactionListQuery,
+			P.pageQuery,
+			P.acceptedCurrenciesQuery,
+			P.currencyListQuery,
+		]) {
 			expect(fields(() => fn(undefined))).toEqual([]);
 		}
+	});
+
+	it('refund statuses', () => {
+		const all = ['pending', 'approved', 'rejected', 'cancelled', 'failed'];
+		const run = (status: unknown) => fields(() => P.refundListQuery({ status } as never));
+		expect(run(all)).toEqual([]);
+		expect(run([])).toEqual([]);
+		expect(run(undefined)).toEqual([]);
+		expect(run([...all, 'pending'])).toEqual(['status']);
+		expect(run(['approved', 'completed', ''])).toEqual(['status[1]', 'status[2]']);
+		expect(run(['denied'])).toEqual(['status[0]']);
+		expect(run([42])).toEqual(['status[0]']);
+		expect(run('pending')).toEqual(['status']);
+		// A repeated ?status=, in the order given.
+		expect(P.refundListQuery({ status: ['approved', 'rejected'], limit: 25 })).toBe(
+			'limit=25&status=approved&status=rejected'
+		);
 	});
 
 	it('dates', () => {
@@ -463,7 +771,7 @@ describe('rules', () => {
 			fields(() =>
 				P.createWebhookEndpointBody({
 					url: 'https://x.io',
-					events: [...twenty, 'refund.denied'],
+					events: [...twenty, 'refund.rejected'],
 				})
 			)
 		).toEqual(['events']);
@@ -471,13 +779,16 @@ describe('rules', () => {
 			fields(() =>
 				P.createWebhookEndpointBody({
 					url: 'https://x.io',
-					events: ['refund.denied', 'webhook.test'],
+					events: ['refund.rejected', 'webhook.test'],
 				})
 			)
 		).toEqual(['events[1]']);
 		expect(
 			fields(() =>
-				P.createWebhookEndpointBody({ url: 'https://x.io', events: ['refund.denied', ''] })
+				P.createWebhookEndpointBody({
+					url: 'https://x.io',
+					events: ['refund.approved', ''],
+				})
 			)
 		).toEqual(['events[1]']);
 		expect(fields(() => P.updateWebhookEndpointBody({ events: ['webhook.test'] }))).toEqual([
@@ -507,22 +818,26 @@ describe('rules', () => {
 
 	it('collects every failing field', () => {
 		const run = customer({
-			name: 'x',
+			firstName: 'x',
 			lastName: '<',
 			email: 'nope',
 			phoneNumber: '1',
 			address: ' ',
 			reference: 'a b',
+			metadata: { k: '\u007f' },
 		});
 		expect(fields(run)).toEqual([
-			'name',
+			'firstName',
 			'lastName',
 			'email',
 			'phoneNumber',
 			'address',
 			'reference',
+			'metadata.k',
 		]);
-		expect(() => run()).toThrow(/^validation failed; name: name must be 2 to 100 characters/);
+		expect(() => run()).toThrow(
+			/^validation failed; firstName: firstName must be 2 to 100 characters/
+		);
 	});
 });
 
@@ -530,21 +845,31 @@ describe('update semantics: what the bodies send', () => {
 	it.each<[string, () => unknown, unknown]>([
 		['empty customer update', () => P.updateCustomerBody({}), {}],
 		[
-			'clear phone and address',
-			() => P.updateCustomerBody({ phoneNumber: '', address: '' }),
-			{ phoneNumber: '', address: '' },
+			'clear lastName, phone and address',
+			() => P.updateCustomerBody({ lastName: '', phoneNumber: '', address: '' }),
+			{ lastName: '', phoneNumber: '', address: '' },
 		],
 		[
 			'customer update',
-			() => P.updateCustomerBody({ name: 'Ada', phoneNumber: '+33 6 12 34 56 78' }),
-			{ name: 'Ada', phoneNumber: '+33 6 12 34 56 78' },
+			() => P.updateCustomerBody({ firstName: 'Ada', phoneNumber: '+33 6 12 34 56 78' }),
+			{ firstName: 'Ada', phoneNumber: '+33 6 12 34 56 78' },
+		],
+		[
+			'customer metadata merge',
+			() => P.updateCustomerBody({ metadata: { crm: '' } }),
+			{ metadata: { crm: '' } },
 		],
 		['empty product update', () => P.updateProductBody({}), {}],
 		['clear description', () => P.updateProductBody({ description: '' }), { description: '' }],
 		[
 			'product update',
-			() => P.updateProductBody({ price: 9.99, isActive: false, removeSubscription: true }),
-			{ price: 9.99, isActive: false, removeSubscription: true },
+			() =>
+				P.updateProductBody({
+					priceUsd: '9.99',
+					isActive: false,
+					removeSubscription: true,
+				}),
+			{ priceUsd: '9.99', isActive: false, removeSubscription: true },
 		],
 		['empty endpoint update', () => P.updateWebhookEndpointBody({}), {}],
 		[
@@ -557,44 +882,55 @@ describe('update semantics: what the bodies send', () => {
 			() => P.updateWebhookEndpointBody({ enabled: false, payloadVersion: 'v2' }),
 			{ payloadVersion: 'v2', enabled: false },
 		],
+		['empty subscription update', () => P.updateSubscriptionBody({}), {}],
 		[
-			'member fee 0',
-			() => P.updateMemberBody({ organizationFeePercent: 0 }),
-			{ organizationFeePercent: 0 },
+			'subscription metadata',
+			() => P.updateSubscriptionBody({ metadata: { plan: '', seats: '5' } }),
+			{ metadata: { plan: '', seats: '5' } },
 		],
 		[
-			'invitation minimal',
-			() => P.createInvitationBody({ email: 'a@b.co', trustLayer: false }),
-			{ email: 'a@b.co', role: 'user', trustLayer: false },
+			'member fee 0',
+			() => P.updateMemberBody({ organizationFeePercent: '0' }),
+			{ organizationFeePercent: '0' },
+		],
+		[
+			'invitation minimal (holdFunds always sent)',
+			() => P.createInvitationBody({ email: 'a@b.co' } as never),
+			{ email: 'a@b.co', role: 'user', holdFunds: false },
+		],
+		[
+			'invitation without fee',
+			() => P.createInvitationBody({ email: 'a@b.co', holdFunds: false }),
+			{ email: 'a@b.co', role: 'user', holdFunds: false },
 		],
 		[
 			'invitation full',
 			() =>
 				P.createInvitationBody({
 					email: 'a@b.co',
-					trustLayer: true,
-					organizationFeePercent: 2.5,
+					holdFunds: true,
+					organizationFeePercent: '2.5',
 					redirectUrl: 'https://x.io',
 				}),
 			{
 				email: 'a@b.co',
 				role: 'user',
-				trustLayer: true,
-				organizationFeePercent: 2.5,
+				holdFunds: true,
+				organizationFeePercent: '2.5',
 				redirectUrl: 'https://x.io',
 			},
 		],
 		[
 			'product',
-			() => P.createProductBody({ name: 'Pro', price: 10 }),
-			{ name: 'Pro', price: 10 },
+			() => P.createProductBody({ name: 'Pro', priceUsd: '10' }),
+			{ name: 'Pro', priceUsd: '10' },
 		],
 		[
 			'product with terms',
 			() =>
 				P.createProductBody({
 					name: 'Pro',
-					price: 10,
+					priceUsd: '10.50',
 					subscription: {
 						frequency: { value: 1, unit: 'months' },
 						trialPeriod: { value: 0 },
@@ -603,7 +939,7 @@ describe('update semantics: what the bodies send', () => {
 				}),
 			{
 				name: 'Pro',
-				price: 10,
+				priceUsd: '10.50',
 				subscription: {
 					frequency: { value: 1, unit: 'months' },
 					trialPeriod: { value: 0 },
@@ -621,21 +957,31 @@ describe('update semantics: what the bodies send', () => {
 			() =>
 				P.createSubscriptionSessionBody({
 					productName: 'Pro',
-					price: 9.99,
+					priceUsd: '9.99',
 					frequency: { value: 1, unit: 'weeks' },
 					expiresInMinutes: 30,
 				}),
 			{
 				productName: 'Pro',
-				price: 9.99,
+				priceUsd: '9.99',
 				expiresInMinutes: 30,
 				frequency: { value: 1, unit: 'weeks' },
 			},
 		],
 		[
 			'refund',
-			() => P.initiateRefundBody({ txUuid: `pay@${MEMBER}` }),
+			() => P.createRefundBody({ txUuid: `pay@${MEMBER}` }),
 			{ txUuid: `pay@${MEMBER}` },
+		],
+		[
+			'refund 50 %',
+			() => P.createRefundBody({ txUuid: `pay@${MEMBER}`, refundPercent: '50' }),
+			{ txUuid: `pay@${MEMBER}`, refundPercent: '50' },
+		],
+		[
+			'money stays as typed',
+			() => P.createProductBody({ name: 'Pro', priceUsd: '12.50' }),
+			{ name: 'Pro', priceUsd: '12.50' },
 		],
 		[
 			'endpoint create',
@@ -644,15 +990,17 @@ describe('update semantics: what the bodies send', () => {
 		],
 		[
 			'unknown keys are not sent',
-			() => P.createProductBody({ name: 'Pro', price: 10, legacyId: 4 } as never),
-			{ name: 'Pro', price: 10 },
+			() => P.createProductBody({ name: 'Pro', priceUsd: '10', legacyId: 4 } as never),
+			{ name: 'Pro', priceUsd: '10' },
 		],
 	])('%s', (_name, build, want) => {
 		expect(build()).toEqual(want);
 	});
 
 	it('validates with the same semantics', () => {
-		expect(fields(() => P.updateCustomerBody({ phoneNumber: '', address: '' }))).toEqual([]);
+		expect(
+			fields(() => P.updateCustomerBody({ lastName: '', phoneNumber: '', address: '' }))
+		).toEqual([]);
 		expect(fields(() => P.updateCustomerBody({ phoneNumber: 'abc' }))).toEqual(['phoneNumber']);
 		expect(fields(() => P.updateCustomerBody({ address: '   ' }))).toEqual(['address']);
 		expect(fields(() => P.updateProductBody({ description: '' }))).toEqual([]);
@@ -666,7 +1014,7 @@ describe('update semantics: what the bodies send', () => {
 });
 
 describe('checkout fees', () => {
-	const line = (p: any) => ({ label: 'Shipping', amountUsd: 0.75, ...p });
+	const line = (p: any) => ({ label: 'Shipping', amountUsd: '0.75', ...p });
 	const withFees = (fees: any) => session({ productUuid: MEMBER, fees });
 	const withLine = (p: any) => withFees({ items: [line(p)] });
 	const AMOUNT = 'fees.items[0].amountUsd';
@@ -734,41 +1082,40 @@ describe('checkout fees', () => {
 	});
 
 	it.each<[unknown, boolean]>([
-		[0.01, true],
-		[0.75, true],
-		[19.9, true],
-		[20, true],
-		[1000000, true],
-		['4.99', true],
-		['19.90', true],
 		['0.01', true],
+		['0.75', true],
+		['4.99', true],
+		['19.9', true],
+		['19.90', true],
+		['20', true],
+		['100', true],
 		['5', true],
+		['12.50', true],
 		['1000000', true],
 		['1000000.00', true],
-		[0, false],
-		[-1, false],
-		[-0.01, false],
-		[1.999, false],
-		[0.001, false],
-		[1000000.01, false],
-		[1e7, false],
-		[Number.NaN, false],
-		[Number.POSITIVE_INFINITY, false],
-		[Number.NEGATIVE_INFINITY, false],
+		['', false],
 		['0', false],
 		['0.00', false],
+		['-1', false],
+		['-0.01', false],
+		['0.001', false],
 		['1.999', false],
 		['1000000.01', false],
+		['1000001', false],
 		['1e2', false],
 		['abc', false],
 		['+1', false],
-		['-1', false],
 		[' 1', false],
 		['1.', false],
 		['.5', false],
-		['', false],
+		['0.30000000000000004', false],
 		[undefined, false],
 		[true, false],
+		// Never a number (the API answers 400 to one; a float cannot carry "0.1" exactly).
+		[0.75, false],
+		[20, false],
+		[Number.NaN, false],
+		[Number.POSITIVE_INFINITY, false],
 	])('amountUsd %p', (amountUsd, ok) => {
 		expect(fields(withLine({ amountUsd }))).toEqual(ok ? [] : [AMOUNT]);
 	});
@@ -800,7 +1147,7 @@ describe('checkout fees', () => {
 			{
 				field: 'fees.items[1].amountUsd',
 				message:
-					'fees.items[1].amountUsd must be an amount in USD above 0 and at most 1000000, with at most 2 decimals',
+					'fees.items[1].amountUsd must be an amount in USD as a decimal string (e.g. "12.50"): above 0, at most 1000000, with at most 2 decimals',
 			},
 		]);
 	});
@@ -825,31 +1172,26 @@ describe('checkout fees', () => {
 		],
 		['no lines', { items: [] }, `{"productUuid":"${MEMBER}","fees":{}}`],
 		[
-			'a number',
-			{ items: [{ label: 'Shipping', amountUsd: 0.75 }] },
-			`{"productUuid":"${MEMBER}","fees":{"items":[{"label":"Shipping","amountUsd":0.75}]}}`,
-		],
-		[
 			'a string, as typed',
 			{ items: [{ label: 'VAT', amountUsd: '19.90' }] },
 			`{"productUuid":"${MEMBER}","fees":{"items":[{"label":"VAT","amountUsd":"19.90"}]}}`,
 		],
 		[
 			'an empty description is omitted',
-			{ items: [{ label: 'VAT', description: '', amountUsd: 4 }] },
-			`{"productUuid":"${MEMBER}","fees":{"items":[{"label":"VAT","amountUsd":4}]}}`,
+			{ items: [{ label: 'VAT', description: '', amountUsd: '4' }] },
+			`{"productUuid":"${MEMBER}","fees":{"items":[{"label":"VAT","amountUsd":"4"}]}}`,
 		],
 		[
 			'everything',
 			{
 				processingFee: true,
 				items: [
-					{ label: 'Shipping', description: 'Standard, 3 to 5 days', amountUsd: 0.75 },
+					{ label: 'Shipping', description: 'Standard, 3 to 5 days', amountUsd: '0.75' },
 					{ label: 'VAT (20%)', amountUsd: '4.99' },
 				],
 			},
 			`{"productUuid":"${MEMBER}","fees":{"processingFee":true,"items":[` +
-				'{"label":"Shipping","description":"Standard, 3 to 5 days","amountUsd":0.75},' +
+				'{"label":"Shipping","description":"Standard, 3 to 5 days","amountUsd":"0.75"},' +
 				'{"label":"VAT (20%)","amountUsd":"4.99"}]}}',
 		],
 	])('body: %s', (_name, fees, want) => {
@@ -858,8 +1200,11 @@ describe('checkout fees', () => {
 
 	it('the body keeps only the known fields of a line', () => {
 		expect(
-			wire({ items: [{ label: 'VAT', amountUsd: 1, type: 'custom' }], extra: true } as never)
-		).toBe(`{"productUuid":"${MEMBER}","fees":{"items":[{"label":"VAT","amountUsd":1}]}}`);
+			wire({
+				items: [{ label: 'VAT', amountUsd: '1', type: 'custom' }],
+				extra: true,
+			} as never)
+		).toBe(`{"productUuid":"${MEMBER}","fees":{"items":[{"label":"VAT","amountUsd":"1"}]}}`);
 	});
 
 	describe('a subscription checkout', () => {
@@ -873,7 +1218,7 @@ describe('checkout fees', () => {
 			expect(fields(sub({ processingFee: false, items: lines(10) }))).toEqual([]);
 			expect(fields(sub({ items: lines(11) }))).toEqual(['fees.items']);
 			expect(
-				fields(sub({ items: [{ label: 'a|b', description: ' ', amountUsd: 0.001 }] }))
+				fields(sub({ items: [{ label: 'a|b', description: ' ', amountUsd: '0.001' }] }))
 			).toEqual([LABEL, DESCRIPTION, AMOUNT]);
 		});
 
@@ -883,7 +1228,7 @@ describe('checkout fees', () => {
 					P.createSubscriptionSessionBody({
 						productUuid: MEMBER,
 						frequency: { value: 1 },
-						fees: { items: [{ label: 'Tax', amountUsd: -1 }] },
+						fees: { items: [{ label: 'Tax', amountUsd: '-1' }] },
 					})
 				)
 			).toEqual(['frequency.unit', AMOUNT]);
@@ -898,19 +1243,19 @@ describe('checkout fees', () => {
 				JSON.stringify(
 					P.createSubscriptionSessionBody({
 						productName: 'Pro',
-						price: 9.99,
+						priceUsd: '9.99',
 						frequency: { value: 1, unit: 'months' },
 						fees: {
 							processingFee: true,
 							items: [
-								{ label: 'VAT (20%)', description: 'French VAT', amountUsd: 2 },
+								{ label: 'VAT (20%)', description: 'French VAT', amountUsd: '2' },
 							],
 						},
 					})
 				)
 			).toBe(
-				'{"productName":"Pro","price":9.99,"frequency":{"value":1,"unit":"months"},' +
-					'"fees":{"processingFee":true,"items":[{"label":"VAT (20%)","description":"French VAT","amountUsd":2}]}}'
+				'{"productName":"Pro","priceUsd":"9.99","frequency":{"value":1,"unit":"months"},' +
+					'"fees":{"processingFee":true,"items":[{"label":"VAT (20%)","description":"French VAT","amountUsd":"2"}]}}'
 			);
 		});
 	});

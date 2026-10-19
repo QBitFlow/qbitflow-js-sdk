@@ -32,7 +32,7 @@ const client = QBitFlow.fromEnv({ maxRetries: 5, timeout: 15_000 });
 // opening a second one.
 const orderId = 'order-1042';
 const session = await client.checkoutSessions.createPayment(
-	{ productName: 'T-shirt', description: 'Blue, size M', price: 4.99, reference: orderId },
+	{ productName: 'T-shirt', description: 'Blue, size M', priceUsd: '4.99', reference: orderId },
 	{ idempotencyKey: `checkout-${orderId}` }
 );
 console.log(`Redirect the customer to ${session.link}`);
@@ -49,7 +49,7 @@ try {
 // docs:start errors-handling
 try {
 	const payment = await client.payments.getByReference('order-1042');
-	console.log(`order-1042 paid: ${payment.amount} USD`);
+	console.log(`order-1042 paid: ${payment.amountUsd} USD`);
 } catch (err) {
 	if (err instanceof NotFoundError) {
 		console.log('no payment for order-1042 yet');
@@ -107,14 +107,15 @@ async function attempt(call: () => Promise<unknown>): Promise<unknown> {
 }
 
 // 1. Client-side validation: nothing is sent.
-describe('invalid params', await attempt(() => client.products.create({ name: 'x', price: -1 })));
+describe(
+	'invalid params',
+	await attempt(() => client.products.create({ name: 'x', priceUsd: '-1' }))
+);
 
 // 2. A 404 from the API.
 describe(
 	'unknown session',
-	await attempt(() =>
-		client.checkoutSessions.getStatus('pay@019eca82-5680-7b00-8000-00000000dead')
-	)
+	await attempt(() => client.checkoutSessions.get('pay@019eca82-5680-7b00-8000-00000000dead'))
 );
 
 // 3. A call cancelled by its signal (here: at once): a NetworkError, cause = the signal's reason.
@@ -127,19 +128,32 @@ describe(
 //    creating a second customer, even from another process after a crash. Reusing the key with
 //    another body is a 422 (IdempotencyError).
 const idempotencyKey = `signup-${Date.now()}`;
-const params = { name: 'Ada', email: `ada+${idempotencyKey}@example.com` };
+const params = {
+	firstName: 'Ada',
+	email: `ada+${idempotencyKey}@example.com`,
+	reference: `crm-${idempotencyKey}`,
+};
 const first = await client.customers.create(params, { idempotencyKey, requestId: 'signup-42' });
 const again = await client.customers.create(params, { idempotencyKey });
 console.log(`same customer both times: ${first.uuid === again.uuid} (${first.uuid})`);
 describe(
 	'same key, other body',
-	await attempt(() => client.customers.create({ ...params, name: 'Grace' }, { idempotencyKey }))
+	await attempt(() =>
+		client.customers.create({ ...params, firstName: 'Grace' }, { idempotencyKey })
+	)
 );
 
-// 5. A unique value taken twice: a 409 unique_violation, details.field naming it.
+// 5. A unique value taken twice: a 409 unique_violation, details.field naming it (a reference is
+//    unique per space; an email is not).
 describe(
-	'email taken',
-	await attempt(() => client.customers.create({ name: 'Ada', email: first.email }))
+	'reference taken',
+	await attempt(() =>
+		client.customers.create({
+			firstName: 'Ada',
+			email: first.email,
+			reference: first.reference,
+		})
+	)
 );
 
 await client.customers.delete(first.uuid); // clean up

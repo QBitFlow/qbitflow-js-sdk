@@ -1,12 +1,12 @@
 /**
  * Refunds half of a payment (a pending refund: no money moves until you sign it in the
- * dashboard), then lists the active refunds.
+ * dashboard), then lists the pending refunds and reads one.
  *
  *     QBITFLOW_API_KEY=sk_… [QBITFLOW_BASE_URL=…] [PAYMENT_UUID=pay@…] npx tsx refunds.ts
  *
- * Without PAYMENT_UUID, it only lists.
+ * Without PAYMENT_UUID, it only lists and reads.
  */
-import { ConflictError, QBitFlow } from 'qbitflow';
+import { ConflictError, QBitFlow, RefundStatus } from 'qbitflow';
 
 const client = QBitFlow.fromEnv();
 
@@ -14,10 +14,10 @@ const client = QBitFlow.fromEnv();
 async function refundHalf(client: QBitFlow, paymentUuid: string): Promise<void> {
 	// docs:start refunds-create
 	// A pending refund: no money moves until you sign the transfer in the dashboard, from the
-	// wallet that was paid. refund.completed tells you when it is sent.
-	const refund = await client.refunds.initiate({
+	// wallet that was paid. refund.approved tells you when it is sent.
+	const refund = await client.refunds.create({
 		txUuid: paymentUuid, // a payment (pay@…) or a bill (sub-hist@…)
-		refundPercent: 50, // of what the customer paid; left out: 100
+		refundPercent: '50', // a percent string, of what the customer paid; left out: '100'
 		reason: 'Damaged item',
 	});
 	console.log(`refund ${refund.uuid}: ${refund.status}`); // pending
@@ -35,9 +35,20 @@ if (paymentUuid) {
 }
 
 // docs:start refunds-list
-// The refunds waiting for an answer (listInactive / iterateInactive: the answered ones).
-const refunds = await client.refunds.list();
-for (const refund of refunds) {
-	console.log(`${refund.uuid} of ${refund.txUuid}: ${refund.amountUsd} USD, ${refund.reason}`);
+// The active ones: pending, waiting for an answer (no status: every status).
+const page = await client.refunds.list({ status: [RefundStatus.Pending] });
+for (const refund of page.items) {
+	const { uuid, txUuid, initiatedBy, reason, amount, currency } = refund;
+	console.log(`${uuid} of ${txUuid} (${initiatedBy}): ${amount} ${currency.symbol}, ${reason}`);
 }
 // docs:end refunds-list
+
+const refundUuid = page.items[0]?.uuid;
+if (refundUuid) {
+	// docs:start refunds-get
+	const refund = await client.refunds.get(refundUuid); // refund@…
+	// pending, approved, rejected or cancelled (a merchant's draft dropped before it was sent).
+	const { uuid, status, refundPercent, amount, currency } = refund;
+	console.log(`${uuid}: ${status}, ${refundPercent}% = ${amount} ${currency.symbol}`);
+	// docs:end refunds-get
+}
