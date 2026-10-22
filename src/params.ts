@@ -603,6 +603,7 @@ export function createInvitationBody(p: CreateInvitationParams): Body {
 		v.percent('organizationFeePercent', p.organizationFeePercent, 50);
 	}
 	v.url('redirectUrl', p.redirectUrl);
+	v.bool('sendEmail', p.sendEmail);
 	v.check();
 	return compact({
 		email: p.email,
@@ -610,6 +611,7 @@ export function createInvitationBody(p: CreateInvitationParams): Body {
 		holdFunds: p.holdFunds === true,
 		organizationFeePercent: nonEmpty(p.organizationFeePercent),
 		redirectUrl: nonEmpty(p.redirectUrl),
+		sendEmail: given(p.sendEmail),
 	});
 }
 

@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [3.0.0] - 2026-10-19
 
 The SDK for **QBitFlow API v2**, aligned with the final API v2 contract (api-hub `docs/api` @
-`fab875c`) and with the behaviour contract the Go, JavaScript, Python and PHP SDKs 3.0.0 share
+`b97ca6c`) and with the behaviour contract the Go, JavaScript, Python and PHP SDKs 3.0.0 share
 (same services, methods, errors, retries, validation and webhook verification). A major release:
 the services, the routes, the ids, the money types, the errors and the webhooks change.
 [MIGRATION-v3.md](MIGRATION-v3.md) maps every 2.x method and type to its replacement.
@@ -109,7 +109,8 @@ but never published; its changes are part of 3.0.0).
 -   **Enums** are string unions with a `const` object of the known values (PascalCase members:
     `SubscriptionStatus.PastDue`), replacing the TypeScript `enum`s with UPPER_CASE members; values
     follow the API's lowerCamelCase (`pastDue`, `trialExpired`, `createPaygSubscription`).
-    `LedgerEntryType` and `AccountingEventType` `subscriptionHistory` → `bill`.
+    `AccountingEventType` `subscriptionHistory` → `bill`; `LedgerEntryType` is `payment` or
+    `refund` only (a held seller sells no subscription, so no bill is ever a held-funds line).
     `RefundStatus.REFUSED` → `RefundStatus.Rejected` (`rejected`); `RefundStatus` keeps `Failed`
     (declared, never set). `TransactionShortType` and `WebhookPayloadVersion.V1` are removed: v2
     is the only payload.
@@ -211,6 +212,12 @@ but never published; its changes are part of 3.0.0).
     carries `paid`, `amount`, its `currency` and, once approved, its `settlement`.
 -   `members` (`list`, `get`, `update`, `remove`, `trust`, `listHeldFunds`, `getHeldFunds`,
     `getOwnHeldFunds`) and `invitations` (`create`, `list`, `revoke`) for marketplaces.
+    `CreateInvitationParams.sendEmail` (absent = emailed): `false` creates the invitation without
+    emailing it, to share its `link` yourself.
+-   `MerchantNotReadyReason` (`details.reason` of a `409 merchant_not_ready`): `noWallet`,
+    `organizationNoWallet`, `noTokenWallet`, and `fundsHeld`, a subscription checkout of a member
+    whose funds the organization holds (a held member sells one-time payments only, until
+    `members.trust`).
 -   `wallets` (`list` with balances, `listForMember`, `listAcceptedCurrencies`),
     `accounting.exportJson` / `exportCsv`, `currencies.list` / `get`.
 -   `TokenAmount` (`amount`, `amountMinUnits`, `amountUsd`), the shape of every token amount.
