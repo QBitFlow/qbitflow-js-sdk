@@ -111,8 +111,8 @@ export interface Member {
 /** What the organization holds for a member in one mode (held funds). */
 export interface HeldFunds {
 	/**
-	 * The lines not settled yet, oldest first: the payments and bills held (positive), and the
-	 * refunds sent of them (negative, type `refund`). `[]` when nothing is held.
+	 * The lines not settled yet, oldest first: the payments held (positive), and the refunds sent
+	 * of them (negative, type `refund`). `[]` when nothing is held.
 	 */
 	ledgers: LedgerEntry[];
 	/**
@@ -124,35 +124,35 @@ export interface HeldFunds {
 }
 
 /**
- * A line of a member's held funds: a payment or a bill made to them while the organization held
- * their funds (it adds what the organization owes them), or a refund of one of them (it takes off
- * what the refund sent back to the customer).
+ * A line of a member's held funds: a payment made to them while the organization held their
+ * funds (it adds what the organization owes them), or a refund of one (it takes off what the
+ * refund sent back to the customer).
  */
 export interface LedgerEntry {
-	/** The line's transaction: the payment (`pay@…`), the bill (`sub-hist@…`) or the refund (`refund@…`). */
+	/** The line's transaction: the payment (`pay@…`) or the refund (`refund@…`). */
 	txUuid: string;
-	/** `payment`, `bill` or `refund`. */
+	/** `payment` or `refund`. */
 	type: LedgerEntryType;
 	/** What the line is, in words (`Payment pay@…`). */
 	description: string;
-	/** On a refund line, the payment or bill it refunds; absent on the others. */
+	/** On a refund line, the payment it refunds; absent on the others. */
 	refundedTxUuid?: string;
 	/**
-	 * What the customer paid (a payment or bill), or what a refund sent back (positive: `owedUsd`
-	 * is its negative), in USD, a decimal string.
+	 * What the customer paid (a payment), or what a refund sent back (positive: `owedUsd` is its
+	 * negative), in USD, a decimal string.
 	 */
 	amountUsd: string;
 	/**
-	 * A payment's or bill's fees and split (the member was owed `settlement.split.merchant`);
-	 * absent on a refund line.
+	 * A payment's fees and split (the member was owed `settlement.split.merchant`); absent on a
+	 * refund line.
 	 */
 	settlement?: Settlement;
 	/** The currency paid (and refunded). */
 	currency: Currency;
 	/**
-	 * What the line counts for in a release, in the currency's units, exact: a payment's or
-	 * bill's merchant share, or minus what a refund sent back (negative). In `heldFunds.released`:
-	 * what it counted for in that release.
+	 * What the line counts for in a release, in the currency's units, exact: a payment's merchant
+	 * share, or minus what a refund sent back (negative). In `heldFunds.released`: what it counted
+	 * for in that release.
 	 */
 	owed: string;
 	/** The same in the currency's smallest unit (negative for a refund). */
@@ -172,7 +172,7 @@ export interface MemberHeldFunds {
 	 * cancel out the payments).
 	 */
 	totalUsd: string;
-	/** Their lines not settled: payments and bills held, refunds of them. */
+	/** Their lines not settled: payments held, refunds of them. */
 	count: number;
 	/** Their oldest line not settled: how long the organization has held funds for them. */
 	oldestAt: string;
@@ -237,8 +237,8 @@ export interface Invitation {
  */
 export interface CreatedInvitation extends Invitation {
 	/**
-	 * The link to accept it, also emailed to the person: share it in your own onboarding if you
-	 * prefer.
+	 * The link to accept it, also emailed to the person unless `sendEmail` was `false`: share it
+	 * in your own onboarding if you prefer.
 	 */
 	link: string;
 }
@@ -265,6 +265,12 @@ export interface CreateInvitationParams {
 	 * confirm with the `member.joined` event.
 	 */
 	redirectUrl?: string;
+	/**
+	 * Whether QBitFlow emails the link to the person (absent = `true`). `false` sends no
+	 * invitation email: share the returned `link` yourself. Signing up through the link still
+	 * emails the person a confirmation.
+	 */
+	sendEmail?: boolean;
 }
 
 /** Filters `invitations.list`. */

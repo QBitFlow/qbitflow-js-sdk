@@ -876,6 +876,20 @@ const ROUTES: RouteCase[] = [
 		reply: CREATED_INVITATION,
 	},
 	{
+		name: 'invitations.create without its email',
+		call: (c, o) =>
+			c.invitations.create(
+				{ email: 'seller@example.com', holdFunds: true, sendEmail: false },
+				o
+			),
+		method: 'POST',
+		path: '/invitations',
+		idempotent: true,
+		status: 201,
+		body: { email: 'seller@example.com', role: 'user', holdFunds: true, sendEmail: false },
+		reply: CREATED_INVITATION,
+	},
+	{
 		name: 'invitations.list',
 		call: (c, o) => c.invitations.list({ status: 'pending', limit: 10 }, o),
 		method: 'GET',
@@ -1204,7 +1218,12 @@ describe('retry policy per method', () => {
 				n: 2,
 			});
 			if (rc.idempotent) {
-				idempotent.add(rc.name.replace(/ (minimal|with fees|processing fee off)$/, ''));
+				idempotent.add(
+					rc.name.replace(
+						/ (minimal|with fees|processing fee off|without its email)$/,
+						''
+					)
+				);
 				const [k0, k1] = ts.recorded.map((r) => r.headers['idempotency-key']);
 				expect(k0).toBeTruthy();
 				expect(k1).toBe(k0);

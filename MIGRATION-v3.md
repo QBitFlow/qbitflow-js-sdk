@@ -245,7 +245,8 @@ account and its funds later. **v2 creates no accounts: a seller sells only once 
 invitation.**
 
 1. `client.invitations.create({ email, holdFunds, organizationFeePercent, redirectUrl })` returns
-   a `CreatedInvitation`: the invitation's fields and its `link` (also emailed).
+   a `CreatedInvitation`: the invitation's fields and its `link` (also emailed, unless
+   `sendEmail: false`).
 2. Wait for the `member.joined` webhook and store its `userUuid` (match `invitationUuid`).
 3. Sell with `client.onBehalfOf(userUuid)`.
 
@@ -356,7 +357,7 @@ cancel an order on it.
 | `UserRole.ADMIN`, `UserRole.USER` | `Role.Admin`, `Role.User` (+ `Role.Owner`, `Role.Handle`) |
 | `CombinedPayment.source` `'subscription_history'` | `Transaction.type` `TransactionKind.Bill` (`bill`) |
 | `AccountingEvent.type` (a string union) | `AccountingEventType` (`subscription_history` → `AccountingEventType.Bill`, `bill`) |
-| ledger lines `subscription_history` | `LedgerEntryType.Bill` (`bill`) |
+| — | `LedgerEntryType` (held-funds lines): `LedgerEntryType.Payment`, `LedgerEntryType.Refund` (a held seller sells no subscription: no bill line) |
 | `DurationUnit` (a string union) | `DurationUnit` (a union and `DurationUnit.Months`, …) |
 
 ## 10. Errors

@@ -178,9 +178,9 @@ export interface HeldFundsReleased {
 	/** The transfer's transaction: its block and what it cost its sender. */
 	settlement: TransferSettlement;
 	/**
-	 * The lines it settled, oldest first: the payments and bills it paid (positive) and the
-	 * refunds of them it took off (negative, type `refund`), each with what it counted for
-	 * (`owed`, `owedMinUnits`, `owedUsd`).
+	 * The lines it settled, oldest first: the payments it paid (positive) and the refunds of them
+	 * it took off (negative, type `refund`), each with what it counted for (`owed`,
+	 * `owedMinUnits`, `owedUsd`).
 	 */
 	ledgers: LedgerEntry[];
 }

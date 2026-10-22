@@ -241,12 +241,10 @@ export const TransferType = {
 } as const;
 export type TransferType = Open<ValuesOf<typeof TransferType>>;
 
-/** A held-funds line's kind. */
+/** A held-funds line's kind. A held member sells no subscription, so no bill is ever a line. */
 export const LedgerEntryType = {
 	/** A payment made to the member while the organization held their funds. */
 	Payment: 'payment',
-	/** A subscription bill paid to the member while held. */
-	Bill: 'bill',
 	/** A refund the organization sent of one of them. */
 	Refund: 'refund',
 } as const;
@@ -375,6 +373,11 @@ export const MerchantNotReadyReason = {
 	NoWallet: 'noWallet',
 	OrganizationNoWallet: 'organizationNoWallet',
 	NoTokenWallet: 'noTokenWallet',
+	/**
+	 * A subscription checkout of a member whose funds the organization holds: one-time payments
+	 * only until `members.trust`.
+	 */
+	FundsHeld: 'fundsHeld',
 } as const;
 export type MerchantNotReadyReason = Open<ValuesOf<typeof MerchantNotReadyReason>>;
 

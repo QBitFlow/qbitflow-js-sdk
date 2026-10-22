@@ -17,6 +17,7 @@ import {
 	ValidationError,
 	WebhookSignatureError,
 } from '../src/errors';
+import { MerchantNotReadyReason } from '../src/enums';
 import { errorFromResponse } from '../src/transport';
 import { closeServers, rejection, reply, testClient, testServer } from './helpers/server';
 
@@ -186,6 +187,27 @@ describe('errors through the client', () => {
 		expect(err.details.policy).toBe('members.products');
 		expect(err.requestId).toBe('hdr-id');
 		expect(err.code).toBe('policy_disabled');
+	});
+
+	it('merchant_not_ready fundsHeld: a subscription checkout of a held member', async () => {
+		const ts = await testServer((_req, res) =>
+			reply(
+				res,
+				409,
+				'{"error":"one-time payments only while funds are held","code":"merchant_not_ready","details":{"reason":"fundsHeld"}}'
+			)
+		);
+		const { client } = testClient(ts);
+		const err = (await rejection(
+			client.checkoutSessions.createSubscription({
+				productUuid: '019eca82-5680-7b00-8000-0000000000c1',
+			})
+		)) as ConflictError;
+		expect(err).toBeInstanceOf(ConflictError);
+		expect([err.code, err.details.reason]).toEqual([
+			'merchant_not_ready',
+			MerchantNotReadyReason.FundsHeld,
+		]);
 	});
 });
 

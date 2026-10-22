@@ -442,8 +442,8 @@ console.log(`Redirect the customer to ${session.link}`);
   URLs must be `https`. A redirect proves nothing (anyone can open the URL): fulfil on the
   webhook, or on `checkoutSessions.get`.
 - **Errors to expect:** a `ConflictError` `merchant_not_ready` (`details.reason`) when the space's
-  wallets accept no currency; `unique_violation` when another payment or open session holds the
-  `reference`; a `ValidationError` above `'5'` USD in test mode, fees included (`details.max`, a
+  wallets accept no currency, or for a subscription of a member whose funds you hold
+  (`fundsHeld`); `unique_violation` when another payment or open session holds the `reference`; a `ValidationError` above `'5'` USD in test mode, fees included (`details.max`, a
   string), and at `'0.25'` or less for a live subscription (`details.min`); a `NotFoundError` for
   an unknown product or customer; a `GoneError` `merchant_closed` for a removed member's space.
 
@@ -913,8 +913,10 @@ console.log(`invitation ${created.uuid}: ${created.link}`);
 ```
 <!-- /docs:snippet -->
 
-The answer is a `CreatedInvitation`: the invitation's fields and its `link` (only here). A
-`ConflictError` `already_joined` for a member; a `RateLimitError` beyond 50 invitations an hour
+The answer is a `CreatedInvitation`: the invitation's fields and its `link` (only here).
+`sendEmail: false` creates the invitation without emailing it: share `link` in your own
+onboarding (signing up through it still emails the person a confirmation). A `ConflictError`
+`already_joined` for a member; a `RateLimitError` beyond 50 invitations an hour, emailed or not
 (raised at once: the wait is over the SDK's 60 s retry cap).
 
 **2. Wait for `member.joined`.** The seller exists once they accepted: store the event's
@@ -940,6 +942,11 @@ if (currencies.length === 0) {
 Then act in their space with [`client.onBehalfOf(memberUuid)`](#on-behalf-of-acting-in-a-members-space):
 `seller.checkoutSessions.createPayment(…)` opens a checkout that pays them (a
 `PermissionDeniedError` `policy_disabled` when your policies don't let members do this).
+
+While you hold a seller's funds (`Member.trustedAt` absent), they sell **one-time payments only**:
+a subscription checkout in their space answers a `ConflictError` `merchant_not_ready` with
+`details.reason` `fundsHeld` (`MerchantNotReadyReason.FundsHeld`) until you trust them
+(`members.trust`), and their subscription products' links open nothing.
 
 **4. Hear of every sale.** An organization webhook endpoint receives every seller's events by
 default; the event's `userUuid` names the seller. Use it as `onBehalfOf` for follow-up reads.

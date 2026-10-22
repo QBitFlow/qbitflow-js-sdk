@@ -876,6 +876,16 @@ describe('update semantics: what the bodies send', () => {
 			{ email: 'a@b.co', role: 'user', holdFunds: false },
 		],
 		[
+			'invitation without its email (sendEmail false is sent)',
+			() => P.createInvitationBody({ email: 'a@b.co', holdFunds: false, sendEmail: false }),
+			{ email: 'a@b.co', role: 'user', holdFunds: false, sendEmail: false },
+		],
+		[
+			'invitation sendEmail true is sent',
+			() => P.createInvitationBody({ email: 'a@b.co', holdFunds: false, sendEmail: true }),
+			{ email: 'a@b.co', role: 'user', holdFunds: false, sendEmail: true },
+		],
+		[
 			'invitation full',
 			() =>
 				P.createInvitationBody({
@@ -971,6 +981,20 @@ describe('update semantics: what the bodies send', () => {
 			fields(() => P.updateProductBody({ removeSubscription: true, subscription: {} }))
 		).toEqual(['removeSubscription']);
 		expect(fields(() => P.updateWebhookEndpointBody({ description: '' }))).toEqual([]);
+		expect(
+			fields(() =>
+				P.createInvitationBody({ email: 'a@b.co', holdFunds: false, sendEmail: false })
+			)
+		).toEqual([]);
+		expect(
+			fields(() =>
+				P.createInvitationBody({
+					email: 'a@b.co',
+					holdFunds: false,
+					sendEmail: 'no' as never,
+				})
+			)
+		).toEqual(['sendEmail']);
 		expect(() => P.updateCustomerBody(null as never)).toThrow(ValidationError);
 	});
 });
