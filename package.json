@@ -1,7 +1,7 @@
 {
   "author": "QBitFlow",
   "bugs": {
-    "url": "https://github.com/qbitflow/qbitflow-js-sdk/issues"
+    "url": "https://github.com/QBitFlow/qbitflow-js-sdk/issues"
   },
   "description": "Official JavaScript/TypeScript SDK for QBitFlow API v2 - crypto payments, subscriptions and marketplaces",
   "devDependencies": {
@@ -35,6 +35,7 @@
   },
   "files": [
     "dist",
+    "src",
     "README.md",
     "TRADEMARKS.md",
     "COMPLIANCE.md",
@@ -43,7 +44,7 @@
     "CHANGELOG.md",
     "MIGRATION-v3.md"
   ],
-  "homepage": "https://github.com/qbitflow/qbitflow-js-sdk#readme",
+  "homepage": "https://github.com/QBitFlow/qbitflow-js-sdk#readme",
   "keywords": [
     "qbitflow",
     "cryptocurrency",
@@ -52,15 +53,17 @@
     "payment-processing",
     "api",
     "sdk",
-    "bitcoin",
     "solana",
     "ethereum",
+    "base",
     "blockchain",
     "subscription",
     "payment-gateway",
     "recurring-billing",
     "api-client",
-    "typescript"
+    "typescript",
+    "stablecoin",
+    "usdc"
   ],
   "license": "MPL-2.0",
   "main": "./dist/cjs/index.js",
@@ -68,7 +71,7 @@
   "name": "qbitflow",
   "repository": {
     "type": "git",
-    "url": "https://github.com/qbitflow/qbitflow-js-sdk.git"
+    "url": "git+https://github.com/QBitFlow/qbitflow-js-sdk.git"
   },
   "scripts": {
     "build": "npm run clean && npm run build:cjs && npm run build:esm",
@@ -86,6 +89,7 @@
     "smoke": "node scripts/smoke-pack.mjs",
     "prepublishOnly": "npm run build && npm run lint && npm test && npm run smoke"
   },
+  "sideEffects": false,
   "types": "./dist/cjs/index.d.ts",
   "version": "3.0.0"
 }
