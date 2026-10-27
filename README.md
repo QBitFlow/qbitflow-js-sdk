@@ -9,7 +9,7 @@ payments: hosted checkouts, one-time payments, subscriptions, refunds, marketpla
 commissions and held funds, accounting exports and signed webhooks. Customers pay from their own
 wallets, on Ethereum, Base and Solana, straight to yours.
 
-- **API v2**, every integrator route: 14 services, 54 routes, one `QBitFlow` client.
+- **API v2**, every integrator route: 53 public routes in 14 services, one `QBitFlow` client.
 - **No runtime dependencies**: Node.js 20+, the global `fetch` (or one you inject), CommonJS and
   ES modules, TypeScript types included.
 - **Typed errors** matched with `instanceof`, each carrying the API's code, request id and field
@@ -23,15 +23,17 @@ wallets, on Ethereum, Base and Solana, straight to yours.
 - **Integration helpers**: `waitForCompletion`, `hasAccess`, exact `formatAmount` / `parseAmount`,
   accounting exports over any range, `QBitFlow.fromEnv()`.
 
-> Coming from 2.x? Read [MIGRATION-v3.md](MIGRATION-v3.md): 3.0.0 targets API v2 and changes the
+> Coming from 2.x? Read [MIGRATION-v3.md](https://github.com/QBitFlow/qbitflow-js-sdk/blob/main/MIGRATION-v3.md): 3.0.0 targets API v2 and changes the
 > services, the routes, the ids, the money types, the errors and the webhooks.
 
 ## Contents
 
 - [Installation](#installation)
+- [TypeScript, ES modules and CommonJS](#typescript-es-modules-and-commonjs)
 - [Quick start](#quick-start)
 - [Integration recipes](#integration-recipes)
 - [Authentication and acting for a member](#authentication-and-acting-for-a-member)
+- [Test mode and live mode](#test-mode-and-live-mode)
 - [Checkout sessions](#checkout-sessions)
 - [Products and customers](#products-and-customers)
 - [Payments and failures](#payments-and-failures)
@@ -46,6 +48,7 @@ wallets, on Ethereum, Base and Solana, straight to yours.
 - [Errors](#errors)
 - [Retries and idempotency](#retries-and-idempotency)
 - [Configuration](#configuration)
+- [What the SDK doesn't cover](#what-the-sdk-doesnt-cover)
 - [Migrating from 2.x](#migrating-from-2x)
 - [Examples](#examples) · [Testing](#testing) · [License](#license) · [Support](#support) · [Security](#security)
 
@@ -65,7 +68,32 @@ const { QBitFlow, webhooks, NotFoundError } = require('qbitflow'); // CommonJS
 
 **Requires Node.js 20 or later.** The SDK has no runtime dependencies: it calls the API with the
 global `fetch` and verifies webhooks with `node:crypto`. It is server-side code: never ship an API
-key to a browser.
+key to a browser. Bun and Deno (`npm:qbitflow`) provide `node:crypto`; on Cloudflare Workers enable
+the `nodejs_compat` flag; runtimes without `node:crypto` (the Next.js and Vercel Edge runtime) can't
+load the package.
+
+## TypeScript, ES modules and CommonJS
+
+The package ships both module formats and their type declarations, wired through its `exports`
+map: `import` gets the ES module build, `require` the CommonJS build, each with its own `.d.ts`.
+Every exported class, method, model and option is documented in TSDoc, so your editor shows the
+same documentation as this README. The package has no default export: import what you use by
+name.
+
+```ts
+import { QBitFlow, EventType, type Payment, type Page } from 'qbitflow';
+
+async function recentPayments(client: QBitFlow): Promise<Page<Payment>> {
+	return client.payments.list({ limit: 10 });
+}
+
+// Enums are string-literal unions with a const object of the known values.
+const wanted: EventType[] = [EventType.PaymentCompleted, EventType.CheckoutExpired];
+```
+
+TypeScript 5 with `strict` is supported, under `"moduleResolution"` `node16`, `nodenext` or
+`bundler`. The package marks itself free of side effects (`"sideEffects": false`), so bundlers
+can drop what you don't import.
 
 ## Quick start
 
@@ -73,8 +101,8 @@ Create a client and check its key (`import { Placeholders, QBitFlow } from 'qbit
 
 <!-- docs:snippet client-init -->
 ```ts
-// One client per API key, shared by the whole program. A blank key, or one not starting with
-// sk_, throws a ValidationError (nothing is sent).
+// One client per API key, shared by the whole program. A blank key, one not starting with
+// sk_, or one with a space or a control character, throws a ValidationError (nothing is sent).
 const client = new QBitFlow(process.env.QBITFLOW_API_KEY ?? '');
 
 // The recommended start-up check: what is this key, and which mode is it in? An
@@ -153,8 +181,8 @@ handlers registered for its type and answers QBitFlow: 200 when handled (or igno
 bad signature, 500 when a handler throws (QBitFlow retries it later). See
 [Webhooks](#2-handle-the-deliveries-with-the-router) for the details.
 
-**Next.js** (App Router, `app/api/webhooks/qbitflow/route.ts`, the default Node.js runtime): a
-route handler receives the raw body, nothing to configure.
+**Next.js** (App Router, `app/api/webhooks/qbitflow/route.ts`, the default Node.js runtime, not
+the Edge runtime): a route handler receives the raw body, nothing to configure.
 
 ```ts
 import { webhooks } from 'qbitflow';
@@ -345,14 +373,16 @@ const patient = QBitFlow.fromEnv({ timeout: 60_000, maxRetries: 5 });
 
 Every request sends your API key in `X-API-Key`. Keys are created in the QBitFlow dashboard; each
 belongs to one **space** (your organization's, or one of its members') and one **mode** (test or
-live). The constructor only checks the key's shape (non-blank, starting with `sk_`) and sends
-nothing: call `me()` to check it online ([Quick start](#quick-start)). It returns the key's `role`
+live). The constructor only checks the key's shape (non-blank, starting with `sk_`, printable ASCII
+without spaces) and sends nothing: call `me()` to check it online ([Quick start](#quick-start)). It returns the key's `role`
 (`admin`: an organization key) and its `space` (`organizationName`, `test`): a job meant for test
 mode can refuse to run when `me.space?.test` is not `true`.
 
-Keep the key in a secret store or an environment variable, never in code. The SDK only checks the
-`sk_` prefix; keys issued before API v2 (`sk_<digits>_…`) are refused by the API (`401`): create a
-new one in the dashboard.
+Keep the key in a secret store or an environment variable, never in code. The client never shows
+it: `console.log(client)` and `JSON.stringify(client)` leave it out. API v2 issues keys shaped
+`sk_<test|live>_<uuid>_<secret>`; the SDK never parses them. Keys in an earlier format (v1's
+`sk_<digits>_…`, or `sk_<uuid>_<test|live>_…`) pass the SDK's check but are refused by the API
+(`401`): create a new one in the dashboard.
 
 ### `On-Behalf-Of`: acting in a member's space
 
@@ -387,6 +417,29 @@ that is not a UUID (or the nil UUID, or blank) throws a `ValidationError` at onc
 `client.onBehalfOf()` and from the constructor; as a request option it fails that call before
 anything is sent. `''` means the organization level and the header is then **omitted** (never sent
 blank: the API answers 403 to a blank one).
+
+Acting for a member carries your organization's authority over its members: a member policy
+doesn't stop you (`members.subscriptions`, `members.checkoutRedirects`, …), but the member's own
+wallets and account stay theirs.
+
+## Test mode and live mode
+
+A key belongs to one mode, and so does everything it reads or creates: a test key only sees test
+resources, a live key only live ones. `me()` tells you which (`me.space?.test`); there is no flag
+to switch per request.
+
+- **Test mode** runs on test networks with test tokens: nothing of value moves. A checkout is
+  capped at `'5'` USD, fees included (a `ValidationError` with `details.max`), redirect URLs may
+  be `http` (a local shop), subscriptions are billed only when you call
+  [`subscriptions.testBill`](#test-billing), and the frequency may be as short as 5 minutes.
+- **Live mode** needs `https` redirect and webhook URLs, a live subscription's price above
+  `'0.25'` USD, and a frequency of at least 1 hour. `subscriptions.testBill` answers a
+  `BadRequestError` `test_mode_only`.
+- Webhook endpoints, members, invitations, products and customers are per mode too. Every event
+  says its mode (`event.test`), and `currencies.list({ test: true })` lists the test networks'
+  currencies.
+
+Build and test your integration with a test key, then switch the key (not the code) for live.
 
 ## Checkout sessions
 
@@ -441,6 +494,13 @@ console.log(`Redirect the customer to ${session.link}`);
   (`Placeholders.UUID`, `Placeholders.TRANSACTION_TYPE`; the SDK sends them as they are). In live mode both
   URLs must be `https`. A redirect proves nothing (anyone can open the URL): fulfil on the
   webhook, or on `checkoutSessions.get`.
+- **A member's own key may send `successUrl` and `cancelUrl`** while its organization's
+  `members.checkoutRedirects` policy allows it (on by default: a member's shop sends its customers
+  back to its own site). With the policy off, the call fails with a `PermissionDeniedError`
+  (403 `policy_disabled`, `details.policy` `members.checkoutRedirects`, `details.field` naming the
+  URL, `successUrl` first) and nothing is created: the member's checkouts then go where the
+  organization's checkout defaults say. An organization key, acting `onBehalfOf` a member too, may
+  always send them.
 - **Errors to expect:** a `ConflictError` `merchant_not_ready` (`details.reason`) when the space's
   wallets accept no currency, or for a subscription of a member whose funds you hold
   (`fundsHeld`); `unique_violation` when another payment or open session holds the `reference`; a `ValidationError` above `'5'` USD in test mode, fees included (`details.max`, a
@@ -486,8 +546,8 @@ console.log(`Redirect the customer to ${session.link}`);
   $120.00 kept). The rate is the checkout's: QBitFlow's fee for your space when the checkout is
   created (a schedule by volume, unless QBitFlow set you a custom rate). `false`: you pay the
   fee, as without fees. Left out: your
-  `checkout.customerPaysProcessingFee` setting decides (in the dashboard, off by default; your
-  product links follow it too).
+  `checkout.customerPaysProcessingFee` setting decides (off by default, set by the organization's
+  team in the dashboard: a member can't change it; your product links follow it too).
 - **What the customer pays** is the session's and the payment's `amountUsd`: `priceUsd` plus every
   line. It is what the contracts split (QBitFlow's fee, and a marketplace's organization fee, are
   taken on it); the payment records it with its `priceUsd` and `fees`
@@ -633,10 +693,8 @@ const byReference = await client.customers.getByReference('crm-42'); // a NotFou
 console.log(customer.uuid === byReference.uuid);
 ```
 
-`customers.get`, `list` / `iterate` (by `email`, `reference` or `verified`) and `delete` (`204`)
-complete the set. A customer you create is `verified`; one QBitFlow created from the email a payer
-typed at checkout is not, and a checkout never links a typed email to a verified customer. A
-checkout given `customerUuid` or `customerReference` asks the customer
+`customers.get`, `list` / `iterate` (by `email` or `reference`) and `delete` (`204`) complete the
+set. A checkout given `customerUuid` or `customerReference` asks the customer
 nothing (`customerReference` is kept on the payment, and links your customer with that reference
 if there is one); without either, the checkout asks what your `checkout.customerDetails` setting
 says (the full details by default).
@@ -791,6 +849,9 @@ console.log(updated.metadata.plan);
 <!-- /docs:snippet -->
 
 - Before its checkout completes, `subscriptions.get` is a 404: read the checkout session instead.
+- With an organization key acting for itself, `subscriptions.get(uuid, { includeMembers: true })`
+  and `subscriptions.getBill(billUuid, { includeMembers: true })` read a member's subscription or
+  bill from the organization's space (or act `onBehalfOf` the member).
 
 ### Cancel
 
@@ -887,7 +948,7 @@ one refund per transaction, whatever it became: `payment.refundable` / `notRefun
 whether one would be accepted now.
 
 A refund is `pending` (a customer's request waiting for your answer), `approved` or `rejected`
-(both final); `failed` is declared but never set. `initiatedBy` is `customer` or `merchant`.
+(both final). `initiatedBy` is `customer` or `merchant`.
 
 ## Marketplaces
 
@@ -1168,7 +1229,7 @@ QBitFlow would send (`t=<unix seconds>,v1=<hex>`):
 const body = JSON.stringify({
 	id: 'evt_test_1',
 	type: 'payment.completed',
-	version: 'v2',
+	version: 'v2', // every delivery is a v2 event
 	createdAt: new Date().toISOString(),
 	test: true,
 	data: { uuid: 'pay@0192f1c2-2222-7c4d-9e5f-6a7b8c9d0e1f', reference: 'order-1', amountUsd: '4.99' },
@@ -1228,8 +1289,8 @@ QBitFlow itself: 2xx for every event it accepts, the ignored types included.
 - **Members' events** carry the member in `event.userUuid`: read their resources with
   `client.onBehalfOf(event.userUuid)`.
 - **No fixed source IPs**: verify the signature, never allow-list addresses.
-- **v2 only.** Every endpoint receives the v2 envelope (`QBitFlow-Webhook-Version: v2`); a body of
-  another version is refused by `parseEvent` (a `ValidationError`).
+- **v2 only.** Every endpoint receives v2 events; a body that is not one is refused by
+  `parseEvent` (a `ValidationError`).
 - **Headers:** `QBitFlow-Signature`, `QBitFlow-Event-Id` and `QBitFlow-Event-Type`
   (`webhooks.SIGNATURE_HEADER`, `EVENT_ID_HEADER`, `EVENT_TYPE_HEADER`).
 - Not holding the secret? `await client.webhooks.verifyRemote(endpointUuid, rawBody, header)` has
@@ -1380,7 +1441,7 @@ builds, even with two copies of the package installed):
 | `ValidationError` | 400 `validation_failed`, or input the SDK refused **before sending** (`status` `undefined`) | `fieldErrors`: each failing input by its wire name, dotted when nested (`frequency.unit`) |
 | `BadRequestError` | any other 400 | `foreign_key_violation` (`details.field`), `test_mode_only`, `sender_is_receiver` |
 | `AuthenticationError` | 401 | a missing, unknown, expired or revoked key (a removed member's keys too) |
-| `PermissionDeniedError` | 403 | `forbidden`, `policy_disabled` (`details.policy`), `plan_required` |
+| `PermissionDeniedError` | 403 | `forbidden` (no details): the key's role may not do it (an admin method with a member's key or `onBehalfOf`), or the resource is another's. `policy_disabled`: a member's key doing what its organization's policy doesn't allow; `details.policy` names the policy, and `details.field` the request field it governs (a checkout's `successUrl` / `cancelUrl` under `members.checkoutRedirects`) |
 | `NotFoundError` | 404 | unknown, deleted, or outside the request's space; also a `getByReference` that found nothing (code `not_found`, the list's `requestId`) |
 | `ConflictError` | 409 | `unique_violation` (`details.field`), `tx_already_sent`, `merchant_not_ready` (`details.reason`), `held_funds_pending`, `already_joined`, `payment_not_due`, `subscription_already_stopped_or_inactive`, `idempotency_key_in_use`, `conflict` |
 | `GoneError` | 410 | `merchant_closed`: a removed member's or a closed organization's space |
@@ -1389,7 +1450,7 @@ builds, even with two copies of the package installed):
 | `ServerError` | 5xx (503 `network_unavailable`, 504 `timeout`), an unexpected 3xx (redirects are never followed), a 2xx whose body is not the expected JSON | |
 | `NetworkError` | no response: DNS, connection, TLS, timeout, an aborted `signal` | `cause`: the underlying error or the signal's reason |
 | `WebhookSignatureError` | a webhook signature refused, locally or by `verifyRemote` | `reason`: `missingHeader`, `malformedHeader`, `timestampOutsideTolerance`, `noMatchingSignature`, `invalidSignature` |
-| `ApiError` | any other HTTP error (e.g. 413 `request_too_large`) | |
+| `ApiError` | any other HTTP error (e.g. 413 `request_too_large`, 405 `method_not_allowed`) | |
 
 Every `ApiError` carries `status` (`undefined` when no response was received), `code` (branch on
 it, never on the message; `''` when absent), `rawMessage` (the API's own message), `details`
@@ -1422,8 +1483,8 @@ try {
 <!-- /docs:snippet -->
 
 **Client-side validation** runs before every request: names and texts (lengths in characters, no
-markup characters), references (`A-Z a-z 0-9 . _ : @ -`, 1 to 100, on creates and on the
-`reference` filters and `getByReference`), emails (the customers' `email` filter too), phone
+markup characters), references (`A-Z a-z 0-9 . _ : @ -`, 1 to 100, never `.` or `..` alone, on
+creates, `productReference`, `customerReference`, the `reference` filters and `getByReference`), emails (the customers' `email` filter too), phone
 numbers, absolute `http(s)` URLs, USD amounts (decimal strings with at most 2 decimals, above 0, at
 most 1,000,000), percents (decimal strings, at most 2 decimals: `organizationFeePercent` 0 to 50),
 metadata (keys, values, at most 50 keys), durations (a frequency between 1 unit and 1 year), UUIDs
@@ -1509,16 +1570,16 @@ console.log(client.webhooks !== undefined);
 
 `new QBitFlow(apiKey)`, `new QBitFlow(apiKey, options)` and `new QBitFlow({ apiKey, ...options })`
 are equivalent. `QBitFlow.fromEnv(config?)` reads `QBITFLOW_API_KEY` (required: a `ValidationError`
-naming it), `QBITFLOW_BASE_URL` and `QBITFLOW_ON_BEHALF_OF` (an empty variable counts as unset);
+naming it), `QBITFLOW_BASE_URL` and `QBITFLOW_ON_BEHALF_OF` (values are trimmed; a blank variable counts as unset);
 `config` overrides them and adds the other options.
 
 | Client option | Default | |
 |---|---|---|
-| `baseUrl` | `https://api.qbitflow.app/v2` (`DEFAULT_BASE_URL`) | an absolute `http(s)` URL; a trailing `/` is stripped |
-| `timeout` | `30000` ms (`DEFAULT_TIMEOUT`) | per attempt, in milliseconds; positive |
+| `baseUrl` | `https://api.qbitflow.app/v2` (`DEFAULT_BASE_URL`) | an absolute `http(s)` URL, without credentials, query or fragment; a trailing `/` is stripped |
+| `timeout` | `30000` ms (`DEFAULT_TIMEOUT`) | per attempt, in milliseconds, through the last byte of the answer's body; positive |
 | `maxRetries` | `3` (`DEFAULT_MAX_RETRIES`) | `0` disables retries; a negative or fractional value is refused |
 | `onBehalfOf` | none | every request acts in that member's space (a member's `userUuid`) |
-| `fetch` | the global `fetch` | `(url, init) => Promise<{ status, headers.get(), text() }>`; called with `redirect: 'manual'` and a `signal` |
+| `fetch` | the global `fetch` | `(url, init) => Promise<{ status, headers.get(), text() }>`; called with `redirect: 'manual'` and a `signal`: an injected `fetch` must not follow redirects either (the `X-API-Key` header would go to the redirect's host) |
 
 | Request option (any method, last argument) | |
 |---|---|
@@ -1537,44 +1598,58 @@ A bad option makes the constructor throw a `ValidationError`. A client's configu
 changes after construction; `client.onBehalfOf` derives clients that share it. Every request sends
 `User-Agent: qbitflow-js/3.0.0` (`VERSION`).
 
+## What the SDK doesn't cover
+
+The SDK covers what integrator code does with an API key. These are done in the
+[QBitFlow dashboard](https://qbitflow.app) instead: your space's settings (checkout defaults,
+emails, branding) and your members' policies; API keys; wallets (added by their owner only);
+sending a refund, and answering a customer's refund request; releasing held funds; rotating a
+webhook secret, and sending a test event. Their effects reach your code through the API and the
+webhooks (`refund.approved`, `heldFunds.released`, `webhook.test`, …).
+
 ## Migrating from 2.x
 
 3.0.0 is a rewrite for API v2: base URL `/v2`, REST routes, a `checkoutSessions` service, UUID
 ids, money as decimal strings, members and invitations instead of users and claims, a new webhook
-signature, typed errors, no `axios` or `ws` dependency. **[MIGRATION-v3.md](MIGRATION-v3.md)** maps every 2.x method and type to its
-replacement, with before/after code for the common tasks.
+signature, typed errors, no `axios` or `ws` dependency. **[MIGRATION-v3.md](https://github.com/QBitFlow/qbitflow-js-sdk/blob/main/MIGRATION-v3.md)**
+maps every 2.x method and type to its replacement, with before/after code for the common tasks.
 
 ## Examples
 
-Runnable TypeScript programs in [`examples/`](examples) (see its [README](examples/README.md)).
-They are also the source of this README's code blocks and of the snippets on
-[qbitflow.app/docs](https://qbitflow.app/docs) (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+Runnable TypeScript programs in [`examples/`](https://github.com/QBitFlow/qbitflow-js-sdk/tree/main/examples)
+(see its [README](https://github.com/QBitFlow/qbitflow-js-sdk/blob/main/examples/README.md)). They are also the source of this README's code blocks
+and of the snippets on [qbitflow.app/docs](https://qbitflow.app/docs) (see
+[CONTRIBUTING.md](https://github.com/QBitFlow/qbitflow-js-sdk/blob/main/CONTRIBUTING.md)).
 
 | Example | Shows |
 |---|---|
-| [`client-setup.ts`](examples/client-setup.ts) | a client from the constructor and `me()`, and from the environment |
-| [`checkout.ts`](examples/checkout.ts) | a payment checkout, its status, `waitForCompletion`, expiry |
-| [`catalog.ts`](examples/catalog.ts) | a product, the products and customers lists, a checkout for a catalog product |
-| [`payments.ts`](examples/payments.ts) | a page of payments, one by id and by reference, the iterator, `formatAmount` |
-| [`subscriptions.ts`](examples/subscriptions.ts) | a subscription checkout with a trial, `hasAccess`, bills, its metadata, a test bill, cancel at period end |
-| [`refunds.ts`](examples/refunds.ts) | a partial refund, the pending refunds, a refund by id |
-| [`marketplace.ts`](examples/marketplace.ts) | invitations, members, `onBehalfOf`, wallets, held funds, fee, trust, removal |
-| [`webhooks.ts`](examples/webhooks.ts) | a webhook endpoint and its secret, the event log |
-| [`webhook-handler.ts`](examples/webhook-handler.ts) | a `node:http` receiver built on the webhook router, with deduplication and typed handlers |
-| [`webhook-verify.ts`](examples/webhook-verify.ts) | `constructEvent` on signed sample deliveries (offline) |
-| [`errors-and-retries.ts`](examples/errors-and-retries.ts) | retries, idempotency keys from the order, error classes, `isRetryable` |
-| [`accounting.ts`](examples/accounting.ts) | a yearly accounting export as JSON and CSV |
-| [`currencies.ts`](examples/currencies.ts) | the currencies customers can pay with |
+| [`client-setup.ts`](https://github.com/QBitFlow/qbitflow-js-sdk/blob/main/examples/client-setup.ts) | a client from the constructor and `me()`, and from the environment |
+| [`checkout.ts`](https://github.com/QBitFlow/qbitflow-js-sdk/blob/main/examples/checkout.ts) | a payment checkout, its status, `waitForCompletion`, expiry |
+| [`catalog.ts`](https://github.com/QBitFlow/qbitflow-js-sdk/blob/main/examples/catalog.ts) | a product, the products and customers lists, a checkout for a catalog product |
+| [`payments.ts`](https://github.com/QBitFlow/qbitflow-js-sdk/blob/main/examples/payments.ts) | a page of payments, one by id and by reference, the iterator, `formatAmount` |
+| [`subscriptions.ts`](https://github.com/QBitFlow/qbitflow-js-sdk/blob/main/examples/subscriptions.ts) | a subscription checkout with a trial, `hasAccess`, bills, its metadata, a test bill, cancel at period end |
+| [`refunds.ts`](https://github.com/QBitFlow/qbitflow-js-sdk/blob/main/examples/refunds.ts) | the pending refunds, a refund by id |
+| [`marketplace.ts`](https://github.com/QBitFlow/qbitflow-js-sdk/blob/main/examples/marketplace.ts) | invitations, members, `onBehalfOf`, wallets, held funds, fee, trust, removal |
+| [`webhooks.ts`](https://github.com/QBitFlow/qbitflow-js-sdk/blob/main/examples/webhooks.ts) | a webhook endpoint and its secret, the event log |
+| [`webhook-handler.ts`](https://github.com/QBitFlow/qbitflow-js-sdk/blob/main/examples/webhook-handler.ts) | a `node:http` receiver built on the webhook router, with deduplication and typed handlers |
+| [`webhook-verify.ts`](https://github.com/QBitFlow/qbitflow-js-sdk/blob/main/examples/webhook-verify.ts) | `constructEvent` on signed sample deliveries (offline) |
+| [`errors-and-retries.ts`](https://github.com/QBitFlow/qbitflow-js-sdk/blob/main/examples/errors-and-retries.ts) | retries, idempotency keys from the order, error classes, `isRetryable` |
+| [`accounting.ts`](https://github.com/QBitFlow/qbitflow-js-sdk/blob/main/examples/accounting.ts) | a yearly accounting export as JSON and CSV |
+| [`currencies.ts`](https://github.com/QBitFlow/qbitflow-js-sdk/blob/main/examples/currencies.ts) | the currencies customers can pay with |
 
 ## Testing
 
 ```bash
-npm run build && npm run lint && npm test
+npm ci
+npm run build && npm run lint && npm test && npm run smoke
 ```
 
-`npm test` type-checks the sources and the tests, then runs the offline suites against a stubbed
-`fetch`, including the cross-SDK vectors the four QBitFlow SDKs share (see
-[tests/README.md](tests/README.md)). The live suite needs an API key **and** an explicit base URL:
+`npm test` type-checks the sources and the tests, then runs the offline suites against a local
+test server: no account or network needed. Two suites of the maintainers' conformance suite (the
+vectors shared by the official SDKs, and the website snippets) are skipped outside the
+maintainers' workspace. See [tests/README.md](https://github.com/QBitFlow/qbitflow-js-sdk/blob/main/tests/README.md) and
+[CONTRIBUTING.md](https://github.com/QBitFlow/qbitflow-js-sdk/blob/main/CONTRIBUTING.md). The live suite needs an API key **and** an explicit base
+URL:
 
 ```bash
 QBITFLOW_API_KEY=sk_… QBITFLOW_BASE_URL=https://… npm run test:live
@@ -1585,20 +1660,22 @@ key (`QBITFLOW_ALLOW_LIVE_MODE_WRITES=1` allows a live-mode key, for a disposabl
 
 ## License
 
-This project is licensed under the MPL-2.0 License: see the [LICENSE](LICENSE) file. See also
-[COMPLIANCE.md](COMPLIANCE.md) and the [trademark policy](TRADEMARKS.md).
+Licensed under the Mozilla Public License 2.0: see [LICENSE](https://github.com/QBitFlow/qbitflow-js-sdk/blob/main/LICENSE). See also how the SDK
+handles data, [COMPLIANCE.md](https://github.com/QBitFlow/qbitflow-js-sdk/blob/main/COMPLIANCE.md), and the
+[trademark policy](https://github.com/QBitFlow/qbitflow-js-sdk/blob/main/TRADEMARKS.md).
 
 ## Support
 
-- 📖 [Documentation](https://qbitflow.app/docs)
-- 📧 [Email Support](mailto:support@qbitflow.app)
-- 🐛 [Issue Tracker](https://github.com/qbitflow/qbitflow-js-sdk/issues)
+- Documentation: [qbitflow.app/docs](https://qbitflow.app/docs)
+- Email: [support@qbitflow.app](mailto:support@qbitflow.app)
+- Bugs and feature requests: [GitHub issues](https://github.com/QBitFlow/qbitflow-js-sdk/issues)
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for version history.
+See [CHANGELOG.md](https://github.com/QBitFlow/qbitflow-js-sdk/blob/main/CHANGELOG.md).
 
 ## Security
 
-For security issues, please email security@qbitflow.app instead of using the issue tracker (see
-[SECURITY.md](SECURITY.md)).
+Report a vulnerability privately to security@qbitflow.app, never in a public issue: see
+[SECURITY.md](https://github.com/QBitFlow/qbitflow-js-sdk/blob/main/SECURITY.md) for what to include, the supported versions and the SDK's
+security properties.

@@ -10,7 +10,7 @@ imports from `'qbitflow'` and reads its configuration from the environment: neve
 | [`catalog.ts`](catalog.ts) | a product (`tshirt-blue-m`), the products and one page of customers, a checkout for the product by its reference |
 | [`payments.ts`](payments.ts) | a page of payments with a filter, one by id and by reference, every payment with `for await`, the transactions feed (payments and bills), `formatAmount` / `parseAmount` |
 | [`subscriptions.ts`](subscriptions.ts) | a subscription checkout with a trial, a subscription and `hasAccess`, its bills with `for await`, its metadata (`update`), a test bill, cancel at period end |
-| [`refunds.ts`](refunds.ts) | a partial refund of a payment, the pending refunds, one refund by id |
+| [`refunds.ts`](refunds.ts) | the pending refunds (customers' requests), one refund by id (refunds are read only in the SDK) |
 | [`marketplace.ts`](marketplace.ts) | invite a seller, the members and invitations, revoke one; for a member: `onBehalfOf`, wallets, held funds, fee, trust, removal |
 | [`webhooks.ts`](webhooks.ts) | a webhook endpoint and its signing secret, the event log |
 | [`webhook-handler.ts`](webhook-handler.ts) | a `node:http` receiver built on `webhooks.router`: typed handlers per event type, `onUnknown`, `onError`, deduplication on `event.id`, `hasAccess`, `formatAmount` |
