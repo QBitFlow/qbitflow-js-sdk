@@ -29,9 +29,15 @@ export const DEFAULT_MAX_RETRIES = 3;
 
 /** The client's options (all optional). */
 export interface ClientOptions {
-	/** The API root (default `https://api.qbitflow.app/v2`): an absolute http(s) URL; a trailing slash is stripped. */
+	/**
+	 * The API root (default `https://api.qbitflow.app/v2`): an absolute http(s) URL without
+	 * credentials, query or fragment; a trailing slash is stripped.
+	 */
 	baseUrl?: string;
-	/** Bounds each HTTP attempt, in milliseconds (default 30000); a retried call may take longer in total. */
+	/**
+	 * Bounds each HTTP attempt as a whole, through the last byte of the answer's body, in
+	 * milliseconds (default 30000); a retried call may take longer in total.
+	 */
 	timeout?: number;
 	/**
 	 * How many times a retryable call (a read, or one of the 6 idempotent creates) is re-sent
@@ -40,7 +46,11 @@ export interface ClientOptions {
 	maxRetries?: number;
 	/** Acts in a member's space by default: every request sends `On-Behalf-Of` (a member's `userUuid`). */
 	onBehalfOf?: string;
-	/** The `fetch` to use (default: the global one), e.g. for tests or other runtimes. */
+	/**
+	 * The `fetch` to use (default: the global one), e.g. for tests, proxies or other runtimes. It
+	 * is called with `redirect: 'manual'` and must honour it: a redirect followed would send the
+	 * `X-API-Key` header to the redirect's host.
+	 */
 	fetch?: FetchLike;
 }
 
@@ -65,6 +75,13 @@ function buildTransport(config: ClientConfig): Transport {
 	const apiKey = typeof config.apiKey === 'string' ? config.apiKey.trim() : '';
 	if (apiKey === '') throw fieldError('apiKey', 'is required');
 	if (!apiKey.startsWith('sk_')) throw fieldError('apiKey', 'must be a QBitFlow API key (sk_…)');
+	// A header value fetch would refuse, quoting it (the key) in its error: refused here, unechoed.
+	if (!/^[\x21-\x7e]+$/.test(apiKey)) {
+		throw fieldError(
+			'apiKey',
+			'must be printable ASCII without spaces (a QBitFlow API key, sk_…)'
+		);
+	}
 
 	let baseUrl = DEFAULT_BASE_URL;
 	if (config.baseUrl !== undefined) {
@@ -72,6 +89,12 @@ function buildTransport(config: ClientConfig): Transport {
 			typeof config.baseUrl === 'string' ? config.baseUrl.trim().replace(/\/+$/, '') : '';
 		if (!isHttpUrl(baseUrl))
 			throw fieldError('baseUrl', 'must be an absolute http or https URL');
+		// Credentials: fetch refuses them, quoting the URL in its error. A query or a fragment
+		// would swallow every request's path. The value is never echoed.
+		const url = new URL(baseUrl);
+		if (url.username !== '' || url.password !== '' || /[?#]/.test(baseUrl)) {
+			throw fieldError('baseUrl', 'must not contain credentials, a query or a fragment');
+		}
 	}
 
 	const timeout = config.timeout ?? DEFAULT_TIMEOUT;
@@ -145,7 +168,8 @@ export class QBitFlow {
 	readonly #core: Core;
 
 	/**
-	 * @param apiKey - The API key (`sk_…`): non-blank, starting with `sk_`; the rest is opaque.
+	 * @param apiKey - The API key (`sk_…`): non-blank, starting with `sk_`, printable ASCII without
+	 *   spaces; the rest is opaque.
 	 * @param options - `baseUrl`, `timeout` (ms), `maxRetries`, `onBehalfOf`, `fetch`.
 	 */
 	constructor(apiKey: string, options?: ClientOptions);
@@ -191,7 +215,7 @@ export class QBitFlow {
 	/**
 	 * A client configured from the environment: the API key from `QBITFLOW_API_KEY` (required: a
 	 * `ValidationError` naming it), the base URL from `QBITFLOW_BASE_URL` and the default
-	 * `On-Behalf-Of` from `QBITFLOW_ON_BEHALF_OF` when set (empty counts as unset). `config`
+	 * `On-Behalf-Of` from `QBITFLOW_ON_BEHALF_OF` when set (values are trimmed; blank counts as unset). `config`
 	 * overrides the environment and adds the other options.
 	 *
 	 * ```ts
@@ -201,8 +225,10 @@ export class QBitFlow {
 	static fromEnv(config: Partial<ClientConfig> = {}): QBitFlow {
 		const env: Record<string, string | undefined> =
 			typeof process !== 'undefined' && process?.env ? process.env : {};
+		// Trimmed, a blank value counting as unset (as the Go SDK: a trailing newline from a
+		// secret file or a `.env` line must not make the value invalid).
 		const fromEnv = (name: string): string | undefined => {
-			const value = env[name];
+			const value = env[name]?.trim();
 			return value === undefined || value === '' ? undefined : value;
 		};
 		const apiKey = config?.apiKey ?? fromEnv('QBITFLOW_API_KEY');

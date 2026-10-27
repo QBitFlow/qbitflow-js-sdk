@@ -1,7 +1,7 @@
 /**
  * Models shared by several resources.
  *
- * Typing rule (types.md §1): a field the API always sends is required (absent or `null` on the
+ * Typing rule: a field the API always sends is required (absent or `null` on the
  * wire decodes to its zero value: `''`, `0`, `false`, `[]`, `{}`, a zero object, or the zero time
  * `0001-01-01T00:00:00Z`); an optional field is `field?: T`, absent when the API leaves it out
  * (the API never sends `null`: an optional field without a value is absent). Lists are arrays
@@ -13,14 +13,7 @@
  * @module
  */
 
-import type {
-	AttemptStatus,
-	Chain,
-	DurationUnit,
-	FeeLineType,
-	RefundInitiator,
-	RefundStatus,
-} from '../enums.js';
+import type { Chain, DurationUnit, FeeLineType, RefundInitiator, RefundStatus } from '../enums.js';
 
 /**
  * A length of time as the API writes it: a value in the largest exact unit (`{value: 1, unit:
@@ -136,8 +129,6 @@ export interface RefundSummary {
  * never final.
  */
 export interface Attempt {
-	/** `failed`. */
-	status: AttemptStatus;
 	/** The error code (e.g. `insufficient_funds`, `token_not_approved`): what to do about it. */
 	code?: string;
 	/** The reason, for the customer. */
@@ -187,8 +178,6 @@ export interface ReferralFee {
 	address: string;
 	/** The referrer's share of the platform fee, a percent string (`"20"` = 20 % of it). */
 	feePercent: string;
-	/** Until when the referrer earns its share. */
-	deadline: string;
 }
 
 /**

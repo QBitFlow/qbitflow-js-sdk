@@ -12,8 +12,8 @@ import { QBitFlow } from 'qbitflow';
 /** Builds a client with the constructor and checks its key. */
 async function createClient(): Promise<QBitFlow> {
 	// docs:start client-init
-	// One client per API key, shared by the whole program. A blank key, or one not starting with
-	// sk_, throws a ValidationError (nothing is sent).
+	// One client per API key, shared by the whole program. A blank key, one not starting with
+	// sk_, or one with a space or a control character, throws a ValidationError (nothing is sent).
 	const client = new QBitFlow(process.env.QBITFLOW_API_KEY ?? '');
 
 	// The recommended start-up check: what is this key, and which mode is it in? An

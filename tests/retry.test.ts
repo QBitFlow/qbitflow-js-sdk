@@ -12,7 +12,7 @@ import {
 	ServerError,
 	ValidationError,
 } from '../src/errors';
-import { type Endpoint, errorFromResponse, newUUIDv4 } from '../src/transport';
+import { type Endpoint, errorFromResponse, newUUIDv4, sleep } from '../src/transport';
 import {
 	closeServers,
 	hangUp,
@@ -363,6 +363,57 @@ describe('network errors, timeouts and cancellation', () => {
 		const err = (await rejection(c2.transport.send(get('/x'), ''))) as NetworkError;
 		expect(err).toBeInstanceOf(NetworkError);
 		expect(err.message).toContain('timed out');
+	});
+
+	it('the timeout covers reading the body: a trickling body cannot hold the call past it', async () => {
+		const timers: NodeJS.Timeout[] = [];
+		const ts = await testServer((_req, res) => {
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.write('{"ok":');
+			// Headers and a first chunk at once, then one byte every 50 ms for ~2 s.
+			let left = 40;
+			const tick = setInterval(() => {
+				if (left-- <= 0 || res.destroyed) {
+					clearInterval(tick);
+					if (!res.destroyed) res.end('true}');
+					return;
+				}
+				res.write(' ');
+			}, 50);
+			timers.push(tick);
+		});
+		const { transport } = testClient(ts, { timeout: 300, maxRetries: 0 });
+		const started = Date.now();
+		const err = (await rejection(transport.send(get('/x'), ''))) as NetworkError;
+		timers.forEach(clearInterval);
+		expect(err).toBeInstanceOf(NetworkError);
+		expect(err.message).toContain('timed out');
+		expect(Date.now() - started).toBeLessThan(1500);
+	});
+
+	it("a timeout above the timers' 2^31-1 ms limit does not fire at once", async () => {
+		// Node's setTimeout fires after 1 ms when given more than 2^31-1 ms (24.8 days).
+		const ts = await testServer((_req, res) => {
+			setTimeout(() => reply(res, 200, '{"ok":true}'), 50);
+		});
+		const { transport } = testClient(ts, { timeout: 3_000_000_000, maxRetries: 0 });
+		const res = await transport.send(get('/x'), '');
+		expect(res.body).toBe('{"ok":true}');
+	});
+
+	it("a back-off above the timers' limit waits instead of firing at once", async () => {
+		const controller = new AbortController();
+		const slept = sleep(2 ** 31 + 1000, controller.signal).then(
+			() => 'slept',
+			() => 'aborted'
+		);
+		const first = await Promise.race([
+			slept,
+			new Promise((r) => setTimeout(() => r('waiting'), 50)),
+		]);
+		controller.abort(new Error('done'));
+		expect(first).toBe('waiting');
+		expect(await slept).toBe('aborted');
 	});
 
 	it('stops on an aborted signal, during the back-off too', async () => {

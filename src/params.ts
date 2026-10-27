@@ -1,5 +1,5 @@
 /**
- * Each params type's checks (behaviour §8), query string and request body. Bodies carry the
+ * Each params type's checks, query string and request body. Bodies carry the
  * wire names explicitly and only the params' known fields; a field left out (or, for the
  * fields the API treats so, left empty) is omitted. The clearable fields
  * (`UpdateCustomerParams.lastName`/`phoneNumber`/`address`, `UpdateProductParams.description`,
@@ -305,17 +305,18 @@ export function customerListQuery(p: CustomerListParams | undefined): string {
 	validatePage(v, p);
 	v.email('email', p?.email);
 	v.reference('reference', p?.reference);
-	v.bool('verified', p?.verified);
 	v.check();
 	return new Query()
 		.page(p?.limit, p?.cursor)
 		.string('email', p?.email)
 		.string('reference', p?.reference)
-		.bool('verified', p?.verified)
 		.encode();
 }
 
-/** Checks a `getByReference` argument like a created reference: required, 1 to 100 of `A-Z a-z 0-9 . _ : @ -`. */
+/**
+ * Checks a `getByReference` argument like a created reference: required, 1 to 100 of
+ * `A-Z a-z 0-9 . _ : @ -`, not `.` or `..` alone.
+ */
 export function referenceQuery(reference: unknown): string {
 	const v = new Validator();
 	if (v.required('reference', reference)) v.reference('reference', reference);
@@ -329,7 +330,7 @@ export function referenceQuery(reference: unknown): string {
 const MAX_FEE_ITEMS = 10;
 
 /**
- * Checks a checkout's `fees` when given (behaviour §8): at most 10 lines; each label the name
+ * Checks a checkout's `fees` when given: at most 10 lines; each label the name
  * rule, 1 to 40; each description the text rule, at most 200; each amount the usd rule. Field
  * errors on their wire paths.
  */
@@ -379,7 +380,7 @@ function feesBody(fees: CheckoutFees | undefined | null): Body | undefined {
 	});
 }
 
-/** Checks every field of a session but its fees (reported last, behaviour §8). */
+/** Checks every field of a session but its fees (reported last). */
 function validateSession(v: Validator, p: CreatePaymentSessionParams): void {
 	v.reference('reference', p.reference);
 	v.uuid('productUuid', p.productUuid);
@@ -400,7 +401,7 @@ function validateSession(v: Validator, p: CreatePaymentSessionParams): void {
 	v.metadata('metadata', p.metadata);
 
 	// Exactly one of: productUuid, productReference, an inline product. Any inline field next
-	// to productUuid or productReference counts as mixing (behaviour §10).
+	// to productUuid or productReference counts as mixing.
 	const hasPrice = p.priceUsd !== undefined && p.priceUsd !== null && p.priceUsd !== '';
 	const inline = !!p.productName || hasPrice || !!p.description;
 	const chosen = [!!p.productUuid, !!p.productReference, inline].filter(Boolean).length;
@@ -690,7 +691,6 @@ export function updateWebhookEndpointBody(p: UpdateWebhookEndpointParams): Body 
 	v.bool('includeMembers', p.includeMembers);
 	if (p.description !== undefined && p.description !== null)
 		v.text('description', p.description, 0, 200);
-	v.oneOf('payloadVersion', p.payloadVersion, ['v2']);
 	v.bool('enabled', p.enabled);
 	v.check();
 	return compact({
@@ -698,7 +698,6 @@ export function updateWebhookEndpointBody(p: UpdateWebhookEndpointParams): Body 
 		events: given(p.events),
 		includeMembers: given(p.includeMembers),
 		description: given(p.description),
-		payloadVersion: nonEmpty(p.payloadVersion),
 		enabled: given(p.enabled),
 	});
 }

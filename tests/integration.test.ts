@@ -13,8 +13,7 @@
  * endpoint, and deletes (or expires) each of them; it sets and deletes a metadata key on the
  * latest subscription, if there is one.
  *
- *     set -a; source ../.local.env; set +a   # never print it
- *     npm run test:live
+ *     QBITFLOW_API_KEY=sk_… QBITFLOW_BASE_URL=https://… npm run test:live
  */
 
 import { QBitFlow } from '../src/client';
@@ -238,7 +237,7 @@ liveWrites('live: writes', () => {
 			metadata: { crm: '42' },
 		});
 		try {
-			expect([cust.firstName, cust.verified, cust.metadata.crm]).toEqual(['Ada', true, '42']);
+			expect([cust.firstName, cust.metadata.crm]).toEqual(['Ada', '42']);
 			expect(cust.phoneNumber).toBeTruthy();
 			expect((await c.customers.getByReference(`sdk-js-${s}`)).uuid).toBe(cust.uuid);
 			const byEmail = await c.customers.list({ email: cust.email });
@@ -376,7 +375,7 @@ liveWrites('live: writes', () => {
 		try {
 			expect(created.secret).toBeTruthy();
 			const got = await c.webhooks.endpoints.get(created.uuid);
-			expect([got.url, got.payloadVersion]).toEqual([created.url, 'v2']);
+			expect([got.url, got.includeMembers]).toEqual([created.url, created.includeMembers]);
 			let found = false;
 			for await (const e of c.webhooks.endpoints.iterate({ limit: 1 })) {
 				found = found || e.uuid === created.uuid;

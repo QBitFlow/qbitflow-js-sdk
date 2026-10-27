@@ -489,6 +489,20 @@ describe('QBitFlow.fromEnv', () => {
 		expect(QBitFlow.fromEnv()[TRANSPORT].baseUrl).toBe('https://api.qbitflow.app/v2');
 	});
 
+	it('treats blank variables as unset and trims the others (as the Go SDK)', async () => {
+		const ts = await testServer((_req, res) => reply(res, 200, '{}'));
+		process.env.QBITFLOW_API_KEY = ' sk_env_key\n';
+		process.env.QBITFLOW_BASE_URL = ' \t';
+		process.env.QBITFLOW_ON_BEHALF_OF = '  ';
+		expect(QBitFlow.fromEnv()[TRANSPORT].baseUrl).toBe('https://api.qbitflow.app/v2');
+
+		process.env.QBITFLOW_BASE_URL = `${ts.url}\n`;
+		process.env.QBITFLOW_ON_BEHALF_OF = ` ${MEMBER}\n`;
+		await QBitFlow.fromEnv().me();
+		expect(ts.recorded[0].headers['on-behalf-of']).toBe(MEMBER);
+		expect(ts.recorded[0].headers['x-api-key']).toBe('sk_env_key');
+	});
+
 	it('lets explicit options override the environment', async () => {
 		const ts = await testServer((_req, res) => reply(res, 200, '{}'));
 		process.env.QBITFLOW_API_KEY = 'sk_env_key';

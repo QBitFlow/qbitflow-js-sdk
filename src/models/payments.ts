@@ -92,8 +92,6 @@ export interface Payment {
 	 * customer with it.
 	 */
 	customerReference?: string;
-	/** A qbf.cash tipper's message to the handle's owner. */
-	note?: string;
 	/** Names the customer, even once deleted (API reads only, never in webhooks). */
 	customer?: CustomerSummary;
 	/** How it settled: its fees, its split and its transaction. */

@@ -68,7 +68,7 @@ export class Core {
 	 * (status 404, code `not_found`), carrying the list answer's request id; checking the
 	 * reference means a server that ignored the filter can never hand back another resource.
 	 * `what` names the resource in the error's message (`product`). The reference is checked like
-	 * a created one's first (1 to 100 of `A-Z a-z 0-9 . _ : @ -`).
+	 * a created one's first (1 to 100 of `A-Z a-z 0-9 . _ : @ -`, not `.` or `..`).
 	 */
 	async getByReference<T extends { reference?: string }>(
 		item: Schema<T>,

@@ -1,7 +1,8 @@
 /**
- * Fixtures with every wire key of each response model (docs/api generated Go types), all
- * non-empty, shaped like the docs' examples (a 10 USD price paid in BASE:USDC, 0.99 % fee): the
- * Go SDK's model fixtures (`models_test.go`), verbatim.
+ * Fixtures with every modelled wire key of each response model, all non-empty, shaped like the
+ * API documentation's examples (a 10 USD price paid in BASE:USDC, 0.99 % fee), as the Go SDK's
+ * model fixtures. Keys the SDK deliberately leaves out are added by the tests that prove they
+ * are ignored (`tests/models.test.ts`, "out-of-scope wire elements still decode").
  */
 
 const fxCurrency = `{"id":8,"code":"BASE:USDC","symbol":"USDC","name":"USD Coin","chain":"BASE",
@@ -14,14 +15,14 @@ const fxSummary = `{"uuid":"c-1","firstName":"Ada","lastName":"Lovelace","email"
 const fxRefundSm = `{"uuid":"refund@1","status":"approved","initiatedBy":"merchant",
 	"refundPercent":"50","amount":"5.0021","amountMinUnits":"5002100","amountUsd":"5.0021",
 	"createdAt":"2026-10-01T12:00:00Z","respondedAt":"2026-10-01T13:00:00Z"}`;
-const fxAttempt = `{"status":"failed","code":"insufficient_funds","message":"Not enough USDC",
+const fxAttempt = `{"code":"insufficient_funds","message":"Not enough USDC",
 	"txHash":"0xa","at":"2026-10-01T12:00:00Z"}`;
 const fxTx = `{"blockNumber":"52468103","blockTime":"2026-10-01T11:59:58Z","gasUsed":95000,
 	"fee":{"amount":"0.00000114","amountMinUnits":"1140000000000","amountUsd":"0.005144"},
 	"l1Fee":{"amount":"0.0000001","amountMinUnits":"100000000000","amountUsd":"0.00045"},
 	"nativePriceUsd":"4512.37"}`;
 const fxSettlement = `{"feePercent":"0.99","organizationFee":{"address":"0xorg","feePercent":"10"},
-	"referralFee":{"address":"0xref","feePercent":"20","deadline":"2027-01-01T00:00:00Z"},
+	"referralFee":{"address":"0xref","feePercent":"20"},
 	"split":{"platform":{"amount":"0.0792","amountMinUnits":"79200","amountUsd":"0.0792"},
 	"organization":{"amount":"0.9901","amountMinUnits":"990100","amountUsd":"0.9901"},
 	"referral":{"amount":"0.0198","amountMinUnits":"19800","amountUsd":"0.0198"},
@@ -50,8 +51,8 @@ const fxSub = `{"uuid":"sub@1","reference":"customer-7731","createdAt":"2026-09-
 	"dunning":{"failedAttempts":1,"remainingAttempts":3,"failingSince":"2026-10-01T12:00:00Z",
 	"nextAttemptAt":"2026-10-02T12:00:00Z","awaitingMaximumSince":"2026-10-01T12:00:00Z"}}`;
 const fxEndpoint = `"uuid":"e-1","test":true,"url":"https://x.io/hook",
-	"events":["payment.completed"],"includeMembers":true,"payloadVersion":"v2","description":"d",
-	"createdAt":"2026-10-01T12:00:00Z","rotatedAt":"2026-10-01T12:00:00Z",
+	"events":["payment.completed"],"includeMembers":true,"description":"d",
+	"createdAt":"2026-10-01T12:00:00Z",
 	"disabledAt":"2026-10-02T12:00:00Z","disabledReason":"failing",
 	"failingSince":"2026-09-29T12:00:00Z","lastDeliveredAt":"2026-09-28T12:00:00Z"`;
 const fxSession = `"uuid":"sub@1","reference":"order-1044","productUuid":"p-1",
@@ -59,8 +60,7 @@ const fxSession = `"uuid":"sub@1","reference":"order-1044","productUuid":"p-1",
 	"priceUsd":"3.99","fees":[{"type":"custom","label":"Shipping","description":"Standard",
 	"amountUsd":"0.75"},{"type":"processingFee","label":"Processing fee","amountUsd":"0.07"}],
 	"amountUsd":"4.81","successUrl":"https://x/ok","cancelUrl":"https://x/ko",
-	"redirectUrl":"https://x/thanks","organizationName":"Shop","userName":"Ada","test":true,
-	"txType":"createSubscription","availableCurrencies":[${fxCurrency},${fxNative}],
+	"test":true,"txType":"createSubscription",
 	"metadata":{"orderId":"order-1044"},"createdAt":"2026-10-01T12:00:00Z",
 	"expiresAt":"2026-10-01T13:00:00Z"`;
 
@@ -70,7 +70,7 @@ export const MODEL_FIXTURES: Record<string, string> = {
 	Payment: `{"uuid":"pay@1",${fxTransfer},"reference":"order-1","priceUsd":"8.5","fees":${fxFees},
 		"productName":"Pro","productDescription":"Lifetime","metadata":{"orderId":"order-1",
 		"crm:customer":"C-5521"},"productUuid":"p-1","customerUuid":"c-1",
-		"customerReference":"crm-1","note":"thanks","customer":${fxSummary},
+		"customerReference":"crm-1","customer":${fxSummary},
 		"settlement":${fxSettlement},${fxPaid},${fxRefunding},
 		"checkoutOpenedAt":"2026-10-01T11:00:00Z"}`,
 	PaymentCompleted: `{"uuid":"pay@1",${fxTransfer},"priceUsd":"10","fees":[],"productName":"Pro",
@@ -115,7 +115,7 @@ export const MODEL_FIXTURES: Record<string, string> = {
 		"txHash":"0xa","lastAttempt":${fxAttempt}},"customerUuid":"c-1","productName":"Pro",
 		"customer":${fxSummary}}`,
 	Customer: `{"uuid":"c-1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com",
-		"verified":true,"phoneNumber":"+33 6 12 34 56 78","address":"1 rue X","reference":"crm-1",
+		"phoneNumber":"+33 6 12 34 56 78","address":"1 rue X","reference":"crm-1",
 		"metadata":{"crm":"42"},"createdAt":"2026-10-01T12:00:00Z","test":true,"userUuid":"m-1"}`,
 	Product: `{"uuid":"p-1","name":"Pro","description":"d","priceUsd":"9.99",
 		"createdAt":"2026-10-01T12:00:00Z","isActive":true,"reference":"pro",
@@ -138,7 +138,7 @@ export const MODEL_FIXTURES: Record<string, string> = {
 	MemberHeldFunds: `{"userUuid":"m-1","totalUsd":"98.5","count":2,
 		"oldestAt":"2026-09-28T12:00:00Z"}`,
 	HeldFundsReleased: `{"uuid":"transfer@1",${fxTransfer},"received":true,
-		"type":"heldFundsRelease","settlement":{"transaction":${fxTx}},
+		"settlement":{"transaction":${fxTx}},
 		"ledgers":[{"txUuid":"pay@1","type":"payment",
 		"description":"Payment pay@1","amountUsd":"10","currency":${fxCurrency},
 		"owed":"9.901","owedMinUnits":"9901000","owedUsd":"9.901",
@@ -175,14 +175,14 @@ export const MODEL_FIXTURES: Record<string, string> = {
 		"receiptUrl":"https://r","txUuid":"refund@1","relatedTxUuid":"pay@0","productUuid":"p-1",
 		"productReference":"pro","productDescription":"d","customerUuid":"c-1","userUuid":"m-1"}`,
 	WebhookEndpointCreated: `{${fxEndpoint},"secret":"whsec_x"}`,
-	EventDetail: `{"id":"evt_1","type":"payment.completed","version":"v2",
+	EventDetail: `{"id":"evt_1","type":"payment.completed",
 		"createdAt":"2026-10-01T12:00:00.123Z","test":false,"userUuid":"m-1",
 		"data":{"uuid":"pay@1"},"deliveries":[{"endpointUuid":"e-1","url":"https://x.io/hook",
 		"delivered":true,"attempts":[{"uuid":"a-1","eventId":"evt_1",
 		"eventType":"payment.completed","endpointUuid":"e-1","attempt":2,"delivered":false,
 		"skipped":true,"statusCode":500,"error":"500 Internal Server Error","durationMs":120,
 		"attemptedAt":"2026-10-01T12:00:01Z"}]}]}`,
-	Me: `{"credential":"apiKey","apiKeyUuid":"k-1","userUuid":"u-1","role":"user",
+	Me: `{"apiKeyUuid":"k-1","role":"user",
 		"onBehalfOfUserUuid":"m-1","space":{"uuid":"s-1","organizationUuid":"o-1",
 		"organizationName":"Shop","userUuid":"m-1","test":true,"role":"admin",
 		"member":{"userUuid":"m-1","firstName":"Ada","lastName":"L","email":"a@b.co"},

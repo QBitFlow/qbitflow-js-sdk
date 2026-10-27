@@ -1,6 +1,6 @@
 /**
- * The HTTP layer: headers, the retry policy (behaviour §3), error mapping (§4) and response
- * decoding (§6), on the global `fetch` (or an injected one).
+ * The HTTP layer: headers, the retry policy, error mapping and response decoding, on the
+ * global `fetch` (or an injected one).
  *
  * @internal Not part of the public API.
  */
@@ -32,17 +32,25 @@ import { checkOnBehalfOf, isIdempotencyKey, isRequestId } from './validate.js';
 
 /** The response a {@link FetchLike} resolves to: the parts of a `fetch` `Response` the SDK reads. */
 export interface FetchResponse {
+	/** The HTTP status. */
 	readonly status: number;
+	/** The response headers (`X-Request-Id`, `Retry-After` are read). */
 	readonly headers: { get(name: string): string | null };
+	/** The whole body, as text. */
 	text(): Promise<string>;
 }
 
 /** The request a {@link FetchLike} receives. */
 export interface FetchInit {
+	/** The HTTP method (`GET`, `POST`, `PATCH`, `DELETE`). */
 	method: string;
+	/** The request headers, `X-API-Key` included: never log them. */
 	headers: Record<string, string>;
+	/** The JSON body, when the request has one. */
 	body?: string;
+	/** Always `manual`: a redirect is answered as is, never followed (honour it). */
 	redirect: 'manual';
+	/** Aborts the attempt (the per-attempt timeout, or the caller's `signal`). */
 	signal: AbortSignal;
 }
 
@@ -106,7 +114,13 @@ const MAX_RETRY_WAIT_MS = 60_000;
 /** Bounds a `Retry-After` (about a year: far above the 60 s the SDK waits anyway). */
 const MAX_RETRY_AFTER_SECONDS = 365 * 24 * 3600;
 
-/** Waits `ms`, or rejects when `signal` aborts. */
+/**
+ * The longest delay a timer takes (2^31-1 ms, about 24.8 days): `setTimeout` fires after 1 ms
+ * when given more, so longer waits and timeouts are clamped to it.
+ */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+/** Waits `ms` (at most {@link MAX_TIMER_MS}), or rejects when `signal` aborts. */
 export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 	return new Promise((resolve, reject) => {
 		if (signal?.aborted) {
@@ -117,10 +131,13 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 			clearTimeout(timer);
 			reject(signal?.reason);
 		};
-		const timer = setTimeout(() => {
-			signal?.removeEventListener('abort', onAbort);
-			resolve();
-		}, ms);
+		const timer = setTimeout(
+			() => {
+				signal?.removeEventListener('abort', onAbort);
+				resolve();
+			},
+			Math.min(ms, MAX_TIMER_MS)
+		);
 		signal?.addEventListener('abort', onAbort, { once: true });
 	});
 }
@@ -154,14 +171,22 @@ export class Transport {
 	/** Test hook: generates an `Idempotency-Key`. */
 	newKey: () => string = newUUIDv4;
 
+	/**
+	 * The API key: a private field, so that `util.inspect`, `console.log` and `JSON.stringify` of
+	 * a client (or of anything holding this transport) never show it.
+	 */
+	readonly #apiKey: string;
+
 	constructor(
-		readonly apiKey: string,
+		apiKey: string,
 		readonly baseUrl: string,
 		/** Per attempt, in ms. */
 		readonly timeout: number,
 		readonly maxRetries: number,
 		readonly fetch: FetchLike
-	) {}
+	) {
+		this.#apiKey = apiKey;
+	}
 
 	/**
 	 * Performs `e`: applies the request options, builds the headers, encodes the body and runs
@@ -189,7 +214,7 @@ export class Transport {
 		}
 
 		const headers: Record<string, string> = {
-			'X-API-Key': this.apiKey,
+			'X-API-Key': this.#apiKey,
 			'User-Agent': USER_AGENT,
 			Accept: e.accept ?? 'application/json',
 		};
@@ -260,10 +285,13 @@ export class Transport {
 	): Promise<RawResponse> {
 		const controller = new AbortController();
 		let timedOut = false;
-		const timer = setTimeout(() => {
-			timedOut = true;
-			controller.abort(new Error(`timeout after ${this.timeout} ms`));
-		}, this.timeout);
+		const timer = setTimeout(
+			() => {
+				timedOut = true;
+				controller.abort(new Error(`timeout after ${this.timeout} ms`));
+			},
+			Math.min(this.timeout, MAX_TIMER_MS)
+		);
 		const onAbort = () => controller.abort(signal?.reason);
 		if (signal?.aborted) controller.abort(signal.reason);
 		else signal?.addEventListener('abort', onAbort, { once: true });
@@ -524,7 +552,7 @@ export function responseContext(res: RawResponse): DecodeContext {
 }
 
 /**
- * Decodes a 2xx JSON answer (behaviour §6): an empty or non-JSON body, or a value of the wrong
+ * Decodes a 2xx JSON answer: an empty or non-JSON body, or a value of the wrong
  * type, is a `ServerError`.
  */
 export function decodeResponse<T>(schema: Schema<T>, res: RawResponse): T {

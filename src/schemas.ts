@@ -1,5 +1,5 @@
 /**
- * The decoding schemas of every answer and webhook event, mirroring the API's types (docs/api).
+ * The decoding schemas of every answer and webhook event, mirroring the API's types.
  * `object<T>()` needs exactly one decoder per property of `T`, so a schema cannot drift from its
  * interface without a compile error.
  *
@@ -26,14 +26,12 @@ import {
 import type {
 	AccountingEventType,
 	ActionRequired,
-	AttemptStatus,
 	BillingFailureReason,
 	BillingOutcome,
 	BillingStage,
 	CancellationReason,
 	Chain,
 	CheckoutSessionStatusValue,
-	Credential,
 	DurationUnit,
 	EndpointDisabledReason,
 	EventType,
@@ -50,8 +48,6 @@ import type {
 	SubscriptionStatus,
 	TransactionKind,
 	TransactionType,
-	TransferType,
-	WebhookPayloadVersion,
 } from './enums.js';
 import type { AccountingEvent } from './models/accounting.js';
 import type {
@@ -169,7 +165,6 @@ export const RefundSummarySchema = object<RefundSummary>({
 });
 
 export const AttemptSchema = object<Attempt>({
-	status: enumString<AttemptStatus>(),
 	code: optString,
 	message: optString,
 	txHash: optString,
@@ -178,11 +173,7 @@ export const AttemptSchema = object<Attempt>({
 
 const OrganizationFeeSchema = object<OrganizationFee>({ address: string, feePercent: string });
 
-const ReferralFeeSchema = object<ReferralFee>({
-	address: string,
-	feePercent: string,
-	deadline: timestamp,
-});
+const ReferralFeeSchema = object<ReferralFee>({ address: string, feePercent: string });
 
 const SplitSchema = object<Split>({
 	platform: TokenAmountSchema,
@@ -245,7 +236,6 @@ const paymentFields: Fields<Payment> = {
 	productUuid: optString,
 	customerUuid: optString,
 	customerReference: optString,
-	note: optString,
 	customer: optional(CustomerSummarySchema),
 	settlement: SettlementSchema,
 	confirmedAt: optTimestamp,
@@ -383,12 +373,8 @@ const paymentSessionFields: Fields<PaymentSessionData> = {
 	amountUsd: string,
 	successUrl: optString,
 	cancelUrl: optString,
-	redirectUrl: optString,
-	organizationName: string,
-	userName: optString,
 	test: boolean,
 	txType: enumString<TransactionType>(),
-	availableCurrencies: list(CurrencySchema),
 	metadata: stringMap,
 	createdAt: optTimestamp,
 	expiresAt: optTimestamp,
@@ -519,7 +505,6 @@ export const CustomerSchema = object<Customer>({
 	firstName: string,
 	lastName: optString,
 	email: string,
-	verified: boolean,
 	phoneNumber: optString,
 	address: optString,
 	reference: optString,
@@ -573,9 +558,7 @@ const MeSpaceSchema = object<MeSpace>({
 });
 
 export const MeSchema = object<Me>({
-	credential: enumString<Credential>(),
 	apiKeyUuid: optString,
-	userUuid: optString,
 	role: optional(enumString<Role>()),
 	onBehalfOfUserUuid: optString,
 	space: optional(MeSpaceSchema),
@@ -727,10 +710,8 @@ const webhookEndpointFields: Fields<WebhookEndpoint> = {
 	url: string,
 	events: list(enumString<EventType>()),
 	includeMembers: boolean,
-	payloadVersion: enumString<WebhookPayloadVersion>(),
 	description: optString,
 	createdAt: timestamp,
-	rotatedAt: optTimestamp,
 	disabledAt: optTimestamp,
 	disabledReason: optional(enumString<EndpointDisabledReason>()),
 	failingSince: optTimestamp,
@@ -823,7 +804,6 @@ const HeldFundsReleasedSchema = object<HeldFundsReleased>({
 	test: boolean,
 	userUuid: optString,
 	received: boolean,
-	type: enumString<TransferType>(),
 	settlement: TransferSettlementSchema,
 	ledgers: list(LedgerEntrySchema),
 });
@@ -852,7 +832,6 @@ export const EVENT_DATA_SCHEMAS: Record<string, Schema<unknown>> = {
 const envelopeFields: Fields<Omit<EventEnvelope<string, unknown>, 'data'>> = {
 	id: string,
 	type: string,
-	version: enumString<WebhookPayloadVersion>(),
 	createdAt: timestamp,
 	test: boolean,
 	userUuid: optString,

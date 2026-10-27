@@ -59,7 +59,10 @@ export class CheckoutSessionsService {
 	 * top of that. `metadata` is copied onto the payment and into its webhooks.
 	 *
 	 * Errors: 400 `validation_failed` (test mode caps the amount, fees included, at `"5"`,
-	 * `details.max`; live mode needs https URLs); 404 for an unknown product or customer; 409
+	 * `details.max`; live mode needs https URLs); 403 `policy_disabled` (`details.policy`,
+	 * `details.field`) when a member's own key sends `successUrl` or `cancelUrl` while its
+	 * organization's `members.checkoutRedirects` policy is off (an organization key, acting
+	 * `onBehalfOf` the member too, always may); 404 for an unknown product or customer; 409
 	 * `unique_violation` on `reference`; 409 `merchant_not_ready` (`details.reason`) when the
 	 * space's wallets accept no currency; 410 `merchant_closed` for a removed member's or a closed
 	 * organization's space.

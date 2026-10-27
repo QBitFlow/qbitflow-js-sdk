@@ -6,15 +6,15 @@
  * | Condition | Class |
  * |---|---|
  * | 400 `validation_failed`, or an input the SDK refused before sending (no `status`) | {@link ValidationError} |
- * | other 400 (`bad_request`, `foreign_key_violation`, …) | {@link BadRequestError} |
+ * | other 400 (`foreign_key_violation`, `test_mode_only`, …) | {@link BadRequestError} |
  * | 401 | {@link AuthenticationError} |
- * | 403 (`forbidden`, `policy_disabled`, `plan_required`) | {@link PermissionDeniedError} |
+ * | 403 (`forbidden`; `policy_disabled` with `details.policy`, and `details.field` for a request field) | {@link PermissionDeniedError} |
  * | 404 | {@link NotFoundError} |
- * | 409 (`unique_violation`, `tx_already_sent`, `merchant_not_ready`, …) | {@link ConflictError} |
+ * | 409 (`unique_violation`, `tx_already_sent`, `merchant_not_ready`, `subscription_already_stopped_or_inactive`, …) | {@link ConflictError} |
  * | 410 (`merchant_closed`) | {@link GoneError} |
  * | 422 `idempotency_key_reused` | {@link IdempotencyError} |
  * | 429 | {@link RateLimitError} |
- * | other 4xx (413 `request_too_large`, …) | {@link ApiError} |
+ * | other 4xx (413 `request_too_large`, 405 `method_not_allowed`, …) | {@link ApiError} |
  * | 5xx, 3xx, a 2xx whose body is not the expected JSON | {@link ServerError} |
  * | no response (DNS, connection, TLS, timeout, abort) | {@link NetworkError} |
  * | a webhook signature that does not verify | {@link WebhookSignatureError} |
@@ -86,13 +86,15 @@ export interface ApiErrorInit {
 
 /**
  * The payload every SDK error carries, and the error thrown as is for an HTTP error without a
- * more specific class (e.g. 413 `request_too_large`).
+ * more specific class (e.g. 413 `request_too_large`, or 405 `method_not_allowed`: a path
+ * called with a method it doesn't take, its `Allow` header listing the methods).
  *
  * `message` reads `"<message> (status <status>, code <code>, request <requestId>)"` followed by
  * `"; <field>: <message>"` for each field error; {@link ApiError.rawMessage} is the API's own
  * message.
  */
 export class ApiError extends QBitFlowError {
+	/** The class's brand (`'ApiError'`), which `instanceof` matches across copies of the SDK. */
 	static override readonly kind: string = 'ApiError';
 
 	/** The HTTP status; `undefined` when no response was received (client-side checks, network errors). */
@@ -148,45 +150,59 @@ function formatMessage(init: ApiErrorInit): string {
 
 /** A 400 `validation_failed`, or an input the SDK refused before sending anything (`status` undefined). */
 export class ValidationError extends ApiError {
+	/** The class's brand (`'ValidationError'`), which `instanceof` matches across copies of the SDK. */
 	static override readonly kind: string = 'ValidationError';
 }
 
-/** Any other 400 (`bad_request`, `foreign_key_violation`, …). */
+/** Any other 400 (`foreign_key_violation`, `test_mode_only`, `sender_is_receiver`, …). */
 export class BadRequestError extends ApiError {
+	/** The class's brand (`'BadRequestError'`), which `instanceof` matches across copies of the SDK. */
 	static override readonly kind: string = 'BadRequestError';
 }
 
 /** A 401: the API key is missing, unknown, expired or revoked. */
 export class AuthenticationError extends ApiError {
+	/** The class's brand (`'AuthenticationError'`), which `instanceof` matches across copies of the SDK. */
 	static override readonly kind: string = 'AuthenticationError';
 }
 
-/** A 403 (`forbidden`, `policy_disabled` with `details.policy`, `plan_required`). */
+/**
+ * A 403. `forbidden` (no details): the key's role may not do it (an admin-only route with a
+ * member's key or `onBehalfOf`), or the resource is another's. `policy_disabled`: a member's key
+ * doing what its organization's member policy doesn't allow; `details.policy` names the policy
+ * (e.g. `members.checkoutRedirects`) and, when the policy governs a request field,
+ * `details.field` names it (e.g. `successUrl`). Organization keys never get `policy_disabled`.
+ */
 export class PermissionDeniedError extends ApiError {
+	/** The class's brand (`'PermissionDeniedError'`), which `instanceof` matches across copies of the SDK. */
 	static override readonly kind: string = 'PermissionDeniedError';
 }
 
 /** A 404: the resource does not exist, or is outside the request's space. */
 export class NotFoundError extends ApiError {
+	/** The class's brand (`'NotFoundError'`), which `instanceof` matches across copies of the SDK. */
 	static override readonly kind: string = 'NotFoundError';
 }
 
 /**
  * A 409 (`unique_violation` with `details.field`, `tx_already_sent`, `merchant_not_ready` with
- * `details.reason`, `held_funds_pending`, `already_joined`, `payment_not_due`, `conflict`,
- * `idempotency_key_in_use`, …).
+ * `details.reason`, `held_funds_pending`, `already_joined`, `payment_not_due`,
+ * `subscription_already_stopped_or_inactive`, `conflict`, `idempotency_key_in_use`, …).
  */
 export class ConflictError extends ApiError {
+	/** The class's brand (`'ConflictError'`), which `instanceof` matches across copies of the SDK. */
 	static override readonly kind: string = 'ConflictError';
 }
 
 /** A 410 (`merchant_closed`): the merchant's space is closed. */
 export class GoneError extends ApiError {
+	/** The class's brand (`'GoneError'`), which `instanceof` matches across copies of the SDK. */
 	static override readonly kind: string = 'GoneError';
 }
 
 /** A 422 `idempotency_key_reused`: the key was already used for another request. Never retried. */
 export class IdempotencyError extends ApiError {
+	/** The class's brand (`'IdempotencyError'`), which `instanceof` matches across copies of the SDK. */
 	static override readonly kind: string = 'IdempotencyError';
 }
 
@@ -202,6 +218,7 @@ export interface RateLimitErrorInit extends ApiErrorInit {
  * 60 seconds.
  */
 export class RateLimitError extends ApiError {
+	/** The class's brand (`'RateLimitError'`), which `instanceof` matches across copies of the SDK. */
 	static override readonly kind: string = 'RateLimitError';
 
 	/** How long the API asked to wait, in seconds (`Retry-After`, else `details.retryAfterSeconds`); 0 when unknown. */
@@ -221,11 +238,13 @@ export class RateLimitError extends ApiError {
 
 /** A 5xx (503 `network_unavailable`, 504 `timeout` included), a 3xx (redirects are never followed), or a 2xx whose body is not the expected JSON. */
 export class ServerError extends ApiError {
+	/** The class's brand (`'ServerError'`), which `instanceof` matches across copies of the SDK. */
 	static override readonly kind: string = 'ServerError';
 }
 
 /** No response was received (DNS, connection, TLS, timeout, an aborted signal). `cause` holds the reason. */
 export class NetworkError extends ApiError {
+	/** The class's brand (`'NetworkError'`), which `instanceof` matches across copies of the SDK. */
 	static override readonly kind: string = 'NetworkError';
 }
 
@@ -258,6 +277,7 @@ export interface WebhookSignatureErrorInit extends ApiErrorInit {
 
 /** A webhook's signature could not be verified: locally (no `status`) or by the API (400 `invalid_signature`). */
 export class WebhookSignatureError extends ApiError {
+	/** The class's brand (`'WebhookSignatureError'`), which `instanceof` matches across copies of the SDK. */
 	static override readonly kind: string = 'WebhookSignatureError';
 
 	/** Why. */

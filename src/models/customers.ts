@@ -16,16 +16,9 @@ export interface Customer {
 	lastName?: string;
 	/**
 	 * The email address, lowercase (matched case-insensitively). Several customers of a space may
-	 * share one (see `verified`).
+	 * share one.
 	 */
 	email: string;
-	/**
-	 * True for a customer the merchant created (the API, the dashboard), who vouches for its
-	 * details; false for one QBitFlow created from the email a payer typed at a checkout that
-	 * named no customer (nobody proved the payer owns that address). A checkout never links a
-	 * typed email to a verified customer.
-	 */
-	verified: boolean;
 	/** The phone number; absent when not given. */
 	phoneNumber?: string;
 	/** The physical address; absent when not given. */
@@ -62,7 +55,7 @@ export interface CreateCustomerParams {
 	address?: string;
 	/**
 	 * Your reference (e.g. your own customer id), unique per space and mode: 1 to 100 of
-	 * `A-Z a-z 0-9 . _ : @ -`.
+	 * `A-Z a-z 0-9 . _ : @ -`, not `.` or `..`.
 	 */
 	reference?: string;
 	/**
@@ -105,9 +98,4 @@ export interface CustomerListParams extends PageParams {
 	 * `customers.getByReference` reads it).
 	 */
 	reference?: string;
-	/**
-	 * Only the customers the merchant created (`true`) or those created from an email a payer
-	 * typed at checkout (`false`).
-	 */
-	verified?: boolean;
 }

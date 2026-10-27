@@ -19,8 +19,8 @@ export class CustomersService {
 
 	/**
 	 * One page of the space's customers (`GET /customers`; newest first, page size 20 by default,
-	 * at most 100), filtered by `email` (several customers may share one), `reference` or
-	 * `verified`. {@link iterate} walks every page.
+	 * at most 100), filtered by `email` (several customers may share one) or `reference`.
+	 * {@link iterate} walks every page.
 	 */
 	async list(params?: CustomerListParams, options?: RequestOptions): Promise<Page<Customer>> {
 		const query = customerListQuery(params);
@@ -43,7 +43,7 @@ export class CustomersService {
 	}
 
 	/**
-	 * Creates a customer (`POST /customers`, 201; verified). Sends an `Idempotency-Key` and is
+	 * Creates a customer (`POST /customers`, 201). Sends an `Idempotency-Key` and is
 	 * retried on transient failures. The email is stored lowercase and is not unique: several
 	 * customers of a space may share one.
 	 *

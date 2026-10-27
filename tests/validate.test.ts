@@ -100,10 +100,10 @@ describe('rules', () => {
 	});
 
 	it('reference', () => {
-		for (const r of ['order-1042', 'INV_2026.10:01@shop', 'a', 'r'.repeat(100)]) {
+		for (const r of ['order-1042', 'INV_2026.10:01@shop', 'a', 'r'.repeat(100), '...', '.a']) {
 			expect(fields(customer({ reference: r }))).toEqual([]);
 		}
-		for (const r of ['has space', 'slash/x', 'é', '#1', 'r'.repeat(101)]) {
+		for (const r of ['has space', 'slash/x', 'é', '#1', 'r'.repeat(101), '.', '..']) {
 			expect(fields(customer({ reference: r }))).toEqual(['reference']);
 		}
 		expect(
@@ -120,10 +120,16 @@ describe('rules', () => {
 			'reference',
 		]);
 		expect(fields(() => P.paymentListQuery({ reference: 'o/1' }))).toEqual(['reference']);
-		expect(fields(() => P.paymentListQuery({ reference: '..' }))).toEqual([]);
+		// `.` and `..` alone are dot-segments: refused everywhere the reference rule applies.
+		expect(fields(() => P.paymentListQuery({ reference: '..' }))).toEqual(['reference']);
+		expect(fields(() => P.productListQuery({ reference: '.' }))).toEqual(['reference']);
+		expect(fields(() => P.paymentListQuery({ reference: '...' }))).toEqual([]);
+		expect(
+			fields(session({ productReference: '.', reference: '..', customerReference: '.' }))
+		).toEqual(['reference', 'productReference', 'customerReference']);
 		expect(fields(() => P.referenceQuery('pro-monthly'))).toEqual([]);
 		expect(P.referenceQuery('pro-monthly')).toBe('reference=pro-monthly');
-		for (const r of ['', ' ', 'pro monthly', 'r'.repeat(101), undefined, 42]) {
+		for (const r of ['', ' ', 'pro monthly', 'r'.repeat(101), undefined, 42, '.', '..']) {
 			expect(fields(() => P.referenceQuery(r))).toEqual(['reference']);
 		}
 	});
@@ -696,13 +702,15 @@ describe('rules', () => {
 	});
 
 	it('refund statuses', () => {
-		const all = ['pending', 'approved', 'rejected', 'failed', 'pending']; // duplicates allowed
+		const all = ['pending', 'approved', 'rejected', 'rejected', 'pending']; // duplicates allowed
 		const run = (status: unknown) => fields(() => P.refundListQuery({ status } as never));
 		expect(run(all)).toEqual([]);
 		expect(run([])).toEqual([]);
 		expect(run(undefined)).toEqual([]);
 		expect(run([...all, 'pending'])).toEqual(['status']);
 		expect(run(['approved', 'completed', ''])).toEqual(['status[1]', 'status[2]']);
+		// `failed` is declared by the API but never sent: not a status the SDK knows.
+		expect(run(['failed'])).toEqual(['status[0]']);
 		expect(run(['denied'])).toEqual(['status[0]']);
 		expect(run(['approved', 'cancelled'])).toEqual(['status[1]']); // retired: unknown
 		expect(run([42])).toEqual(['status[0]']);
@@ -771,10 +779,6 @@ describe('rules', () => {
 				P.createWebhookEndpointBody({ url: 'https://x.io', events: ['future.event'] })
 			)
 		).toEqual([]);
-		expect(fields(() => P.updateWebhookEndpointBody({ payloadVersion: 'v1' }))).toEqual([
-			'payloadVersion',
-		]);
-		expect(fields(() => P.updateWebhookEndpointBody({ payloadVersion: 'v2' }))).toEqual([]);
 	});
 
 	it('headers', () => {
@@ -851,8 +855,8 @@ describe('update semantics: what the bodies send', () => {
 		],
 		[
 			'endpoint pause',
-			() => P.updateWebhookEndpointBody({ enabled: false, payloadVersion: 'v2' }),
-			{ payloadVersion: 'v2', enabled: false },
+			() => P.updateWebhookEndpointBody({ enabled: false }),
+			{ enabled: false },
 		],
 		['empty subscription update', () => P.updateSubscriptionBody({}), {}],
 		[

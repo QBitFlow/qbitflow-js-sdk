@@ -29,6 +29,7 @@ export const SubscriptionStatus = {
 	/** Cancelled. Final. */
 	Cancelled: 'cancelled',
 } as const;
+/** A `SubscriptionStatus` value (a string): one of {@link SubscriptionStatus}'s, or a newer one the SDK keeps as is. */
 export type SubscriptionStatus = Open<ValuesOf<typeof SubscriptionStatus>>;
 
 /** What a subscription's customer must do (absent: nothing). */
@@ -40,27 +41,41 @@ export const ActionRequired = {
 	/** The trial must be confirmed to be billed. */
 	ConfirmTrial: 'confirmTrial',
 } as const;
+/** A `ActionRequired` value (a string): one of {@link ActionRequired}'s, or a newer one the SDK keeps as is. */
 export type ActionRequired = Open<ValuesOf<typeof ActionRequired>>;
 
 /** Why a subscription stopped or was cancelled. */
 export const CancellationReason = {
+	/** Cancelled by its customer. */
 	Customer: 'customer',
+	/** Cancelled by its merchant (`subscriptions.cancel`, or the dashboard). */
 	Merchant: 'merchant',
+	/** Its bill's last attempt failed. */
 	BillingFailed: 'billingFailed',
+	/** Its trial ended and its customer didn't subscribe within the grace period. */
 	TrialNotConverted: 'trialNotConverted',
+	/** Its merchant's space closed (a member removed, the organization closed). */
 	MerchantClosed: 'merchantClosed',
+	/** The contract no longer had it active (cancelled outside QBitFlow). */
 	InactiveOnChain: 'inactiveOnChain',
 } as const;
+/** A `CancellationReason` value (a string): one of {@link CancellationReason}'s, or a newer one the SDK keeps as is. */
 export type CancellationReason = Open<ValuesOf<typeof CancellationReason>>;
 
 /** Why a bill failed (`subscription.billingFailed`). */
 export const BillingFailureReason = {
+	/** The customer's wallet doesn't hold the bill: they add funds to it. */
 	InsufficientBalance: 'insufficientBalance',
+	/** What remains of the allowance the customer signed doesn't cover the bill (or it expired): they top it up (the management page). */
 	AllowanceExhausted: 'allowanceExhausted',
+	/** The customer's wallet revoked the token approval the subscription pulls through: they approve it again (the management page). */
 	ApprovalRevoked: 'approvalRevoked',
+	/** The bill, at today's price, exceeds the maximum the customer signed: they sign a new maximum (the management page). */
 	MaxAmountExceeded: 'maxAmountExceeded',
+	/** Another refusal of the charge, caused by the customer's wallet. */
 	Other: 'other',
 } as const;
+/** A `BillingFailureReason` value (a string): one of {@link BillingFailureReason}'s, or a newer one the SDK keeps as is. */
 export type BillingFailureReason = Open<ValuesOf<typeof BillingFailureReason>>;
 
 /** Where a bill stands ({@link TestBill.stage}). */
@@ -71,12 +86,15 @@ export const BillingStage = {
 	Waiting: 'waiting',
 	/** Over the customer's maximum: waiting for their new one. */
 	Pending: 'pending',
+	/** Over: see its `outcome`. */
 	Done: 'done',
 } as const;
+/** A `BillingStage` value (a string): one of {@link BillingStage}'s, or a newer one the SDK keeps as is. */
 export type BillingStage = Open<ValuesOf<typeof BillingStage>>;
 
 /** How a bill ended ({@link TestBill.outcome}). */
 export const BillingOutcome = {
+	/** Charged and recorded (`subscription.billed`). */
 	Paid: 'paid',
 	/** Nothing to bill: paid already, cancelled, or gone. */
 	NotDue: 'notDue',
@@ -90,6 +108,7 @@ export const BillingOutcome = {
 	/** Its customer paused the subscription: not charged. */
 	Paused: 'paused',
 } as const;
+/** A `BillingOutcome` value (a string): one of {@link BillingOutcome}'s, or a newer one the SDK keeps as is. */
 export type BillingOutcome = Open<ValuesOf<typeof BillingOutcome>>;
 
 /** A checkout session's (or a refund approval's) status. */
@@ -103,14 +122,8 @@ export const CheckoutSessionStatusValue = {
 	/** Expired unpaid (at its `expiresAt`, or expired by its merchant). Final. */
 	Expired: 'expired',
 } as const;
+/** A `CheckoutSessionStatusValue` value (a string): one of {@link CheckoutSessionStatusValue}'s, or a newer one the SDK keeps as is. */
 export type CheckoutSessionStatusValue = Open<ValuesOf<typeof CheckoutSessionStatusValue>>;
-
-/** A failed attempt's status. */
-export const AttemptStatus = {
-	/** Not sent, not confirmed, or failed on the network: nothing was paid. */
-	Failed: 'failed',
-} as const;
-export type AttemptStatus = Open<ValuesOf<typeof AttemptStatus>>;
 
 /** Who added a line to a checkout's price ({@link FeeLine.type}). */
 export const FeeLineType = {
@@ -119,6 +132,7 @@ export const FeeLineType = {
 	/** QBitFlow's processing fee, which the merchant has the customer pay (computed by QBitFlow). */
 	ProcessingFee: 'processingFee',
 } as const;
+/** A `FeeLineType` value (a string): one of {@link FeeLineType}'s, or a newer one the SDK keeps as is. */
 export type FeeLineType = Open<ValuesOf<typeof FeeLineType>>;
 
 /**
@@ -135,9 +149,8 @@ export const RefundStatus = {
 	Approved: 'approved',
 	/** Rejected by whoever decides it (`refund.rejected`). */
 	Rejected: 'rejected',
-	/** Declared, never set: a failed approval leaves the request pending. */
-	Failed: 'failed',
 } as const;
+/** A `RefundStatus` value (a string): one of {@link RefundStatus}'s, or a newer one the SDK keeps as is. */
 export type RefundStatus = Open<ValuesOf<typeof RefundStatus>>;
 
 /** Who started a refund. */
@@ -147,13 +160,17 @@ export const RefundInitiator = {
 	/** Sent by the merchant without a request. */
 	Merchant: 'merchant',
 } as const;
+/** A `RefundInitiator` value (a string): one of {@link RefundInitiator}'s, or a newer one the SDK keeps as is. */
 export type RefundInitiator = Open<ValuesOf<typeof RefundInitiator>>;
 
 /** Why a transaction cannot be refunded now. */
 export const NotRefundableReason = {
+	/** The transaction already has a refund (one per transaction, whatever it became). */
 	RefundExists: 'refundExists',
+	/** A held member's payment whose funds were already released to the member. */
 	HeldFundsReleased: 'heldFundsReleased',
 } as const;
+/** A `NotRefundableReason` value (a string): one of {@link NotRefundableReason}'s, or a newer one the SDK keeps as is. */
 export type NotRefundableReason = Open<ValuesOf<typeof NotRefundableReason>>;
 
 /**
@@ -166,6 +183,7 @@ export const TransactionKind = {
 	/** A subscription's bill (`sub-hist@…`): `subscriptions.getBill`. */
 	Bill: 'bill',
 } as const;
+/** A `TransactionKind` value (a string): one of {@link TransactionKind}'s, or a newer one the SDK keeps as is. */
 export type TransactionKind = Open<ValuesOf<typeof TransactionKind>>;
 
 /** What a failed attempt was paying. */
@@ -177,6 +195,7 @@ export const FailureKind = {
 	/** A subscription's bill (`sub-hist@…`). */
 	Bill: 'bill',
 } as const;
+/** A `FailureKind` value (a string): one of {@link FailureKind}'s, or a newer one the SDK keeps as is. */
 export type FailureKind = Open<ValuesOf<typeof FailureKind>>;
 
 /** What a failure means, from its code. */
@@ -195,8 +214,10 @@ export const FailureCategory = {
 	NotConfirmed: 'notConfirmed',
 	/** The customer's signature was refused. */
 	SignatureRejected: 'signatureRejected',
+	/** Any other failure. */
 	Other: 'other',
 } as const;
+/** A `FailureCategory` value (a string): one of {@link FailureCategory}'s, or a newer one the SDK keeps as is. */
 export type FailureCategory = Open<ValuesOf<typeof FailureCategory>>;
 
 /** A blockchain, by its native coin's symbol ({@link Currency.chain}; the testnet's in test mode). */
@@ -208,38 +229,18 @@ export const Chain = {
 	/** Solana. */
 	SOL: 'SOL',
 } as const;
+/** A `Chain` value (a string): one of {@link Chain}'s, or a newer one the SDK keeps as is. */
 export type Chain = Open<ValuesOf<typeof Chain>>;
 
 /** A transaction's kind (`checkout.expired`'s `txType`: `payment` or `createSubscription`). */
 export const TransactionType = {
+	/** A one-time payment's checkout. */
 	Payment: 'payment',
-	Transfer: 'transfer',
-	TokenTransfer: 'tokenTransfer',
+	/** A subscription's checkout. */
 	CreateSubscription: 'createSubscription',
-	CancelSubscription: 'cancelSubscription',
-	ForceCancelSubscription: 'forceCancelSubscription',
-	ExecuteSubscription: 'executeSubscription',
-	CreatePaygSubscription: 'createPaygSubscription',
-	CancelPaygSubscription: 'cancelPaygSubscription',
-	IncreaseAllowance: 'increaseAllowance',
-	UpdateMaxAmount: 'updateMaxAmount',
-	Refund: 'refund',
-	Faucet: 'faucet',
-	ClaimFunds: 'claimFunds',
-	ReleaseHeldFunds: 'releaseHeldFunds',
 } as const;
+/** A `TransactionType` value (a string): one of {@link TransactionType}'s, or a newer one the SDK keeps as is. */
 export type TransactionType = Open<ValuesOf<typeof TransactionType>>;
-
-/** A transfer's kind ({@link HeldFundsReleased.type}: `heldFundsRelease`). */
-export const TransferType = {
-	/** v1: funds held for a user, paid when they claimed their account. */
-	AccountClaim: 'accountClaim',
-	/** The funds an organization held for a member, paid out to them. */
-	HeldFundsRelease: 'heldFundsRelease',
-	Internal: 'internal',
-	External: 'external',
-} as const;
-export type TransferType = Open<ValuesOf<typeof TransferType>>;
 
 /** A held-funds line's kind. A held member sells no subscription, so no bill is ever a line. */
 export const LedgerEntryType = {
@@ -248,6 +249,7 @@ export const LedgerEntryType = {
 	/** A refund the organization sent of one of them. */
 	Refund: 'refund',
 } as const;
+/** A `LedgerEntryType` value (a string): one of {@link LedgerEntryType}'s, or a newer one the SDK keeps as is. */
 export type LedgerEntryType = Open<ValuesOf<typeof LedgerEntryType>>;
 
 /** An accounting export row's kind. */
@@ -263,6 +265,7 @@ export const AccountingEventType = {
 	/** The referrer's share earned on a referred organization's payment or bill. */
 	ReferralFee: 'referralFee',
 } as const;
+/** A `AccountingEventType` value (a string): one of {@link AccountingEventType}'s, or a newer one the SDK keeps as is. */
 export type AccountingEventType = Open<ValuesOf<typeof AccountingEventType>>;
 
 /** Whose wallet paid an accounting event's network fees ({@link AccountingEvent.networkFeesPaidBy}). */
@@ -277,6 +280,7 @@ export const NetworkFeesPayer = {
 	 */
 	Organization: 'organization',
 } as const;
+/** A `NetworkFeesPayer` value (a string): one of {@link NetworkFeesPayer}'s, or a newer one the SDK keeps as is. */
 export type NetworkFeesPayer = Open<ValuesOf<typeof NetworkFeesPayer>>;
 
 /** An invitation's status (computed when read). */
@@ -290,39 +294,46 @@ export const InvitationStatus = {
 	/** Not accepted in time. */
 	Expired: 'expired',
 } as const;
+/** A `InvitationStatus` value (a string): one of {@link InvitationStatus}'s, or a newer one the SDK keeps as is. */
 export type InvitationStatus = Open<ValuesOf<typeof InvitationStatus>>;
 
 /** A webhook event's type. */
 export const EventType = {
+	/** A one-time payment confirmed: fulfil the order. */
 	PaymentCompleted: 'payment.completed',
+	/** A subscription signed (paid, or its trial started). */
 	SubscriptionCreated: 'subscription.created',
+	/** A subscription's bill paid. */
 	SubscriptionBilled: 'subscription.billed',
+	/** A subscription's status changed. */
 	SubscriptionStatusChanged: 'subscription.statusChanged',
+	/** What a subscription's customer must do changed. */
 	SubscriptionActionRequiredChanged: 'subscription.actionRequiredChanged',
+	/** A bill's attempt failed, or a bill waits for a new maximum. */
 	SubscriptionBillingFailed: 'subscription.billingFailed',
+	/** A bill, or a trial's end, is near. */
 	SubscriptionUpcomingBill: 'subscription.upcomingBill',
+	/** A customer requested a refund. */
 	RefundRequested: 'refund.requested',
 	/** Was `refund.completed`. */
 	RefundApproved: 'refund.approved',
 	/** Was `refund.denied`. */
 	RefundRejected: 'refund.rejected',
+	/** Someone accepted an invitation: a new member. */
 	MemberJoined: 'member.joined',
+	/** A member was removed. */
 	MemberRemoved: 'member.removed',
+	/** A member's held funds were paid out to them. */
 	HeldFundsReleased: 'heldFunds.released',
+	/** A checkout session expired unpaid. */
 	CheckoutExpired: 'checkout.expired',
 	/** Sent only by an endpoint's test (the dashboard); no endpoint subscribes to it. */
 	WebhookTest: 'webhook.test',
 } as const;
 /** A known webhook event type. */
 export type KnownEventType = ValuesOf<typeof EventType>;
+/** A `EventType` value (a string): one of {@link EventType}'s, or a newer one the SDK keeps as is. */
 export type EventType = Open<KnownEventType>;
-
-/** A webhook endpoint's (and an event's) payload version. */
-export const WebhookPayloadVersion = {
-	/** The event envelope `{id, type, version, createdAt, test, userUuid, data}`: the only version. */
-	V2: 'v2',
-} as const;
-export type WebhookPayloadVersion = Open<ValuesOf<typeof WebhookPayloadVersion>>;
 
 /** Why a webhook endpoint is disabled. */
 export const EndpointDisabledReason = {
@@ -333,45 +344,50 @@ export const EndpointDisabledReason = {
 	/** Its member removed, or its organization closed. */
 	Closed: 'closed',
 } as const;
+/** A `EndpointDisabledReason` value (a string): one of {@link EndpointDisabledReason}'s, or a newer one the SDK keeps as is. */
 export type EndpointDisabledReason = Open<ValuesOf<typeof EndpointDisabledReason>>;
 
 /** A {@link Duration}'s unit (months = 30 days, years = 365 days). */
 export const DurationUnit = {
+	/** Seconds. */
 	Seconds: 'seconds',
+	/** Minutes. */
 	Minutes: 'minutes',
+	/** Hours. */
 	Hours: 'hours',
+	/** Days. */
 	Days: 'days',
+	/** Weeks (7 days). */
 	Weeks: 'weeks',
+	/** Months (30 days). */
 	Months: 'months',
+	/** Years (365 days). */
 	Years: 'years',
 } as const;
+/** A `DurationUnit` value (a string): one of {@link DurationUnit}'s, or a newer one the SDK keeps as is. */
 export type DurationUnit = Open<ValuesOf<typeof DurationUnit>>;
 
 /**
  * What a credential (or an invitation) may do in a space. An API key is `admin` (organization
- * key) or `user` (a member's key, or `onBehalfOf`).
+ * key) or `user` (a member's key, or `onBehalfOf`); an invitation is `user` (a member, the SDK's)
+ * or `admin` (the team, from the dashboard).
  */
 export const Role = {
-	Owner: 'owner',
+	/** An organization key: every method. */
 	Admin: 'admin',
+	/** A member's key, or an organization key acting `onBehalfOf` a member: the admin methods answer 403. */
 	User: 'user',
-	Handle: 'handle',
 } as const;
+/** A `Role` value (a string): one of {@link Role}'s, or a newer one the SDK keeps as is. */
 export type Role = Open<ValuesOf<typeof Role>>;
-
-/** What authenticated a request ({@link Me.credential}). */
-export const Credential = {
-	/** An API key (`X-API-Key`). */
-	ApiKey: 'apiKey',
-	/** A signed-in person's access token. */
-	Session: 'session',
-} as const;
-export type Credential = Open<ValuesOf<typeof Credential>>;
 
 /** `details.reason` of a 409 `merchant_not_ready`. */
 export const MerchantNotReadyReason = {
+	/** The space's wallets accept no currency. */
 	NoWallet: 'noWallet',
+	/** The organization, which holds the member's funds, has no wallet accepting a currency. */
 	OrganizationNoWallet: 'organizationNoWallet',
+	/** No wallet of the space accepts a token, which a subscription needs. */
 	NoTokenWallet: 'noTokenWallet',
 	/**
 	 * A subscription checkout of a member whose funds the organization holds: one-time payments
@@ -379,6 +395,7 @@ export const MerchantNotReadyReason = {
 	 */
 	FundsHeld: 'fundsHeld',
 } as const;
+/** A `MerchantNotReadyReason` value (a string): one of {@link MerchantNotReadyReason}'s, or a newer one the SDK keeps as is. */
 export type MerchantNotReadyReason = Open<ValuesOf<typeof MerchantNotReadyReason>>;
 
 /** The known values of an enum object, as a list (filter checks). @internal */

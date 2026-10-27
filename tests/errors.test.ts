@@ -39,7 +39,6 @@ describe('error mapping', () => {
 		[401, 'unauthorized', AuthenticationError],
 		[403, 'forbidden', PermissionDeniedError],
 		[403, 'policy_disabled', PermissionDeniedError],
-		[403, 'plan_required', PermissionDeniedError],
 		[404, 'not_found', NotFoundError],
 		[409, 'unique_violation', ConflictError],
 		[409, 'tx_already_sent', ConflictError],
@@ -51,6 +50,8 @@ describe('error mapping', () => {
 		[422, 'something_else', ApiError],
 		[413, 'request_too_large', ApiError],
 		[405, '', ApiError],
+		[405, 'method_not_allowed', ApiError],
+		[409, 'subscription_already_stopped_or_inactive', ConflictError],
 		[429, 'rate_limit_exceeded', RateLimitError],
 		[500, 'internal', ServerError],
 		[503, 'network_unavailable', ServerError],
@@ -109,6 +110,31 @@ describe('error payload', () => {
 				'name: name must be at least 2 characters; frequency.unit: frequency.unit is required'
 		);
 		expect(err.rawBody).toBe(body);
+	});
+
+	it("a member's checkout URL refused: 403 forbidden, details.field reachable", () => {
+		const body = JSON.stringify({
+			error: 'a member cannot set successUrl',
+			code: 'forbidden',
+			details: { field: 'successUrl' },
+		});
+		const err = errorFromResponse(response(403, body), Date.now());
+		expect(err).toBeInstanceOf(PermissionDeniedError);
+		expect([err.code, err.details.field]).toEqual(['forbidden', 'successUrl']);
+	});
+
+	it('a field error carrying a `reason` (not modelled) parses into field and message only', () => {
+		const body = JSON.stringify({
+			error: 'handle is reserved',
+			code: 'validation_failed',
+			details: {
+				errors: [{ field: 'handle', message: 'handle is reserved', reason: 'reserved' }],
+			},
+		});
+		const err = errorFromResponse(response(400, body), Date.now());
+		expect(err).toBeInstanceOf(ValidationError);
+		expect(err.fieldErrors).toEqual([{ field: 'handle', message: 'handle is reserved' }]);
+		expect(Object.keys(err.fieldErrors[0])).toEqual(['field', 'message']);
 	});
 
 	it.each([

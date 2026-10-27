@@ -10,7 +10,7 @@ import {
 } from '../src/enums';
 import type { AccountingEvent } from '../src/models/accounting';
 import type { SubscriptionSessionData } from '../src/models/checkout';
-import type { Currency, CustomerSummary, Page } from '../src/models/common';
+import type { Currency, CustomerSummary, Page, ReferralFee } from '../src/models/common';
 import type { CreatedInvitation, HeldFunds, Invitation, Me, Member } from '../src/models/members';
 import type { Payment, Transaction } from '../src/models/payments';
 import type { Refund } from '../src/models/refunds';
@@ -102,7 +102,7 @@ describe('models match the wire', () => {
 		const wire = JSON.parse(MODEL_FIXTURES[name]);
 		if (name === 'EventDetail') {
 			// The envelope's decoder leaves `data` and `deliveries` to the event's own decoders,
-			// and `data` is decoded eagerly by the event's type (behaviour §10.2: Go keeps it raw),
+			// and `data` is decoded eagerly by the event's type (the Go SDK keeps it raw),
 			// so its absent fields come back at their zero values: compare the rest.
 			expect(unknown).toEqual(['data', 'deliveries']);
 			expect(value.data.uuid).toBe('pay@1');
@@ -186,7 +186,6 @@ describe('model values', () => {
 			2,
 			'createSubscription',
 		]);
-		expect(ss.availableCurrencies.map((c) => c.code)).toEqual(['BASE:USDC', 'ETH']);
 		expect([ss.metadata.orderId, ss.frequency, ss.minPeriods, ss.upgradingFromTrial]).toEqual([
 			'order-1044',
 			{ value: 1, unit: 'months' },
@@ -361,9 +360,15 @@ describe('model values', () => {
 		// The session-only fields (user, spaces, reauthenticatedUntil) are not modelled: kept raw.
 		const me2 = decode<Me>(
 			S.MeSchema,
-			'{"credential":"apiKey","spaces":[],"user":{"uuid":"u"}}'
+			'{"credential":"apiKey","apiKeyUuid":"k-2","spaces":[],"user":{"uuid":"u"}}'
 		);
-		expect(me2.credential).toBe('apiKey');
+		expect(me2.apiKeyUuid).toBe('k-2');
+		// The staff console's `space.staffView` is not modelled either (not typed; decoding accepts it).
+		const me3 = decode<Me>(
+			S.MeSchema,
+			'{"credential":"apiKey","space":{"uuid":"s-1","createdAt":"2026-09-01T12:00:00Z","staffView":false}}'
+		);
+		expect(me3.space?.uuid).toBe('s-1');
 
 		const page = fixture<Page<CustomerSummary>>('Page');
 		expect([page.hasMore, page.nextCursor, page.items.length]).toEqual([
@@ -371,6 +376,116 @@ describe('model values', () => {
 			'djF8MDE5Y2FkZmQ',
 			1,
 		]);
+	});
+});
+
+describe('out-of-scope wire elements still decode', () => {
+	/** Decodes `name`'s fixture with `patch` applied, collecting the unmodelled keys. */
+	function decodePatched(
+		name: string,
+		patch: (wire: any) => void
+	): { value: any; unknown: string[] } {
+		const wire = JSON.parse(MODEL_FIXTURES[name]);
+		patch(wire);
+		const unknown: string[] = [];
+		const value = SCHEMAS[name].decode(wire, '', { ...ctx, unknown: (p) => unknown.push(p) });
+		return { value, unknown };
+	}
+
+	it('session-only and qbf.cash fields stay untyped, their enum values raw strings', () => {
+		const me = decodePatched('Me', (w) => {
+			w.userUuid = 'u-1';
+			w.space.role = 'handle';
+		});
+		expect(me.unknown).toEqual(['userUuid']);
+		expect(me.value.space.role).toBe('handle');
+
+		const pay = decodePatched('Payment', (w) => (w.note = 'thanks'));
+		expect(pay.unknown).toEqual(['note']);
+		const done = decodePatched('PaymentCompleted', (w) => (w.note = 'thanks'));
+		expect(done.unknown).toEqual(['note']);
+
+		const ss = decodePatched('SubscriptionSessionData', (w) => {
+			w.redirectUrl = 'https://x/thanks';
+			w.txType = 'transfer';
+		});
+		expect(ss.unknown).toEqual(['redirectUrl']);
+		expect(ss.value.txType).toBe('transfer');
+	});
+
+	it('the elements left out of the SDK (dashboard-only, or constant for a key) are ignored', () => {
+		const me = decodePatched('Me', (w) => (w.credential = 'apiKey'));
+		expect(me.unknown).toEqual(['credential']);
+
+		const customer = decodePatched('Customer', (w) => (w.verified = true));
+		expect(customer.unknown).toEqual(['verified']);
+
+		const endpoint = decodePatched('WebhookEndpointCreated', (w) => {
+			w.payloadVersion = 'v2';
+			w.rotatedAt = '2026-10-01T12:00:00Z';
+		});
+		expect(endpoint.unknown).toEqual(['payloadVersion', 'rotatedAt']);
+
+		const session = decodePatched('SubscriptionSessionData', (w) => {
+			w.organizationName = 'Shop';
+			w.userName = 'Ada';
+			w.availableCurrencies = [{ id: 8, code: 'BASE:USDC' }];
+		});
+		expect(session.unknown).toEqual(['organizationName', 'userName', 'availableCurrencies']);
+
+		const status = decodePatched('CheckoutSessionStatus', (w) => {
+			w.lastAttempt.status = 'failed';
+		});
+		expect(status.unknown).toEqual(['lastAttempt.status']);
+
+		const released = decodePatched('HeldFundsReleased', (w) => (w.type = 'heldFundsRelease'));
+		expect(released.unknown).toEqual(['type']);
+
+		const detail = decodePatched('EventDetail', (w) => (w.version = 'v2'));
+		expect(detail.unknown).toContain('version');
+		expect(detail.value.id).toBe('evt_1');
+
+		// A refund status the SDK doesn't list still decodes, raw.
+		const refund = decodePatched('Refund', (w) => (w.status = 'failed'));
+		expect([refund.unknown, refund.value.status]).toEqual([[], 'failed']);
+	});
+
+	it('the role `owner` is not modelled: a key is at most admin, yet `owner` decodes raw', () => {
+		expect(Object.values(Role)).toEqual(['admin', 'user']);
+		// @ts-expect-error Role has no Owner: an API key is at most admin.
+		void Role.Owner;
+		const me = decodePatched('Me', (w) => (w.space.role = 'owner'));
+		expect(me.unknown).toEqual([]);
+		expect(me.value.space.role).toBe('owner');
+		const inv = decodePatched('Invitation', (w) => (w.role = 'owner'));
+		expect(inv.value.role).toBe('owner');
+	});
+
+	it("a referral fee's internal deadline is not modelled, and decoding ignores it", () => {
+		const pay = decodePatched(
+			'Payment',
+			(w) => (w.settlement.referralFee.deadline = '2027-01-01T00:00:00Z')
+		);
+		expect(pay.unknown).toEqual(['settlement.referralFee.deadline']);
+		const fee: ReferralFee = (pay.value as Payment).settlement.referralFee!;
+		expect([fee.address, fee.feePercent]).toEqual(['0xref', '20']);
+		// @ts-expect-error ReferralFee is { address, feePercent }: no deadline.
+		void fee.deadline;
+	});
+
+	it('a skipped delivery attempt (a policy off) has no statusCode', () => {
+		const detail = decodePatched('EventDetail', (w) => {
+			const a = w.deliveries[0].attempts[0];
+			delete a.statusCode;
+			a.error = 'the members.webhooks policy is off for this member';
+		});
+		const attempt = detail.value.deliveries[0].attempts[0];
+		expect([attempt.delivered, attempt.skipped, attempt.error]).toEqual([
+			false,
+			true,
+			'the members.webhooks policy is off for this member',
+		]);
+		expect('statusCode' in attempt).toBe(false);
 	});
 });
 
@@ -554,5 +669,33 @@ describe('checkout fees in the models', () => {
 		]);
 		expect(decode(S.SubscriptionSchema, '{"uuid":"sub@1","fees":null}').fees).toEqual([]);
 		expect(decode(S.SubscriptionSchema, '{"uuid":"sub@1"}').fees).toEqual([]);
+	});
+});
+
+describe('metadata', () => {
+	it('keeps a `__proto__` key (a valid metadata key) as an own entry', () => {
+		const c = decode<{ metadata: Record<string, string> }>(
+			S.CustomerSchema,
+			'{"uuid":"c-1","metadata":{"__proto__":"x","a":"b"}}'
+		);
+		expect(Object.prototype.hasOwnProperty.call(c.metadata, '__proto__')).toBe(true);
+		expect(Object.getPrototypeOf(c.metadata)).toBe(Object.prototype);
+		expect(Object.entries(c.metadata)).toEqual([
+			['__proto__', 'x'],
+			['a', 'b'],
+		]);
+	});
+
+	it('hostile `__proto__` / `constructor` keys never touch a prototype', () => {
+		const c = decode(
+			S.PaymentSchema as unknown as Schema<Record<string, unknown>>,
+			'{"uuid":"pay@1","__proto__":{"polluted":true},"constructor":{"prototype":{"polluted":true}},' +
+				'"settlement":{"__proto__":{"polluted":true}},"metadata":{"constructor":"x"}}'
+		);
+		expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+		expect(Object.getPrototypeOf(c)).toBe(Object.prototype);
+		expect(Object.getPrototypeOf(c.settlement)).toBe(Object.prototype);
+		expect((c as { polluted?: unknown }).polluted).toBeUndefined();
+		expect((c.metadata as Record<string, string>).constructor).toBe('x');
 	});
 });

@@ -76,7 +76,7 @@ export class ProductsService {
 	 * The space's product with your reference, hidden or not: runs {@link list}'s reference filter
 	 * (`GET /products?reference=`) and returns its one product. No product with that reference is
 	 * a `NotFoundError` (status 404, code `not_found`), as an unknown uuid is. The reference is
-	 * checked like a created one's (1 to 100 of `A-Z a-z 0-9 . _ : @ -`).
+	 * checked like a created one's (1 to 100 of `A-Z a-z 0-9 . _ : @ -`, not `.` or `..`).
 	 */
 	async getByReference(reference: string, options?: RequestOptions): Promise<Product> {
 		return this.core.getByReference(ProductSchema, '/products', 'product', reference, options);

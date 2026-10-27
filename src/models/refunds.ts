@@ -31,7 +31,7 @@ export interface Refund {
 	reason?: string;
 	/**
 	 * `pending` (a customer's request not answered yet), `approved` (its transfer confirmed) or
-	 * `rejected`. `failed` is declared but never set.
+	 * `rejected`.
 	 */
 	status: RefundStatus;
 	/** When it was requested (or prepared by the merchant). */
@@ -124,8 +124,8 @@ export interface RefundApproval {
 /** Filters `refunds.list`. */
 export interface RefundListParams extends PageParams {
 	/**
-	 * Only the refunds in one of these statuses (at most 5 of `pending`, `approved`, `rejected`,
-	 * `failed`), sent as a repeated `?status=`; absent or `[]`: every status.
+	 * Only the refunds in one of these statuses (at most 5 of `pending`, `approved` and
+	 * `rejected`), sent as a repeated `?status=`; absent or `[]`: every status.
 	 * `['pending']` lists the ones awaiting an answer.
 	 */
 	status?: RefundStatus[];

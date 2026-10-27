@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { EndpointDisabledReason, EventType, WebhookPayloadVersion } from '../enums.js';
+import type { EndpointDisabledReason, EventType } from '../enums.js';
 import type { PageParams } from './common.js';
 import type { Event } from './events.js';
 
@@ -23,14 +23,10 @@ export interface WebhookEndpoint {
 	events: EventType[];
 	/** True for an organization endpoint that also receives its members' events. */
 	includeMembers: boolean;
-	/** The payload it receives: `v2` (the event envelope), the only version. */
-	payloadVersion: WebhookPayloadVersion;
 	/** A note for the dashboard; absent when none. */
 	description?: string;
 	/** When it was created. */
 	createdAt: string;
-	/** When its secret last changed. */
-	rotatedAt?: string;
 	/**
 	 * When it was disabled (it receives nothing): after 3 days without a successful delivery
 	 * (live mode only), or by its owner; absent while enabled. `update` with `enabled: true`
@@ -92,9 +88,9 @@ export interface DeliveryAttempt {
 	 * leaves it out when false.
 	 */
 	skipped: boolean;
-	/** The endpoint's answer; absent when it didn't answer. */
+	/** The endpoint's HTTP status; absent when it didn't answer, or nothing was posted (`skipped`). */
 	statusCode?: number;
-	/** Why it wasn't delivered. */
+	/** Why it wasn't delivered (for a skipped attempt: the policy is off); absent when delivered. */
 	error?: string;
 	/** How long it took, in milliseconds. */
 	durationMs: number;
@@ -133,11 +129,6 @@ export interface UpdateWebhookEndpointParams {
 	includeMembers?: boolean;
 	/** The new note; `''` clears it, absent leaves it unchanged. */
 	description?: string;
-	/**
-	 * The payload it receives: `v2`, the only version today (anything else is refused); absent
-	 * leaves it unchanged.
-	 */
-	payloadVersion?: WebhookPayloadVersion;
 	/**
 	 * `false` pauses the endpoint (it receives nothing, deliveries in progress stop); `true`
 	 * enables it again, also after it was disabled for failing.

@@ -86,7 +86,9 @@ function describe(what: string, err: unknown): void {
 	} else if (err instanceof AuthenticationError) {
 		console.log(`${what}: bad API key`);
 	} else if (err instanceof PermissionDeniedError) {
-		console.log(`${what}: not allowed: ${err.code}`); // forbidden, policy_disabled, plan_required
+		// forbidden (no details), or policy_disabled: details.policy (and details.field for a
+		// request field, e.g. a member's successUrl under members.checkoutRedirects)
+		console.log(`${what}: not allowed: ${err.code}, details ${JSON.stringify(err.details)}`);
 	} else if (err instanceof NetworkError || err instanceof ServerError) {
 		console.log(`${what}: transient (retryable: ${isRetryable(err)}): ${err.message}`);
 	} else if (err instanceof ApiError) {

@@ -1,5 +1,5 @@
 /**
- * The SDK's one set of client-side checks (behaviour §8, docs `validators.md`). They mirror the
+ * The SDK's one set of client-side checks. They mirror the
  * API's binding rules so a bad input fails before the round trip, with a `ValidationError`
  * naming each failing input by its wire name. Lengths count code points. Rules that depend on
  * the key's mode or on server state (the test-mode price cap, https-only URLs in live mode, the
@@ -253,12 +253,19 @@ export class Validator {
 		}
 	}
 
-	/** Checks a merchant reference when set: 1 to 100 of `A-Z a-z 0-9 . _ : @ -`. */
+	/**
+	 * Checks a merchant reference when set: 1 to 100 of `A-Z a-z 0-9 . _ : @ -`, and not `.` or
+	 * `..` alone (dot-segments, which a URL path resolves away: a URL built on such a reference
+	 * could never name it). `...`, `.a` and `INV.2026.001` pass.
+	 */
 	reference(field: string, input: unknown): void {
 		const value = this.str(field, input);
 		if (!value || !this.length(field, value, 1, 100)) return;
-		if (!REFERENCE.test(value))
-			this.add(field, 'must contain only letters, digits and . _ : @ -');
+		if (!REFERENCE.test(value) || value === '.' || value === '..')
+			this.add(
+				field,
+				"must contain only letters, digits and . _ : @ -, and can't be . or .."
+			);
 	}
 
 	/** Checks a phone number when set: at most 32 characters, an optional `+`, digits and `space . - ( )`. */

@@ -24,12 +24,15 @@ describe('constructor', () => {
 		expect(err.fieldErrors.map((f) => f.field)).toEqual(['apiKey']);
 	});
 
-	it.each(['sk_', 'sk_123_live_abc', `sk_${MEMBER}_test_x`, '  sk_padded  '])(
-		'accepts %j',
-		(key) => {
-			expect(() => new QBitFlow(key)).not.toThrow();
-		}
-	);
+	it.each([
+		'sk_',
+		`sk_test_${MEMBER}_x`,
+		'sk_123_live_abc',
+		`sk_${MEMBER}_test_x`,
+		'  sk_padded  ',
+	])('accepts %j', (key) => {
+		expect(() => new QBitFlow(key)).not.toThrow();
+	});
 
 	it('refuses a missing config', () => {
 		expect(thrown(() => new QBitFlow(undefined as unknown as string))).toBeInstanceOf(
@@ -84,6 +87,53 @@ describe('constructor', () => {
 		const err = thrown(() => new QBitFlow('sk_x', options)) as ValidationError;
 		expect(err).toBeInstanceOf(ValidationError);
 		expect(err.fieldErrors[0].field).toBe(field);
+	});
+
+	it.each([
+		['a line break', 'sk_SECRET\r\nX-Evil: 1'],
+		['a space', 'sk_SECRET part'],
+		['a NUL', 'sk_SECRET\u0000x'],
+		['a non-ASCII character', 'sk_SECRÉT'],
+	])('refuses an API key with %s, without echoing it', (_name, key) => {
+		// fetch would refuse the header and quote the key in its error message.
+		const err = thrown(() => new QBitFlow(key)) as ValidationError;
+		expect(err).toBeInstanceOf(ValidationError);
+		expect(err.fieldErrors.map((f) => f.field)).toEqual(['apiKey']);
+		expect(err.message).not.toContain('SECRET');
+	});
+
+	it.each([
+		['credentials', 'https://user:pa55word@api.example.com/v2'],
+		['a user name', 'https://user@api.example.com/v2'],
+		['a query', 'https://api.example.com/v2?x=1'],
+		['a fragment', 'https://api.example.com/v2#x'],
+	])('refuses a baseUrl with %s, without echoing it', (_name, baseUrl) => {
+		// fetch refuses a URL with credentials (quoting it); a query or fragment would swallow
+		// every request's path.
+		const err = thrown(() => new QBitFlow('sk_x', { baseUrl })) as ValidationError;
+		expect(err).toBeInstanceOf(ValidationError);
+		expect(err.fieldErrors.map((f) => f.field)).toEqual(['baseUrl']);
+		expect(err.message).not.toContain('pa55word');
+	});
+
+	it('never reveals the API key through inspect, JSON or toString', () => {
+		// eslint-disable-next-line @typescript-eslint/no-require-imports
+		const { inspect } = require('node:util') as typeof import('node:util');
+		const key = 'sk_SECRET_KEY_123';
+		const client = new QBitFlow(key, { onBehalfOf: MEMBER });
+		const scoped = client.onBehalfOf(OTHER);
+		const views = [
+			client,
+			scoped,
+			client.products,
+			client.webhooks.endpoints,
+			client[TRANSPORT],
+		];
+		for (const v of views) {
+			expect(inspect(v, { depth: Infinity, showHidden: true })).not.toContain('SECRET');
+			expect(JSON.stringify(v) ?? '').not.toContain('SECRET');
+			expect(String(v)).not.toContain('SECRET');
+		}
 	});
 
 	it('applies the options, in both constructor forms', () => {
@@ -225,7 +275,7 @@ describe('me', () => {
 							email: 'ada@example.com',
 						},
 						test: true,
-						role: 'owner',
+						role: 'admin',
 						organizationFeePercent: '7.5',
 						trustedAt: '2026-10-02T12:00:00Z',
 						createdAt: '2026-10-01T12:00:00Z',
@@ -237,14 +287,12 @@ describe('me', () => {
 		);
 		const { client } = testClient(ts);
 		const me = await client.me();
-		expect(me.credential).toBe('apiKey');
 		expect(me.role).toBe('user');
 		expect(me.onBehalfOfUserUuid).toBe(MEMBER);
-		expect(me.userUuid).toBeUndefined();
 		expect(me.space?.test).toBe(true);
 		expect(me.space?.organizationName).toBe('Example Shop');
 		expect(me.space?.member?.firstName).toBe('Ada');
-		expect(me.space?.role).toBe('owner');
+		expect(me.space?.role).toBe('admin');
 		expect(me.space?.organizationFeePercent).toBe('7.5');
 		expect(me.space?.trustedAt).toBe('2026-10-02T12:00:00Z');
 		expect(me.space?.createdAt).toBe('2026-10-01T12:00:00Z');

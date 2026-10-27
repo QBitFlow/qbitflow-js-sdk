@@ -4,20 +4,13 @@
  * @module
  */
 
-import type { Credential, InvitationStatus, LedgerEntryType, Role } from '../enums.js';
+import type { InvitationStatus, LedgerEntryType, Role } from '../enums.js';
 import type { Currency, PageParams, Settlement } from './common.js';
 
 /** What the API key is, and where the request acts (`client.me()`). */
 export interface Me {
-	/** `apiKey` for an API key. */
-	credential: Credential;
 	/** The key's id. */
 	apiKeyUuid?: string;
-	/**
-	 * Who signed in, for a session; absent for an API key (a key acts for its space, not for the
-	 * person who created it).
-	 */
-	userUuid?: string;
 	/**
 	 * What the request may do in the space: `admin` (an organization key) or `user` (a member's
 	 * key, or an organization key acting `onBehalfOf` a member).
@@ -47,7 +40,7 @@ export interface MeSpace {
 	userUuid?: string;
 	/** The space's mode: `true` for test, `false` for live. */
 	test: boolean;
-	/** The caller's own role in the organization: `owner`, `admin`, `user` or `handle`. */
+	/** The key's role in the organization: `admin` (an organization key) or `user` (a member's key). */
 	role: Role;
 	/** Names the member whose space it is; absent for the organization's own space. */
 	member?: MeMember;

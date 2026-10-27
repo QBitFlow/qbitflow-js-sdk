@@ -18,8 +18,8 @@ import {
 import { thrown } from './helpers/server';
 
 /**
- * The docs' example body of each event type (docs/api webhooks.md § Examples, generated from the
- * API's code), as the Go SDK's testdata.
+ * The documented example body of each event type (the API reference's webhook examples,
+ * generated from the API's code), as the Go SDK's testdata.
  */
 const FIXTURES = join(__dirname, 'fixtures', 'events');
 const raw = (type: string): string => readFileSync(join(FIXTURES, `${type}.json`), 'utf8');
@@ -27,7 +27,6 @@ const raw = (type: string): string => readFileSync(join(FIXTURES, `${type}.json`
 function load(type: string): Event {
 	const e = parseEvent(raw(type));
 	expect(e.type).toBe(type);
-	expect(e.version).toBe('v2');
 	expect(e.id.startsWith('evt_')).toBe(true);
 	expect(Date.parse(e.createdAt)).not.toBeNaN();
 	return e;
@@ -44,6 +43,15 @@ describe('the 15 docs fixtures', () => {
 		).toEqual([...KNOWN].sort());
 	});
 
+	/**
+	 * The keys the API sends that the SDK deliberately leaves out (constant for an API key, or
+	 * the hosted checkout page's copy): decoding ignores them.
+	 */
+	const LEFT_OUT: Record<string, string[]> = {
+		'heldFunds.released': ['data.type'],
+		'checkout.expired': ['data.availableCurrencies', 'data.organizationName'],
+	};
+
 	it.each(KNOWN)('%s is fully modelled', (type) => {
 		const data = JSON.parse(raw(type)).data;
 		const unknown: string[] = [];
@@ -51,7 +59,7 @@ describe('the 15 docs fixtures', () => {
 			fail: (path) => new Error(`bad ${path}`),
 			unknown: (path) => unknown.push(path),
 		});
-		expect(unknown).toEqual([]);
+		expect(unknown.sort()).toEqual(LEFT_OUT[type] ?? []);
 		expect(isUnknownEvent(load(type))).toBe(false);
 	});
 });
@@ -252,11 +260,7 @@ describe('typed data', () => {
 		const e = load('heldFunds.released');
 		expect(e.userUuid).toBe('019eca82-5680-7b00-8000-0000000000b1');
 		const released = eventData(e, 'heldFunds.released');
-		expect([released.received, released.type, released.ledgers.length]).toEqual([
-			true,
-			'heldFundsRelease',
-			3,
-		]);
+		expect([released.received, released.ledgers.length]).toEqual([true, 3]);
 		expect([released.amount, released.amountUsd, released.currency.code]).toEqual([
 			'98.9068',
 			'98.9068',
@@ -285,20 +289,8 @@ describe('typed data', () => {
 	it('checkout.expired: payment, with fees, subscription, unknown txType', () => {
 		const p = eventData(load('checkout.expired'), 'checkout.expired');
 		expect(isSubscriptionSession(p)).toBe(false);
-		expect([p.txType, p.priceUsd, p.amountUsd, p.availableCurrencies.length]).toEqual([
-			'payment',
-			'10',
-			'10',
-			2,
-		]);
-		expect('address' in p.availableCurrencies[0]).toBe(false);
-		expect(p.availableCurrencies[1].code).toBe('BASE:USDC');
-		expect([p.metadata.orderId, p.organizationName, p.reference, p.redirectUrl]).toEqual([
-			'order-1043',
-			'Example Shop',
-			'order-1043',
-			undefined,
-		]);
+		expect([p.txType, p.priceUsd, p.amountUsd]).toEqual(['payment', '10', '10']);
+		expect([p.metadata.orderId, p.reference]).toEqual(['order-1043', 'order-1043']);
 		expect(p.expiresAt && p.createdAt).toBeTruthy();
 		// The docs' session has no fees.
 		expect(p.fees).toEqual([]);
@@ -342,7 +334,7 @@ describe('typed data', () => {
 			3,
 			false,
 		]);
-		expect([s.metadata.plan, s.availableCurrencies[0].code]).toEqual(['pro', 'BASE:USDC']);
+		expect(s.metadata.plan).toBe('pro');
 
 		const u = eventData(
 			parseEvent(

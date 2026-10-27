@@ -3,7 +3,7 @@
  *
  * TypeScript types are erased at run time, so a cast of `JSON.parse`'s output would promise
  * fields the API may leave out. Every body is decoded against a schema mirroring the API's
- * types, with the policy all four QBitFlow SDKs share (behaviour §6):
+ * types, with the policy all four official QBitFlow SDKs share:
  *
  * - **Lenient on absence**: an absent or `null` value where the field is required decodes to its
  *   zero value (`''`, `0`, `false`, `[]`, `{}`, a zero object, the zero time
@@ -191,13 +191,22 @@ export const stringMap: Schema<Record<string, string>> = {
 		if (isAbsent(value)) return {};
 		if (!isPlainObject(value)) throw ctx.fail(path, this.expected, value);
 		const out: Record<string, string> = {};
+		// Defined, not assigned: a `__proto__` key (a valid metadata key) stays an own entry.
+		const put = (key: string, item: string): void => {
+			Object.defineProperty(out, key, {
+				value: item,
+				enumerable: true,
+				writable: true,
+				configurable: true,
+			});
+		};
 		for (const [key, item] of Object.entries(value)) {
 			if (item === null) {
-				out[key] = '';
+				put(key, '');
 				continue;
 			}
 			if (typeof item !== 'string') throw ctx.fail(childPath(path, key), 'a string', item);
-			out[key] = item;
+			put(key, item);
 		}
 		return out;
 	},

@@ -92,7 +92,7 @@ export interface CreateProductParams {
 	 */
 	priceUsd: string;
 	/**
-	 * Your reference, unique per space and mode (1 to 100 of `A-Z a-z 0-9 . _ : @ -`); the
+	 * Your reference, unique per space and mode (1 to 100 of `A-Z a-z 0-9 . _ : @ -`, not `.` or `..`); the
 	 * product's uuid when absent.
 	 */
 	reference?: string;

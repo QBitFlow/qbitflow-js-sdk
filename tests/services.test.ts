@@ -266,13 +266,7 @@ const ROUTES: RouteCase[] = [
 			metadata: { crm: '42' },
 		},
 		reply: customer(),
-		check: (v) =>
-			expect([v.uuid, v.firstName, v.verified, v.metadata.crm]).toEqual([
-				'c-1',
-				'Ada',
-				true,
-				'42',
-			]),
+		check: (v) => expect([v.uuid, v.firstName, v.metadata.crm]).toEqual(['c-1', 'Ada', '42']),
 	},
 	{
 		name: 'customers.update',
@@ -296,13 +290,12 @@ const ROUTES: RouteCase[] = [
 					cursor: CURSOR,
 					email: 'ada+1@example.com',
 					reference: 'crm-1',
-					verified: true,
 				},
 				o
 			),
 		method: 'GET',
 		path: '/customers',
-		query: `cursor=${CURSOR}&email=ada%2B1%40example.com&limit=5&reference=crm-1&verified=true`,
+		query: `cursor=${CURSOR}&email=ada%2B1%40example.com&limit=5&reference=crm-1`,
 		reply: page(customer()),
 		check: (v) => expect([v.items.length, v.hasMore, v.nextCursor]).toEqual([1, true, CURSOR]),
 	},
@@ -1034,14 +1027,10 @@ const ROUTES: RouteCase[] = [
 	{
 		name: 'webhooks.endpoints.update',
 		call: (c, o) =>
-			c.webhooks.endpoints.update(
-				UUID_A,
-				{ events: [], description: '', payloadVersion: 'v2', enabled: true },
-				o
-			),
+			c.webhooks.endpoints.update(UUID_A, { events: [], description: '', enabled: true }, o),
 		method: 'PATCH',
 		path: `/webhooks/endpoints/${UUID_A}`,
-		body: { events: [], description: '', payloadVersion: 'v2', enabled: true },
+		body: { events: [], description: '', enabled: true },
 		reply: ENDPOINT,
 	},
 	{
@@ -1539,7 +1528,7 @@ describe('validation before the request', () => {
 			'status',
 			(c) =>
 				c.refunds.list({
-					status: ['pending', 'approved', 'rejected', 'failed', 'pending', 'approved'],
+					status: ['pending', 'approved', 'rejected', 'rejected', 'pending', 'approved'],
 				}),
 		],
 		['refunds.list txUuid', 'txUuid', (c) => c.refunds.list({ txUuid: 'order-1' })],
@@ -1589,11 +1578,6 @@ describe('validation before the request', () => {
 			'webhooks.endpoints.update test event',
 			'events[0]',
 			(c) => c.webhooks.endpoints.update(UUID_A, { events: ['webhook.test'] }),
-		],
-		[
-			'webhooks.endpoints.update payload version',
-			'payloadVersion',
-			(c) => c.webhooks.endpoints.update(UUID_A, { payloadVersion: 'v1' }),
 		],
 		[
 			'webhooks.events.list cursor',
@@ -1734,9 +1718,9 @@ describe('every iterator', () => {
 		[
 			'customers.iterate',
 			'/customers',
-			'email=a%40b.co&limit=2&verified=false',
+			'email=a%40b.co&limit=2',
 			uuidItem,
-			(c) => c.customers.iterate({ limit: 2, email: 'a@b.co', verified: false }),
+			(c) => c.customers.iterate({ limit: 2, email: 'a@b.co' }),
 			(v) => v.uuid,
 		],
 		[
@@ -1924,14 +1908,19 @@ describe('getByReference', () => {
 		).toBeInstanceOf(NotFoundError);
 	});
 
-	it('sends a reference of dots in the query (no path segment to resolve)', async () => {
-		const ts = await testServer(staticReply(200, items(subscription('..'))));
-		expect((await testClient(ts).client.subscriptions.getByReference('..')).reference).toBe(
-			'..'
-		);
+	it('refuses a reference of `.` or `..` alone, sending nothing; `...` is sent', async () => {
+		const ts = await testServer(staticReply(200, items(subscription('...'))));
+		const { client } = testClient(ts);
+		for (const ref of ['.', '..']) {
+			const err = await rejection(client.subscriptions.getByReference(ref));
+			expect(err).toBeInstanceOf(ValidationError);
+			expect((err as ValidationError).fieldErrors.map((f) => f.field)).toEqual(['reference']);
+		}
+		expect(ts.recorded).toHaveLength(0);
+		expect((await client.subscriptions.getByReference('...')).reference).toBe('...');
 		expect([ts.recorded[0].path, ts.recorded[0].query]).toEqual([
 			'/subscriptions',
-			'reference=..',
+			'reference=...',
 		]);
 	});
 

@@ -6,7 +6,7 @@ import { webhooks } from '../src/index';
 import { constructEvent, verify, type VerifyOptions } from '../src/webhooks';
 import { thrown } from './helpers/server';
 
-// The shared vector (behaviour §7, docs webhooks.md).
+// The documented signature vector (secret rotation), shared by every official SDK.
 const BODY =
 	'{"createdAt":"2026-10-01T12:00:00Z","data":{},"id":"evt_3f1c2d4e-5a6b-5c7d-8e9f-0a1b2c3d4e5f","test":false,"type":"webhook.test","version":"v2"}';
 const T = 1790856000;
@@ -162,7 +162,6 @@ describe('constructEvent', () => {
 		const e = constructEvent(BODY, HEADER, 'whsec_new_secret', at(60));
 		expect(e.id).toBe('evt_3f1c2d4e-5a6b-5c7d-8e9f-0a1b2c3d4e5f');
 		expect(e.type).toBe('webhook.test');
-		expect(e.version).toBe('v2');
 		expect(e.test).toBe(false);
 		expect(e.createdAt).toBe('2026-10-01T12:00:00Z');
 		expect(e.userUuid).toBeUndefined();

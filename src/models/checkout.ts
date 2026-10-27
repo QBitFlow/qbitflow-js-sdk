@@ -5,7 +5,7 @@
  */
 
 import type { CheckoutSessionStatusValue, TransactionType } from '../enums.js';
-import type { Attempt, Currency, Duration, FeeLine } from './common.js';
+import type { Attempt, Duration, FeeLine } from './common.js';
 
 /**
  * A checkout session just opened (`checkoutSessions.createPayment`, `createSubscription`): the
@@ -85,21 +85,10 @@ export interface PaymentSessionData {
 	successUrl?: string;
 	/** The merchant's page for a customer who leaves the checkout (placeholders filled). */
 	cancelUrl?: string;
-	/** The merchant's success page on the hosted page's copy only: absent from `checkout.expired`. */
-	redirectUrl?: string;
-	/** The merchant's organization, as the checkout shows it. */
-	organizationName: string;
-	/**
-	 * The member the checkout pays (a marketplace's seller), by name; absent on the
-	 * organization's own checkouts.
-	 */
-	userName?: string;
 	/** True for a checkout paid on test networks. */
 	test: boolean;
 	/** The session's kind: `payment` or `createSubscription`. */
 	txType: TransactionType;
-	/** The currencies the customer could pay with. */
-	availableCurrencies: Currency[];
 	/** The merchant's own data on the checkout; `{}` without any. */
 	metadata: Record<string, string>;
 	/** When the session was opened. */
@@ -134,7 +123,7 @@ export interface SubscriptionSessionData extends PaymentSessionData {
 export interface CreatePaymentSessionParams {
 	/**
 	 * Your reference for the payment (an order or invoice id), kept on it: unique per space (open
-	 * sessions included), 1 to 100 of `A-Z a-z 0-9 . _ : @ -`.
+	 * sessions included), 1 to 100 of `A-Z a-z 0-9 . _ : @ -`, not `.` or `..`.
 	 */
 	reference?: string;
 	/** One of the space's products (unknown: 404). */
@@ -156,11 +145,21 @@ export interface CreatePaymentSessionParams {
 	/**
 	 * Where the customer goes after paying, through QBitFlow's page for the payment
 	 * (`Placeholders.UUID`: the session's id; `Placeholders.TRANSACTION_TYPE`: `payment` or
-	 * `createSubscription`). Default: the space's `checkout.defaults` setting. https only in live
-	 * mode. Reaching it is no proof of payment: fulfil on `payment.completed`.
+	 * `createSubscription`). Default: the space's `checkout.defaults` setting (set in the
+	 * dashboard). https only in live mode. Reaching it is no proof of payment: fulfil on
+	 * `payment.completed`.
+	 *
+	 * A member's own key may send it (and `cancelUrl`) while its organization's
+	 * `members.checkoutRedirects` policy allows it (on by default). With the policy off, the call
+	 * fails with a `PermissionDeniedError` (403 `policy_disabled`, `details.policy`
+	 * `members.checkoutRedirects`, `details.field` naming the URL, `successUrl` first) and nothing
+	 * is created. An organization key, acting `onBehalfOf` a member too, may always send both.
 	 */
 	successUrl?: string;
-	/** Where the customer goes after a cancelled or failed payment (same placeholders). */
+	/**
+	 * Where the customer goes after a cancelled or failed payment (same placeholders). A member's
+	 * own key may send it under the same policy as `successUrl`.
+	 */
 	cancelUrl?: string;
 	/** One of the space's customers (unknown: 404); the checkout then asks the customer nothing. */
 	customerUuid?: string;
@@ -206,8 +205,9 @@ export interface CheckoutFees {
 	 * QBitFlow's fee is also taken on that line, so this gross-up leaves you at least the price
 	 * and your lines, as if no fee were taken ($100 + $20 VAT at 0.99 % → a $1.20 fee, $121.20
 	 * charged, $120.00 kept). A marketplace's organization fee is not passed on. Absent: the
-	 * space's `checkout.customerPaysProcessingFee` setting decides (off by default; set in the
-	 * dashboard); `false` turns it off for this checkout.
+	 * space's `checkout.customerPaysProcessingFee` setting decides (off by default; set by the
+	 * organization's team in the dashboard, a member can't change it); `false` turns it off for
+	 * this checkout.
 	 */
 	processingFee?: boolean;
 	/** Up to 10 lines of your own, shown in this order before the processing fee. */

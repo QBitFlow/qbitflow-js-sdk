@@ -16,8 +16,6 @@ import type {
 	Chain,
 	KnownEventType,
 	SubscriptionStatus,
-	TransferType,
-	WebhookPayloadVersion,
 } from '../enums.js';
 import type { PaymentSessionData, SubscriptionSessionData } from './checkout.js';
 import type { Currency, TransferSettlement } from './common.js';
@@ -173,8 +171,6 @@ export interface HeldFundsReleased {
 	userUuid?: string;
 	/** True once the recipient received it. */
 	received: boolean;
-	/** `heldFundsRelease`. */
-	type: TransferType;
 	/** The transfer's transaction: its block and what it cost its sender. */
 	settlement: TransferSettlement;
 	/**
@@ -205,8 +201,6 @@ export interface EventEnvelope<T extends string, D> {
 	id: string;
 	/** The event's type. */
 	type: T;
-	/** The payload version: `v2`, the only one. */
-	version: WebhookPayloadVersion;
 	/** When it happened (at most millisecond precision). */
 	createdAt: string;
 	/** True when it happened in test mode. */
@@ -217,6 +211,7 @@ export interface EventEnvelope<T extends string, D> {
 	data: D;
 }
 
+/** `payment.completed`: a one-time payment confirmed ({@link PaymentCompleted}). Fulfil the order. */
 export type PaymentCompletedEvent = EventEnvelope<'payment.completed', PaymentCompleted>;
 /**
  * `subscription.created`: the subscription (status `active`, or `trial`), as `subscriptions.get`
@@ -225,18 +220,22 @@ export type PaymentCompletedEvent = EventEnvelope<'payment.completed', PaymentCo
 export type SubscriptionCreatedEvent = EventEnvelope<'subscription.created', Subscription>;
 /** `subscription.billed`: the bill paid and its subscription (`data.bill`, `data.subscription`). */
 export type SubscriptionBilledEvent = EventEnvelope<'subscription.billed', SubscriptionBilled>;
+/** `subscription.statusChanged`: the subscription's new and previous status ({@link SubscriptionStatusChanged}). */
 export type SubscriptionStatusChangedEvent = EventEnvelope<
 	'subscription.statusChanged',
 	SubscriptionStatusChanged
 >;
+/** `subscription.actionRequiredChanged`: what the customer must do changed ({@link SubscriptionActionRequiredChanged}). */
 export type SubscriptionActionRequiredChangedEvent = EventEnvelope<
 	'subscription.actionRequiredChanged',
 	SubscriptionActionRequiredChanged
 >;
+/** `subscription.billingFailed`: a bill's attempt failed, or a bill waits ({@link SubscriptionBillingFailed}). */
 export type SubscriptionBillingFailedEvent = EventEnvelope<
 	'subscription.billingFailed',
 	SubscriptionBillingFailed
 >;
+/** `subscription.upcomingBill`: a bill, or a trial's end, is near ({@link SubscriptionUpcomingBill}). */
 export type SubscriptionUpcomingBillEvent = EventEnvelope<
 	'subscription.upcomingBill',
 	SubscriptionUpcomingBill
@@ -257,8 +256,11 @@ export type RefundApprovedEvent = EventEnvelope<'refund.approved', Refund>;
  * decision, final.
  */
 export type RefundRejectedEvent = EventEnvelope<'refund.rejected', Refund>;
+/** `member.joined`: someone accepted an invitation and is now a member ({@link MemberJoined}). */
 export type MemberJoinedEvent = EventEnvelope<'member.joined', MemberJoined>;
+/** `member.removed`: a member was removed from the organization (the {@link Member}). */
 export type MemberRemovedEvent = EventEnvelope<'member.removed', Member>;
+/** `heldFunds.released`: a member's held funds were paid out to them ({@link HeldFundsReleased}). */
 export type HeldFundsReleasedEvent = EventEnvelope<'heldFunds.released', HeldFundsReleased>;
 /**
  * `checkout.expired`: the expired session, a payment's or a subscription's (chosen by its
@@ -269,6 +271,7 @@ export type CheckoutExpiredEvent = EventEnvelope<
 	'checkout.expired',
 	PaymentSessionData | SubscriptionSessionData
 >;
+/** `webhook.test`: the dashboard's test delivery ({@link WebhookTest}). */
 export type WebhookTestEvent = EventEnvelope<'webhook.test', WebhookTest>;
 
 /**
