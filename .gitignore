@@ -1,31 +1,29 @@
-
-PUBLISH.md
-PROJECT_SUMMARY.*
-.coverage
-
-# Development
+# Dependencies and build output
 node_modules/
-*.log
-.env
-.DS_Store
-
-
 dist/
+coverage/
+*.tgz
+*.log
 
-
-# IDE
+# Local environment and maintainer-only files
+.env
+.env.*
+.DS_Store
 .vscode/
 .idea/
 *.swp
 *.swo
-
+PUBLISH.md
+PROJECT_SUMMARY.*
+CLAUDE.md
+AGENTS.md
 test-internal/
+**/.qbitflow-sync
 
-*.tgz
+# The examples install the SDK from this checkout (`file:..`): their lockfile would pin a local
+# path, so it is not committed.
+examples/package-lock.json
 
 # Files the examples write when run
 examples/qbitflow-*.csv
 examples/qbitflow-webhook-secret
-
-
-**/.qbitflow-sync
