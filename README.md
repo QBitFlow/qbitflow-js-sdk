@@ -1070,8 +1070,10 @@ console.log(`fee now ${updated.organizationFeePercent} %`);
   release them first.
 - `invitations.list` / `iterate` (by `status`; member invitations only, the team's being managed
   from the dashboard) and `invitations.revoke` (`204`, resolves to `void`) manage the invitations.
-- Today a seller whose account already belongs to another organization cannot accept (no
-  `member.joined` comes), and test-mode sellers are real accounts that accept from a real inbox.
+- A seller who already uses QBitFlow joins with the same account: accepting while it belongs to
+  another organization succeeds like any acceptance (it keeps its other memberships, and
+  `member.joined` comes as usual). Test-mode sellers are real accounts that accept from a real
+  inbox.
 
 ## Wallets
 
