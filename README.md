@@ -1219,7 +1219,9 @@ call `handle` yourself:
 The adapters read `QBitFlow-Signature` whatever its case, and never echo the secret or an error's
 details: log them with `onError`, called for every 400 and 500 (with `event` `null` when the body
 could not be parsed), not for 405 and 413. The router's options are `tolerance` (seconds, default 300),
-`now` (tests) and `onError`.
+`now` (tests) and `onError`. When `nodeHandler` answers 413 while the body is still arriving, it
+discards the rest so that the sender reads the answer: at most 4 MiB more, within 10 seconds,
+beyond which it drops the connection.
 
 **Test your handlers** with `webhooks.sign(rawBody, secret, timestamp?)`, which returns the header
 QBitFlow would send (`t=<unix seconds>,v1=<hex>`):

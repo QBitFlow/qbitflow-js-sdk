@@ -4,7 +4,7 @@
  */
 
 import http from 'node:http';
-import type { AddressInfo } from 'node:net';
+import net, { type AddressInfo } from 'node:net';
 
 import { QBitFlow } from '../src/client';
 import { ValidationError, WebhookSignatureError } from '../src/errors';
@@ -395,6 +395,25 @@ async function nodeServer(
 	};
 }
 
+/** Writes `parts` on one raw connection; resolves to what came back once `done` holds (or it closed). */
+function rawExchange(
+	port: number,
+	parts: Array<string | Buffer>,
+	done: (text: string) => boolean
+): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const socket = net.connect(port, '127.0.0.1');
+		let text = '';
+		socket.on('data', (d: Buffer) => {
+			text += d.toString('latin1');
+			if (done(text)) socket.end();
+		});
+		socket.on('error', reject);
+		socket.on('close', () => resolve(text));
+		for (const part of parts) socket.write(part);
+	});
+}
+
 /** Reads the request's body, as a body parser would. */
 async function readAll(req: http.IncomingMessage): Promise<Buffer> {
 	const chunks: Buffer[] = [];
@@ -474,6 +493,56 @@ describe('router.nodeHandler', () => {
 			duplex: 'half',
 		} as RequestInit);
 		expect(chunked.status).toBe(413);
+	});
+
+	it('a 413 to a body still coming discards the rest: the connection serves the next delivery', async () => {
+		const { router, calls } = recordingRouter();
+		const { port } = new globalThis.URL(await start(router));
+		const big = 2 * MAX_WEBHOOK_BODY_BYTES;
+		const signature = webhooks.sign(PAYMENT, SECRET);
+		// Two requests on one connection, the second right behind the 2 MiB body of the first.
+		const answers = await rawExchange(
+			Number(port),
+			[
+				`POST /webhooks/qbitflow HTTP/1.1\r\nHost: x\r\nContent-Length: ${big}\r\n\r\n`,
+				Buffer.alloc(big, 120),
+				`POST /webhooks/qbitflow HTTP/1.1\r\nHost: x\r\nQBitFlow-Signature: ${signature}\r\n` +
+					`Content-Length: ${Buffer.byteLength(PAYMENT)}\r\n\r\n${PAYMENT}`,
+			],
+			(text) => text.includes('{"received":true}')
+		);
+		const [first, second] = answers.split('HTTP/1.1 ').slice(1);
+		expect(first).toMatch(/^413 /);
+		expect(first.toLowerCase()).not.toContain('connection: close');
+		expect(first).toContain('{"error":"body too large"}');
+		expect(second).toMatch(/^200 /);
+		expect(calls[0]).toBe('payment:order-1042:evt_0f1c2d4e-5a6b-5c7d-8e9f-0a1b2c3d4e5f');
+	});
+
+	it('a 413 to an endless body: answered, then the connection is dropped', async () => {
+		const { port } = new globalThis.URL(await start(recordingRouter().router));
+		const declared = 64 * MAX_WEBHOOK_BODY_BYTES;
+		const outcome = await new Promise<{ answer: string; written: number }>((resolve) => {
+			const socket = net.connect(Number(port), '127.0.0.1');
+			let answer = '';
+			let written = 0;
+			socket.on('data', (d: Buffer) => (answer += d.toString('latin1')));
+			socket.on('error', () => undefined); // the drop
+			socket.on('close', () => resolve({ answer, written }));
+			socket.write(
+				`POST /webhooks/qbitflow HTTP/1.1\r\nHost: x\r\nContent-Length: ${declared}\r\n\r\n`
+			);
+			const chunk = Buffer.alloc(64 * 1024, 120);
+			const pump = () => {
+				while (!socket.destroyed && written < declared) {
+					written += chunk.length;
+					if (!socket.write(chunk)) return void socket.once('drain', pump);
+				}
+			};
+			pump();
+		});
+		expect(outcome.answer).toMatch(/^HTTP\/1\.1 413 /);
+		expect(outcome.written).toBeLessThan(declared);
 	});
 
 	it.each<[string, (raw: Buffer) => unknown]>([

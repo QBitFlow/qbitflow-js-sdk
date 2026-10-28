@@ -183,7 +183,8 @@ changes since 2.1.0.
 -   `timeout` bounds each attempt through the last byte of the response body.
 -   Webhook signatures are compared in constant time against every `v1` signature, with a
     timestamp tolerance (300 seconds by default) that can no longer be skipped; the router's
-    adapters read at most 1 MiB.
+    adapters read at most 1 MiB (`nodeHandler` answers 413 to a larger body, then discards at
+    most 4 MiB more of it, within 10 seconds, so that the sender reads the answer).
 -   Decoding untrusted JSON never touches a prototype: a `__proto__` key in `metadata` stays a
     plain own entry.
 

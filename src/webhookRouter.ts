@@ -34,6 +34,13 @@ import {
 /** The largest body the adapters read: 1 MiB (larger: 413). */
 export const MAX_WEBHOOK_BODY_BYTES = 1 << 20;
 
+/**
+ * How much of a body answered 413 the Node handler still reads and discards, and for how long,
+ * before it drops the connection (see {@link drainThenDrop}).
+ */
+const DRAIN_MAX_BYTES = 4 * MAX_WEBHOOK_BODY_BYTES;
+const DRAIN_MAX_MS = 10_000;
+
 /** Handles the events of type `T`: `data` is the event's typed data. It may be async. */
 export type WebhookHandler<T extends KnownEventType> = (
 	data: EventOf<T>['data'],
@@ -253,7 +260,9 @@ export class WebhookRouter {
 	 * `req.body` when it is a `Buffer` or a string: with Express, mount `express.raw({ type:
 	 * 'application/json' })` (or no body parser) on the route. A `req.body` already parsed into an
 	 * object (`express.json()` ran first: the signature can no longer be checked) is answered 500
-	 * with a message saying so. Same answers as {@link fetchHandler}.
+	 * with a message saying so. Same answers as {@link fetchHandler}. A 413 sent while the body is
+	 * still arriving is followed by discarding the rest (at most 4 MiB more, within 10 seconds,
+	 * then the connection is dropped), so that the sender reads it.
 	 */
 	nodeHandler(): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
 		return async (req, res) => {
@@ -264,7 +273,15 @@ export class WebhookRouter {
 				a = answer(400, 'cannot read the body');
 			}
 			if (res.headersSent) return;
-			res.writeHead(a.status, { ...JSON_HEADERS, ...a.headers });
+			const headers: Record<string, string> = { ...JSON_HEADERS, ...a.headers };
+			if (a.status === 413 && !req.complete) {
+				// The client is still sending the body. With `Connection: close`, Node would close
+				// the socket right after the answer, unread bytes and all: the peer gets a reset
+				// that can discard the 413 before it reads it. Answer, then discard the rest.
+				delete headers.Connection;
+				drainThenDrop(req);
+			}
+			res.writeHead(a.status, headers);
 			res.end(JSON.stringify(a.body));
 		};
 	}
@@ -316,6 +333,35 @@ async function readWebBody(request: Request): Promise<Uint8Array | undefined> {
 		chunks.push(value);
 	}
 	return Buffer.concat(chunks);
+}
+
+/**
+ * Discards the rest of a request answered 413 so that the connection stays usable and the client
+ * reads the answer. A client that sends more than {@link DRAIN_MAX_BYTES} more, or doesn't finish
+ * within {@link DRAIN_MAX_MS}, has its connection dropped.
+ */
+function drainThenDrop(req: IncomingMessage): void {
+	let left = DRAIN_MAX_BYTES;
+	const drop = () => {
+		stop();
+		req.destroy();
+	};
+	const onData = (chunk: Buffer | string) => {
+		left -= typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length;
+		if (left < 0) drop();
+	};
+	const timer = setTimeout(drop, DRAIN_MAX_MS);
+	timer.unref?.();
+	const stop = () => {
+		clearTimeout(timer);
+		req.off('data', onData);
+		req.off('end', stop);
+		req.off('close', stop);
+	};
+	req.on('data', onData);
+	req.once('end', stop);
+	req.once('close', stop);
+	req.resume();
 }
 
 /** Reads a Node request's body up to the limit (`undefined`: larger; the rest is discarded). */
