@@ -185,28 +185,22 @@ export interface UpdateMemberParams {
 export type MemberListParams = PageParams;
 
 /**
- * An invitation to the organization: to be a member in one mode (role `user`), or to its team
- * (role `admin`, from the dashboard: mode-free, so `test`, `holdFunds` and
- * `organizationFeePercent` are absent).
+ * An invitation to be a member of the organization in one mode. An API key only sees member
+ * invitations: the team's are managed from the dashboard.
  */
 export interface Invitation {
 	/** The invitation's id. */
 	uuid: string;
-	/** A member invitation's mode; absent for a team invitation. */
+	/** The mode the person is invited in (`true`: test). */
 	test?: boolean;
 	/** The invited address. */
 	email: string;
-	/** `admin` (the team) or `user` (a member). */
-	role: Role;
 	/**
-	 * For a member, `true` when the organization holds their payments until it trusts them
-	 * (`members.trust`), `false` when they are paid directly; absent for the team.
+	 * `true` when the organization holds the member's payments until it trusts them
+	 * (`members.trust`), `false` when they are paid directly.
 	 */
 	holdFunds?: boolean;
-	/**
-	 * For a member, the organization's fee on their payments, a percent string (`"0"`: none);
-	 * absent for the team.
-	 */
+	/** The organization's fee on the member's payments, a percent string (`"0"`: none). */
 	organizationFeePercent?: string;
 	/** Where the person goes once they accepted (with `?invitationUuid=<uuid>`); absent when none. */
 	redirectUrl?: string;

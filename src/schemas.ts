@@ -608,7 +608,6 @@ const invitationFields: Fields<Invitation> = {
 	uuid: string,
 	test: optBoolean,
 	email: string,
-	role: enumString<Role>(),
 	holdFunds: optBoolean,
 	organizationFeePercent: optString,
 	redirectUrl: optString,

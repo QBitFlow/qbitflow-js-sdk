@@ -93,9 +93,9 @@ const HELD_FUNDS = `{"ledgers":[{"txUuid":"refund@1","type":"refund","descriptio
 	"refundedTxUuid":"pay@1","amountUsd":"10.0042","currency":${CUR},"owed":"-10.0042","owedMinUnits":"-10004200",
 	"owedUsd":"-10.0042","createdAt":"${AT}"}],"totalUsd":"-10.0042"}`;
 const MEMBER_HELD_FUNDS = `{"userUuid":"m-1","totalUsd":"98.5","count":2,"oldestAt":"2026-09-28T12:00:00Z"}`;
-const INVITATION = `{"uuid":"i-1","test":true,"email":"a@b.co","role":"user","holdFunds":true,"organizationFeePercent":"2.5",
+const INVITATION = `{"uuid":"i-1","test":true,"email":"a@b.co","holdFunds":true,"organizationFeePercent":"2.5",
 	"expiresAt":"2026-10-08T12:00:00Z","createdAt":"${AT}","status":"pending"}`;
-const CREATED_INVITATION = `{"uuid":"i-1","test":true,"email":"a@b.co","role":"user","holdFunds":true,
+const CREATED_INVITATION = `{"uuid":"i-1","test":true,"email":"a@b.co","holdFunds":true,
 	"expiresAt":"2026-10-08T12:00:00Z","createdAt":"${AT}","status":"pending","link":"https://qbitflow.app/invite?token=x"}`;
 const WALLET = `{"uuid":"w-1","createdAt":"${AT}","address":"0xpk","test":false,"tokenWallets":[{"uuid":"tw-1",
 	"createdAt":"${AT}","currency":${CUR},"walletUuid":"w-1","balance":{"currency":${CUR},"amount":"12.5",

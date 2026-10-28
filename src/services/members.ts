@@ -190,8 +190,9 @@ export class InvitationsService {
 
 	/**
 	 * One page of the organization's invitations (`GET /invitations`; newest first, page size 20
-	 * by default, at most 100), its team's (role `admin`) included, optionally filtered by
-	 * `status`. Organization key only. {@link iterate} walks every page.
+	 * by default, at most 100), optionally filtered by `status`. An API key lists member
+	 * invitations only: the team's are managed from the dashboard. Organization key only.
+	 * {@link iterate} walks every page.
 	 */
 	async list(params?: InvitationListParams, options?: RequestOptions): Promise<Page<Invitation>> {
 		const query = invitationListQuery(params);

@@ -368,9 +368,9 @@ export const DurationUnit = {
 export type DurationUnit = Open<ValuesOf<typeof DurationUnit>>;
 
 /**
- * What a credential (or an invitation) may do in a space. An API key is `admin` (organization
- * key) or `user` (a member's key, or `onBehalfOf`); an invitation is `user` (a member, the SDK's)
- * or `admin` (the team, from the dashboard).
+ * What a credential may do in a space (`Me.role`, `Me.space.role`): an API key is `admin` (an
+ * organization key) or `user` (a member's key, or an organization key acting `onBehalfOf` a
+ * member).
  */
 export const Role = {
 	/** An organization key: every method. */

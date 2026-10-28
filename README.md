@@ -1068,9 +1068,8 @@ console.log(`fee now ${updated.organizationFeePercent} %`);
 - `members.remove` ends a seller's membership in the key's mode: their keys stop working and their
   checkouts close (`204`). It is a `409 held_funds_pending` while you hold their live funds:
   release them first.
-- `invitations.list` / `iterate` (by `status`; your team's invitations are listed too, with `role`
-  `admin` and no `test`, `holdFunds` or fee) and `invitations.revoke` (`204`, resolves to `void`)
-  manage the invitations.
+- `invitations.list` / `iterate` (by `status`; member invitations only, the team's being managed
+  from the dashboard) and `invitations.revoke` (`204`, resolves to `void`) manage the invitations.
 - Today a seller whose account already belongs to another organization cannot accept (no
   `member.joined` comes), and test-mode sellers are real accounts that accept from a real inbox.
 

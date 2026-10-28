@@ -301,7 +301,7 @@ describe('model values', () => {
 		expect(ev.networkFeesPaidBy).toBe('relayer');
 	});
 
-	it('a created invitation is flat; a team invitation is mode-free', () => {
+	it('a created invitation is flat; an invitation decodes without its optional fields', () => {
 		const inv = fixture<CreatedInvitation>('CreatedInvitation');
 		expect([inv.uuid, inv.test, inv.holdFunds, inv.organizationFeePercent]).toEqual([
 			'i-1',
@@ -311,14 +311,14 @@ describe('model values', () => {
 		]);
 		expect(inv.link).toBeTruthy();
 
-		const team = decode<Invitation>(
+		const bare = decode<Invitation>(
 			S.InvitationSchema,
-			'{"uuid":"i-2","email":"a@b.co","role":"admin","expiresAt":"2026-10-08T12:00:00Z",' +
+			'{"uuid":"i-2","email":"a@b.co","expiresAt":"2026-10-08T12:00:00Z",' +
 				'"createdAt":"2026-10-01T12:00:00Z","status":"pending"}'
 		);
-		expect(team.role).toBe(Role.Admin);
+		expect(bare.status).toBe('pending');
 		for (const absent of ['test', 'holdFunds', 'organizationFeePercent', 'acceptedAt']) {
-			expect(absent in team).toBe(false);
+			expect(absent in bare).toBe(false);
 		}
 	});
 
@@ -420,6 +420,10 @@ describe('out-of-scope wire elements still decode', () => {
 		const customer = decodePatched('Customer', (w) => (w.verified = true));
 		expect(customer.unknown).toEqual(['verified']);
 
+		// An API key only lists member invitations: their role is always `user`.
+		const invitation = decodePatched('Invitation', (w) => (w.role = 'user'));
+		expect(invitation.unknown).toEqual(['role']);
+
 		const endpoint = decodePatched('WebhookEndpointCreated', (w) => {
 			w.payloadVersion = 'v2';
 			w.rotatedAt = '2026-10-01T12:00:00Z';
@@ -457,8 +461,6 @@ describe('out-of-scope wire elements still decode', () => {
 		const me = decodePatched('Me', (w) => (w.space.role = 'owner'));
 		expect(me.unknown).toEqual([]);
 		expect(me.value.space.role).toBe('owner');
-		const inv = decodePatched('Invitation', (w) => (w.role = 'owner'));
-		expect(inv.value.role).toBe('owner');
 	});
 
 	it("a referral fee's internal deadline is not modelled, and decoding ignores it", () => {
