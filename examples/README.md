@@ -1,74 +1,76 @@
+# QBitFlow SDK examples
 
-# QBitFlow SDK Examples
+Runnable TypeScript programs for the QBitFlow JavaScript/TypeScript SDK 3.0.0 (API v2). Each one
+imports from `'qbitflow'` and reads its configuration from the environment: never hardcode a key.
 
-This directory contains example code demonstrating how to use the QBitFlow JavaScript/TypeScript SDK.
+| File | Shows |
+|---|---|
+| [`client-setup.ts`](client-setup.ts) | a client from the constructor, checked with `me()`; clients from the environment (`QBitFlow.fromEnv`) |
+| [`checkout.ts`](checkout.ts) | a payment checkout with an inline product, its status (`get`), `waitForCompletion`, its expiry; a checkout with fees (a shipping line, the processing fee) |
+| [`catalog.ts`](catalog.ts) | a product (`tshirt-blue-m`), the products and one page of customers, a checkout for the product by its reference |
+| [`payments.ts`](payments.ts) | a page of payments with a filter, one by id and by reference, every payment with `for await`, the transactions feed (payments and bills), `formatAmount` / `parseAmount` |
+| [`subscriptions.ts`](subscriptions.ts) | a subscription checkout with a trial, a subscription and `hasAccess`, its bills with `for await`, its metadata (`update`), a test bill, cancel at period end |
+| [`refunds.ts`](refunds.ts) | the pending refunds (customers' requests), one refund by id (refunds are read only in the SDK) |
+| [`marketplace.ts`](marketplace.ts) | invite a seller, the members and invitations, revoke one; for a member: `onBehalfOf`, wallets, held funds, fee, trust, removal |
+| [`webhooks.ts`](webhooks.ts) | a webhook endpoint and its signing secret, the event log |
+| [`webhook-handler.ts`](webhook-handler.ts) | a `node:http` receiver built on `webhooks.router`: typed handlers per event type, `onUnknown`, `onError`, deduplication on `event.id`, `hasAccess`, `formatAmount` |
+| [`webhook-verify.ts`](webhook-verify.ts) | the lower level: `webhooks.constructEvent` on deliveries signed with `webhooks.sign` (offline) |
+| [`errors-and-retries.ts`](errors-and-retries.ts) | retries and an idempotency key derived from the order, the error classes with `instanceof`, `isRetryable`, an `AbortSignal` |
+| [`accounting.ts`](accounting.ts) | the year 2026 exported as JSON and as CSV, over the 92-day limit (both days included) |
+| [`currencies.ts`](currencies.ts) | the currencies customers can pay with |
 
-## Files
+The `// docs:start <id>` … `// docs:end <id>` regions of these programs are the code snippets of
+[qbitflow.app/docs](https://qbitflow.app/docs) and of the SDK's README; `snippets.manifest.json`
+maps each snippet id to its program. See [CONTRIBUTING.md](../CONTRIBUTING.md).
 
-- **client.ts** - Example client showing various SDK operations (create payments, subscriptions, etc.)
-- **server.ts** - Example Express.js server showing webhook handling
+## Running them
 
-## Running the Examples
+The examples use the SDK of this repository (`"qbitflow": "file:.."`): build it first.
 
-### Prerequisites
-
-1. Install dependencies in the examples directory:
 ```bash
+npm install && npm run build      # in the repository root
 cd examples
 npm install
+export QBITFLOW_API_KEY=sk_…      # a test-mode key; QBITFLOW_BASE_URL=… for another server
+npm run checkout                  # or: npx tsx checkout.ts
 ```
 
-2. Make sure to replace `<api_key_here>` with your actual API key in both files.
+They use the documentation's sample values (orders `order-1042` and `order-1044`, product `tshirt-blue-m`,
+`https://shop.example.com/…` URLs): run them with a test-mode key. A program that creates
+something with a fixed reference handles the conflict of a second run, or expires its checkout.
 
-### Running the Client Examples
+| Script | Environment |
+|---|---|
+| `npm run client-setup` | `QBITFLOW_API_KEY`; `QBITFLOW_ON_BEHALF_OF` optional. The constructor example uses the default base URL: it is skipped when `QBITFLOW_BASE_URL` is set |
+| `npm run checkout` | `QBITFLOW_API_KEY`; `WAIT=1` to wait for the payment (up to 10 minutes) before expiring the checkout |
+| `npm run catalog` | `QBITFLOW_API_KEY` (it creates the product once, and opens then expires a checkout for it) |
+| `npm run payments` | `QBITFLOW_API_KEY`; `PAYMENT_UUID` (`pay@…`), else the first payment listed |
+| `npm run subscriptions` | `QBITFLOW_API_KEY`; `SUBSCRIPTION_UUID` (`sub@…`), else the first active one; `TEST_BILL=1` to bill it now (test mode); `CANCEL=1` to stop it at the end of its period |
+| `npm run refunds` | `QBITFLOW_API_KEY` (it lists the pending refunds and reads one) |
+| `npm run marketplace` | an organization key in `QBITFLOW_API_KEY`. Without `MEMBER_UUID`: lists members and invitations, `INVITE=1` invites `seller@example.com`, `REVOKE_INVITATION_UUID` revokes an invitation. With `MEMBER_UUID` (a member's `userUuid`): reads them and acts for them; `SET_FEE=1`, `TRUST=1`, `REMOVE=1` change them |
+| `npm run webhooks` | `QBITFLOW_API_KEY`; `CREATE_ENDPOINT=1` to register an endpoint and write its secret to `./qbitflow-webhook-secret` |
+| `npm run webhook-handler` | `QBITFLOW_WEBHOOK_SECRET` (the `whsec_…` secret `webhooks.endpoints.create` returned); `QBITFLOW_API_KEY` for the follow-up reads. Listens on `:8080`, `POST /webhooks/qbitflow` |
+| `npm run webhook-verify` | `QBITFLOW_WEBHOOK_SECRET` (any `whsec_…` value: it runs offline) |
+| `npm run errors-and-retries` | `QBITFLOW_API_KEY` (it opens then expires a checkout, and creates then deletes a customer) |
+| `npm run accounting` | `QBITFLOW_API_KEY` (writes `./qbitflow-2026.csv`) |
+| `npm run currencies` | `QBITFLOW_API_KEY` |
 
-The client examples demonstrate various SDK operations:
+Every script that calls the API also honours `QBITFLOW_BASE_URL` (default
+`https://api.qbitflow.app/v2`), except the constructor example of `client-setup.ts`.
 
-```bash
-npm run client
+`npm run typecheck` type-checks every program. To receive webhooks on your machine, expose port
+8080 with a tunnel and create an endpoint for its public `https` URL (a test-mode endpoint also
+accepts `http`).
+
+## With Express
+
+`webhook-handler.ts` uses `node:http` to stay dependency-free. With Express, give the webhook route
+the raw body, and register it before any `app.use(express.json())` (a parsed body can no longer be
+verified: the router answers 500 and says so):
+
+```ts
+app.post('/webhooks/qbitflow', express.raw({ type: 'application/json' }), router.nodeHandler());
 ```
 
-This will show you how to:
-- Create one-time payments
-- Create subscriptions
-- Create pay-as-you-go subscriptions
-- Check transaction status
-- List payments
-- And more...
-
-### Running the Webhook Server
-
-The server example demonstrates how to handle webhooks:
-
-```bash
-npm run server
-```
-
-This will start an Express server on port 8001 with the following endpoints:
-- `POST /webhook` - Receives payment notifications from QBitFlow
-- `GET /success` - Handles successful payment redirects
-- `GET /cancel` - Handles cancelled payment redirects
-
-## Modifying the Examples
-
-Feel free to modify these examples to test different scenarios:
-
-1. Change product IDs to match your products
-2. Adjust subscription frequencies and trial periods
-3. Customize webhook handling logic
-4. Add your own business logic for payment processing
-
-## Integration Tips
-
-1. **Webhooks**: Use webhooks for reliable payment notifications. They're more reliable than polling.
-
-2. **Error Handling**: Always wrap SDK calls in try-catch blocks to handle errors gracefully.
-
-3. **Status Updates**: Use WebSocket connections for real-time status updates during payment processing.
-
-4. **Security**: 
-   - Never commit your API key to version control
-   - Use environment variables for sensitive data
-   - Validate webhook signatures in production
-
-5. **Testing**: Use test mode API keys during development to avoid real transactions.
+With Next.js (App Router), Hono, Bun, Deno or Cloudflare Workers, use `router.fetchHandler()`, a
+`(request: Request) => Promise<Response>`: `export const POST = router.fetchHandler();`.

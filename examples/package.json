@@ -1,19 +1,34 @@
 {
 	"name": "qbitflow-examples",
-	"version": "1.0.0",
-	"description": "Examples for QBitFlow SDK",
+	"version": "3.0.0",
+	"description": "Examples for the QBitFlow JavaScript/TypeScript SDK 3.0.0",
 	"private": true,
+	"type": "module",
+	"engines": {
+		"node": ">=20.0.0"
+	},
 	"scripts": {
-		"client": "ts-node client.ts",
-		"server": "ts-node server.ts"
+		"client-setup": "tsx client-setup.ts",
+		"checkout": "tsx checkout.ts",
+		"catalog": "tsx catalog.ts",
+		"payments": "tsx payments.ts",
+		"subscriptions": "tsx subscriptions.ts",
+		"refunds": "tsx refunds.ts",
+		"marketplace": "tsx marketplace.ts",
+		"webhooks": "tsx webhooks.ts",
+		"webhook-handler": "tsx webhook-handler.ts",
+		"webhook-verify": "tsx webhook-verify.ts",
+		"errors-and-retries": "tsx errors-and-retries.ts",
+		"accounting": "tsx accounting.ts",
+		"currencies": "tsx currencies.ts",
+		"typecheck": "tsc --noEmit --strict --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 --types node client-setup.ts checkout.ts catalog.ts payments.ts subscriptions.ts refunds.ts marketplace.ts webhooks.ts webhook-handler.ts webhook-verify.ts errors-and-retries.ts accounting.ts currencies.ts"
 	},
 	"dependencies": {
-		"express": "^5.1.0"
+		"qbitflow": "file:.."
 	},
 	"devDependencies": {
-		"@types/express": "^5.0.0",
 		"@types/node": "^24.9.2",
-		"ts-node": "^10.9.2",
-		"typescript": "^5.3.3"
+		"tsx": "^4.20.0",
+		"typescript": "^5.9.3"
 	}
 }

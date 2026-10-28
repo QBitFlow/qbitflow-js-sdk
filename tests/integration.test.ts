@@ -1,668 +1,421 @@
 /**
- * Integration tests for QBitFlow SDK.
+ * Live checks against a QBitFlow API (mirrors the Go SDK's integration_test.go).
  *
- * These tests run against the actual QBitFlow test API.
- * Make sure to set QBITFLOW_API_KEY environment variable.
+ * The suite reads its target from the environment — it never defaults to a URL:
  *
- * Run with:
- *     export QBITFLOW_API_KEY="your_test_api_key"
- *     npm test -- tests/integration.test.ts
+ * - `QBITFLOW_API_KEY` and `QBITFLOW_BASE_URL` set → it runs against that server;
+ * - `QBITFLOW_API_KEY` set without `QBITFLOW_BASE_URL` → it FAILS, naming the missing variable;
+ * - neither set → it is skipped, so the offline `npm test` stays green.
+ *
+ * The read-only group only reads. The write group also needs `QBITFLOW_LIVE_WRITES=1`, and a
+ * test-mode key (per `me()`) unless `QBITFLOW_ALLOW_LIVE_MODE_WRITES=1`; it creates a product, a
+ * customer, three checkout sessions (a payment's and a subscription's with fees) and a webhook
+ * endpoint, and deletes (or expires) each of them; it sets and deletes a metadata key on the
+ * latest subscription, if there is one.
+ *
+ *     QBITFLOW_API_KEY=sk_… QBITFLOW_BASE_URL=https://… npm run test:live
  */
 
-import { QBitFlow } from '../src/QBitFlow';
-import { Duration, TransactionType } from '../src/types';
+import { QBitFlow } from '../src/client';
+import { ConflictError, NotFoundError, PermissionDeniedError } from '../src/errors';
+import type { CheckoutFees } from '../src/models/checkout';
+import type { Me } from '../src/models/members';
 
-import { NotFoundException } from '../src/exceptions';
-import { CreateCustomerDto, Customer, UpdateCustomerDto } from '../src/types/customer';
-import { CreateProductDto, Product, UpdateProductDto } from '../src/types/product';
-import { CreateUserDto, UpdateUserDto, User, UserRole } from '../src/types/user';
+const KEY = process.env.QBITFLOW_API_KEY ?? '';
+const BASE = process.env.QBITFLOW_BASE_URL ?? '';
+const WRITES = process.env.QBITFLOW_LIVE_WRITES === '1';
+const ALLOW_LIVE = process.env.QBITFLOW_ALLOW_LIVE_MODE_WRITES === '1';
 
-const LOCAL_URL = 'http://localhost:3001';
+const live = KEY ? describe : describe.skip;
+jest.setTimeout(120_000);
 
-// Global variables to store created entities across tests
-let createdUser: User | null = null;
-let createdProduct: Product | null;
-let createdCustomer: Customer | null;
-
-// Test data factories
-const createTestCustomerData = (): CreateCustomerDto => ({
-	name: 'John',
-	lastName: 'Doe',
-	email: `test+${Math.random().toString(36).substring(7)}@example.com`,
-	phoneNumber: '+1234567890',
-	address: '123 Test Street',
-});
-
-const createTestProductData = (): CreateProductDto => ({
-	name: `Test Product ${Math.random().toString(36).substring(7)}`,
-	description: 'A test product for integration testing',
-	price: 9.99,
-	reference: `REF-${Math.random().toString(36).substring(7)}`,
-});
-
-const createTestUserData = (): CreateUserDto => ({
-	email: `testuser+${Math.random().toString(36).substring(7)}@example.com`,
-	name: 'Test',
-	lastName: 'User',
-	role: UserRole.USER,
-	organizationFeeBps: 100,
-});
-
-// Setup and teardown
-let client: QBitFlow;
-let apiKey: string;
-
-beforeAll(() => {
-	if (!process.env.QBITFLOW_API_KEY) {
-		throw new Error('QBITFLOW_API_KEY environment variable is not set');
+function liveClient(): QBitFlow {
+	if (!BASE) {
+		throw new Error(
+			'QBITFLOW_API_KEY is set but QBITFLOW_BASE_URL is not: set the API base URL explicitly (see tests/README.md).'
+		);
 	}
-	apiKey = process.env.QBITFLOW_API_KEY;
+	return new QBitFlow({ apiKey: KEY, baseUrl: BASE });
+}
 
-	const baseUrl = process.env.QBITFLOW_BASE_URL || process.env.QBITFLOW_API_URL || LOCAL_URL;
-	client = new QBitFlow({ apiKey, baseUrl });
+const isOrganizationKey = (me: Me): boolean => me.role === 'admin' && !me.onBehalfOfUserUuid;
+const suffix = (): string => `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+const isoDate = (d: Date): string => d.toISOString().slice(0, 10);
+
+/** Runs `f`; a 404 (already gone) is fine. */
+async function cleanup(f: () => Promise<unknown>): Promise<void> {
+	try {
+		await f();
+	} catch (err) {
+		if (!(err instanceof NotFoundError)) throw err;
+	}
+}
+
+live('live: read-only', () => {
+	let c: QBitFlow;
+	let me: Me;
+
+	beforeAll(async () => {
+		c = liveClient();
+		me = await c.me();
+		expect(me.space?.uuid).toBeTruthy();
+	});
+
+	it('products: list, getByReference', async () => {
+		const page = await c.products.list({ includeHidden: true, limit: 2 });
+		expect(page.items.length).toBeLessThanOrEqual(2);
+		expect(page.hasMore).toBe(page.nextCursor !== undefined);
+		const first = page.items[0];
+		if (first?.reference) {
+			expect((await c.products.getByReference(first.reference)).uuid).toBe(first.uuid);
+		}
+		await expect(c.products.getByReference('sdk-js-no-such-reference')).rejects.toBeInstanceOf(
+			NotFoundError
+		);
+	});
+
+	it('customers', async () => {
+		const page = await c.customers.list({ limit: 2 });
+		expect(page.items.length).toBeLessThanOrEqual(2);
+		let n = 0;
+		for await (const cust of c.customers.iterate({ limit: 2 })) {
+			expect(cust.uuid).toBeTruthy();
+			if (++n === 3) break; // the first page and one more row at most
+		}
+	});
+
+	it('payments, transactions and failures', async () => {
+		const payments = await c.payments.list({ limit: 5 });
+		if (payments.items.length > 0) {
+			const p = await c.payments.get(payments.items[0].uuid);
+			expect(p.uuid).toBe(payments.items[0].uuid);
+			expect(p.currency.code).toBeTruthy();
+			expect(p.amountUsd).toBeTruthy();
+		}
+		const txs = await c.transactions.list({
+			limit: 5,
+			createdAfter: new Date(Date.now() - 30 * 86_400_000),
+		});
+		for (const tx of txs.items) expect(['payment', 'bill']).toContain(tx.type);
+		await c.transactions.list({ limit: 5, type: 'bill' });
+		await c.failures.list({ limit: 5 });
+	});
+
+	it('subscriptions and their bills', async () => {
+		const subs = await c.subscriptions.list({ limit: 5 });
+		const sub = subs.items[0];
+		if (!sub) return;
+		await c.subscriptions.get(sub.uuid);
+		const bills = await c.subscriptions.listBills(sub.uuid, { limit: 2 });
+		if (bills.items.length > 0) {
+			const bill = await c.subscriptions.getBill(bills.items[0].uuid);
+			expect(bill.subscriptionUuid).toBe(sub.uuid);
+		}
+	});
+
+	it('refunds: list by status, get', async () => {
+		const pending = await c.refunds.list({ status: ['pending'] });
+		for (const r of pending.items) expect(r.status).toBe('pending');
+		const answered = await c.refunds.list({ limit: 5, status: ['approved', 'rejected'] });
+		if (answered.items.length > 0) {
+			expect((await c.refunds.get(answered.items[0].uuid)).uuid).toBe(answered.items[0].uuid);
+		}
+	});
+
+	it('members (organization key only)', async () => {
+		if (!isOrganizationKey(me)) return;
+		await c.members.list({ limit: 5 });
+		await c.members.listHeldFunds();
+		await c.invitations.list({ limit: 5 });
+		// The organization's own space holds nothing for itself.
+		expect((await c.members.getOwnHeldFunds()).ledgers).toEqual([]);
+	});
+
+	it('wallets', async () => {
+		await c.wallets.list({ withBalances: true });
+		await c.wallets.listAcceptedCurrencies();
+	});
+
+	it('currencies', async () => {
+		const test = me.space?.test ?? false;
+		const currencies = await c.currencies.list({ test });
+		const natives = await c.currencies.list({ test, main: true });
+		for (const n of natives) {
+			expect(n.address).toBeUndefined();
+			expect(n.mainCurrencyId).toBeUndefined();
+		}
+		if (currencies.length > 0) {
+			expect((await c.currencies.get(currencies[0].id)).id).toBe(currencies[0].id);
+		}
+	});
+
+	it('accounting', async () => {
+		const to = new Date();
+		const from = new Date(to.getTime() - 30 * 86_400_000);
+		await c.accounting.exportJson(isoDate(from), isoDate(to));
+		expect(await c.accounting.exportCsv(isoDate(from), isoDate(to))).not.toBe('');
+	});
+
+	it('accounting over more than 92 days (exportJsonRange / exportCsvRange)', async () => {
+		const to = new Date();
+		const from = new Date(to.getTime() - 200 * 86_400_000); // 3 windows
+		expect(Array.isArray(await c.accounting.exportJsonRange(isoDate(from), isoDate(to)))).toBe(
+			true
+		);
+		const csv = await c.accounting.exportCsvRange(isoDate(from), isoDate(to));
+		const header = csv.split(/\r?\n/)[0];
+		expect(csv.split(/\r?\n/).filter((line) => line === header)).toHaveLength(1);
+	});
+
+	it('webhooks', async () => {
+		await c.webhooks.endpoints.list({ limit: 5 });
+		const page = await c.webhooks.events.list({ limit: 5 });
+		if (page.items.length > 0) await c.webhooks.events.get(page.items[0].id);
+	});
+
+	it('checkoutSessions.get of an unknown session is a NotFoundError', async () => {
+		await expect(
+			c.checkoutSessions.get('pay@019eca82-5680-7b00-8000-00000000dead')
+		).rejects.toBeInstanceOf(NotFoundError);
+	});
 });
 
-describe('QBitFlow Integration Tests', () => {
-	describe('Client', () => {
-		it('should initialize with API key string', () => {
-			const testClient = new QBitFlow(apiKey);
-			expect(testClient.getApiKey()).toBe(apiKey);
-			expect(testClient.customers).toBeDefined();
-			expect(testClient.products).toBeDefined();
-			expect(testClient.oneTimePayments).toBeDefined();
-			expect(testClient.subscriptions).toBeDefined();
-			expect(testClient.refunds).toBeDefined();
-			expect(testClient.accounting).toBeDefined();
-			expect(testClient.claims).toBeDefined();
-		});
+const liveWrites = KEY && WRITES ? describe : describe.skip;
 
-		it('should initialize with config object', () => {
-			const testClient = new QBitFlow({
-				apiKey,
-				baseUrl: LOCAL_URL,
-				timeout: 60000,
-				maxRetries: 5,
-			});
-			expect(testClient.getApiKey()).toBe(apiKey);
-			expect(testClient.getBaseUrl()).toBe(LOCAL_URL);
-		});
+liveWrites('live: writes', () => {
+	let c: QBitFlow;
+	let allowed = false;
 
-		it('should throw error when API key is not provided', () => {
-			expect(() => new QBitFlow('')).toThrow('API key is required');
-		});
-	});
-
-	describe('Customers', () => {
-		it('should create a new customer', async () => {
-			const customerData = createTestCustomerData();
-			const customer = await client.customers.create(customerData);
-
-			expect(customer.uuid).toBeDefined();
-			expect(customer.name).toBe(customerData.name);
-			expect(customer.lastName).toBe(customerData.lastName);
-			expect(customer.email).toBe(customerData.email);
-			expect(customer.createdAt).toBeDefined();
-
-			createdCustomer = customer;
-		});
-
-		it('should get customer by UUID', async () => {
-			expect(createdCustomer).not.toBeNull();
-			if (!createdCustomer) return;
-
-			const retrieved = await client.customers.get(createdCustomer.uuid);
-
-			expect(retrieved.uuid).toBe(createdCustomer.uuid);
-			expect(retrieved.email).toBe(createdCustomer.email);
-		});
-
-		it('should get customer by email', async () => {
-			expect(createdCustomer).not.toBeNull();
-			if (!createdCustomer) return;
-
-			const retrieved = await client.customers.getByEmail(createdCustomer.email);
-
-			expect(retrieved.uuid).toBe(createdCustomer.uuid);
-			expect(retrieved.email).toBe(createdCustomer.email);
-		});
-
-		it('should get all customers with pagination', async () => {
-			const limit = 2;
-			const customers = await client.customers.getAll({ limit });
-
-			expect(Array.isArray(customers.items)).toBe(true);
-			expect(customers.items.length).toBeGreaterThan(0);
-			expect(customers.hasMore()).toBe(true); // Assuming we have more than 2 customers in test environment
-
-			const nextCustomers = await client.customers.getAll({
-				limit,
-				cursor: customers.nextCursor,
-			});
-			expect(Array.isArray(nextCustomers.items)).toBe(true);
-			expect(nextCustomers.items.length).toBeGreaterThan(0);
-		});
-
-		it('should update a customer (UUID in URL path)', async () => {
-			const customerData = createTestCustomerData();
-			const created = await client.customers.create(customerData);
-
-			const updatedEmail = `updated+${Math.random().toString(36).substring(7)}@example.com`;
-
-			const updateData: UpdateCustomerDto = {
-				name: created.name,
-				lastName: created.lastName,
-				email: updatedEmail,
-				phoneNumber: '+9876543210',
-			};
-			const updated = await client.customers.update(created.uuid, updateData);
-
-			expect(updated.uuid).toBe(created.uuid);
-			expect(updated.email).toBe(updatedEmail);
-			expect(updated.phoneNumber).toBe('+9876543210');
-		});
-
-		it('should apply a partial update and leave other fields untouched', async () => {
-			const created = await client.customers.create(createTestCustomerData());
-
-			// Only the name is sent; every other stored value must survive.
-			const updated = await client.customers.update(created.uuid, { name: 'OnlyName' });
-
-			expect(updated.name).toBe('OnlyName');
-			expect(updated.lastName).toBe(created.lastName);
-			expect(updated.email).toBe(created.email);
-		});
-
-		it('should treat an empty update body as a no-op', async () => {
-			const created = await client.customers.create(createTestCustomerData());
-
-			const updated = await client.customers.update(created.uuid, {});
-
-			expect(updated.name).toBe(created.name);
-			expect(updated.lastName).toBe(created.lastName);
-			expect(updated.email).toBe(created.email);
-		});
-
-		it('should delete a customer', async () => {
-			const customerData = createTestCustomerData();
-			const created = await client.customers.create(customerData);
-
-			const response = await client.customers.delete(created.uuid);
-			expect(response.message).toBeDefined();
-
-			await expect(client.customers.get(created.uuid)).rejects.toThrow(NotFoundException);
-		});
-	});
-
-	describe('Users', () => {
-		it('should create a new user', async () => {
-			const userData = createTestUserData();
-			const user = await client.users.create(userData);
-
-			expect(user.id).toBeDefined();
-			expect(user.name).toBe(userData.name);
-			expect(user.email).toBe(userData.email);
-			expect(user.createdAt).toBeDefined();
-
-			createdUser = user;
-		});
-
-		it('should get current user', async () => {
-			const retrieved = await client.users.get();
-			expect(retrieved.id).toBeDefined();
-		});
-
-		it('should get user by ID', async () => {
-			expect(createdUser).not.toBeNull();
-			if (!createdUser) return;
-
-			const retrieved = await client.users.getById(createdUser.id.toString());
-
-			expect(retrieved.id).toBe(createdUser.id);
-			expect(retrieved.email).toBe(createdUser.email);
-		});
-
-		it('should get all users', async () => {
-			const users = await client.users.getAll();
-
-			expect(Array.isArray(users)).toBe(true);
-			expect(users.length).toBeGreaterThanOrEqual(1);
-		});
-
-		it('should update a user', async () => {
-			expect(createdUser).not.toBeNull();
-			if (!createdUser) return;
-
-			const updatedEmail = `updated+${Math.random().toString(36).substring(7)}@example.com`;
-
-			const updateData: UpdateUserDto = {
-				name: 'Updated',
-				lastName: 'User',
-				email: updatedEmail,
-				organizationFeeBps: 150,
-			};
-			const updated = await client.users.update(createdUser.id, updateData);
-
-			expect(updated.id).toBe(createdUser.id);
-			expect(updated.email).toBe(updatedEmail);
-			expect(updated.name).toBe('Updated');
-			expect(updated.organizationFeeBps).toBe(150);
-		});
-
-		it('should delete a user', async () => {
-			const tempUserData = createTestUserData();
-			const tempUser = await client.users.create(tempUserData);
-			expect(tempUser.id).toBeDefined();
-
-			const response = await client.users.delete(tempUser.id);
-			expect(response.message).toBeDefined();
-
-			await expect(client.users.getById(tempUser.id.toString())).rejects.toThrow(
-				NotFoundException
+	beforeAll(async () => {
+		c = liveClient();
+		const me = await c.me();
+		allowed = me.space?.test === true || ALLOW_LIVE;
+		if (!allowed)
+			console.warn(
+				'write checks skipped: a live-mode key needs QBITFLOW_ALLOW_LIVE_MODE_WRITES=1'
 			);
-		});
 	});
 
-	describe('Products', () => {
-		it('should create a new product', async () => {
-			const productData = createTestProductData();
-			const product = await client.products.create(productData);
-
-			expect(product.id).toBeDefined();
-			expect(product.name).toBe(productData.name);
-			expect(product.price).toBe(productData.price);
-			expect(product.isActive).toBe(true);
-
-			createdProduct = product;
+	it('product: create, get, getByReference, update, delete', async () => {
+		if (!allowed) return;
+		const reference = `sdk-js-test-${suffix()}`;
+		const p = await c.products.create({
+			name: 'SDK JS test',
+			priceUsd: '1',
+			reference,
+			metadata: { sdk: 'js', run: suffix() },
 		});
-
-		it('should get product by ID', async () => {
-			expect(createdProduct).not.toBeNull();
-			if (!createdProduct) return;
-
-			const retrieved = await client.products.get(createdProduct.id);
-
-			expect(retrieved.id).toBe(createdProduct.id);
-			expect(retrieved.name).toBe(createdProduct.name);
-		});
-
-		it('should get all products', async () => {
-			const products = await client.products.getAll();
-
-			expect(Array.isArray(products)).toBe(true);
-			expect(products.length).toBeGreaterThan(0);
-		});
-
-		it('should get product by reference', async () => {
-			const referenceCode = `REF-${Math.random().toString(36).substring(7)}`;
-			const productData: CreateProductDto = {
-				...createTestProductData(),
-				reference: referenceCode,
-			};
-			const created = await client.products.create(productData);
-
-			const retrieved = await client.products.getByReference(referenceCode);
-
-			expect(retrieved.id).toBe(created.id);
-			expect(retrieved.reference).toBe(referenceCode);
-		});
-
-		it('should update a product', async () => {
-			const productData = createTestProductData();
-			const created = await client.products.create(productData);
-
-			const updateData: UpdateProductDto = {
-				name: 'Updated Product',
-				description: 'Updated description',
-				price: 19.99,
-			};
-			const updated = await client.products.update(created.id, updateData);
-
-			expect(updated.id).toBe(created.id);
-			expect(updated.name).toBe('Updated Product');
-			expect(updated.price).toBe(19.99);
-		});
-
-		it('should apply a partial update and leave other fields untouched', async () => {
-			const created = await client.products.create(createTestProductData());
-
-			// Only the price is sent; name, description and reference must survive.
-			const updated = await client.products.update(created.id, { price: 42.5 });
-
-			expect(updated.price).toBe(42.5);
-			expect(updated.name).toBe(created.name);
-			expect(updated.description).toBe(created.description);
-			expect(updated.reference).toBe(created.reference);
-		});
-
-		it('should delete a product', async () => {
-			const productData = createTestProductData();
-			const created = await client.products.create(productData);
-
-			const response = await client.products.delete(created.id);
-			expect(response.message).toBeDefined();
-
-			await expect(client.products.get(created.id)).rejects.toThrow(NotFoundException);
-		});
-	});
-
-	describe('API Keys', () => {
-		// Note: creating/deleting API keys is a JWT-only operation on the API and cannot be
-		// performed with an API key, so the SDK only exposes read access.
-		it('should get all API keys', async () => {
-			const apiKeys = await client.apiKeys.getAll();
-
-			expect(Array.isArray(apiKeys)).toBe(true);
-			expect(apiKeys.length).toBeGreaterThan(0);
-		});
-
-		it('should get API keys for a specific user', async () => {
-			expect(createdUser).not.toBeNull();
-			if (!createdUser) return;
-
-			const apiKeys = await client.apiKeys.getForUser(createdUser.id);
-
-			expect(Array.isArray(apiKeys)).toBe(true);
-			for (const key of apiKeys) {
-				expect(key.userId).toBe(createdUser.id);
-			}
-		});
-	});
-
-	describe('Currencies', () => {
-		it('should get all available currencies', async () => {
-			const currencies = await client.currencies.getAllAvailable();
-
-			expect(Array.isArray(currencies)).toBe(true);
-			expect(currencies.length).toBeGreaterThan(0);
-			for (const currency of currencies) {
-				expect(typeof currency.id).toBe('number');
-				expect(typeof currency.symbol).toBe('string');
-			}
-		});
-
-		it('should get all main currencies', async () => {
-			const currencies = await client.currencies.getAllMain();
-
-			expect(Array.isArray(currencies)).toBe(true);
-			expect(currencies.length).toBeGreaterThan(0);
-			// Main currencies are native currencies, so they have no main currency reference.
-			for (const currency of currencies) {
-				expect(currency.mainCurrencyId).toBeFalsy();
-			}
-		});
-
-		it('should resolve currency IDs from a payment session', async () => {
-			if (!createdProduct || !createdCustomer) return;
-
-			const session = await client.oneTimePayments.createSession({
-				productId: createdProduct.id,
-				customerUUID: createdCustomer.uuid,
+		try {
+			const got = await c.products.get(p.uuid);
+			expect([got.reference, got.priceUsd, got.metadata.sdk]).toEqual([reference, '1', 'js']);
+			expect((await c.products.getByReference(reference)).uuid).toBe(p.uuid);
+			const updated = await c.products.update(p.uuid, {
+				priceUsd: '2.50',
+				description: 'Updated by the JS SDK',
+				metadata: { run: '', tier: 'gold' },
 			});
-			const checkout = await client.oneTimePayments.getSession(session.uuid);
-
-			const currencies = await client.currencies.getAllAvailable();
-			const byId = new Map(currencies.map((c) => [c.id, c]));
-			for (const id of checkout.availableCurrencies) {
-				expect(typeof id).toBe('number');
-				expect(byId.has(id)).toBe(true);
-			}
-		});
+			// The price comes back in its canonical form; the metadata is merged.
+			expect(updated.priceUsd).toBe('2.5');
+			expect(updated.description).toBeTruthy();
+			expect(updated.metadata).toEqual({ sdk: 'js', tier: 'gold' });
+			await c.products.delete(p.uuid);
+			await expect(c.products.get(p.uuid)).rejects.toBeInstanceOf(NotFoundError);
+		} finally {
+			await cleanup(() => c.products.delete(p.uuid));
+		}
 	});
 
-	describe('Payments', () => {
-		it('should create payment session with product ID', async () => {
-			try {
-				const response = await client.oneTimePayments.createSession({
-					productId: createdProduct?.id,
-					customerUUID: createdCustomer?.uuid,
-				});
-
-				expect(response.uuid).toBeDefined();
-				expect(response.link).toBeDefined();
-				expect(response.link).toContain('http');
-			} catch (err) {
-				console.log(err);
-			}
+	it('customer: create, getByReference, list by email, clear fields, delete', async () => {
+		if (!allowed) return;
+		const s = suffix();
+		const cust = await c.customers.create({
+			firstName: 'Ada',
+			lastName: 'Test',
+			email: `sdk-js-test-${s}@example.com`,
+			phoneNumber: '+33 6 12 34 56 78',
+			reference: `sdk-js-${s}`,
+			metadata: { crm: '42' },
 		});
-
-		it('should create payment session with inline product details', async () => {
-			const response = await client.oneTimePayments.createSession({
-				productName: 'Custom Product',
-				description: 'Test product',
-				price: 29.99,
-				customerUUID: createdCustomer?.uuid,
+		try {
+			expect([cust.firstName, cust.metadata.crm]).toEqual(['Ada', '42']);
+			expect(cust.phoneNumber).toBeTruthy();
+			expect((await c.customers.getByReference(`sdk-js-${s}`)).uuid).toBe(cust.uuid);
+			const byEmail = await c.customers.list({ email: cust.email });
+			expect(byEmail.items.map((x) => x.uuid)).toEqual([cust.uuid]);
+			const updated = await c.customers.update(cust.uuid, {
+				lastName: '',
+				phoneNumber: '',
+				metadata: { crm: '' },
 			});
-
-			expect(response.uuid).toBeDefined();
-			expect(response.link).toBeDefined();
-		});
-
-		it('should get payment session', async () => {
-			const created = await client.oneTimePayments.createSession({
-				productId: createdProduct?.id,
-				customerUUID: createdCustomer?.uuid,
-			});
-
-			const session = await client.oneTimePayments.getSession(created.uuid);
-
-			expect(session.uuid).toBe(created.uuid);
-			expect(session.price).toBeGreaterThan(0);
-			expect(session.availableCurrencies.length).toBeGreaterThan(0);
-		});
-
-		it('should get all payments with pagination', async () => {
-			let cursor: string | null = null;
-			const allPayments = [];
-			let pageCount = 0;
-			const maxPages = 3;
-
-			while (pageCount < maxPages) {
-				const page = await client.oneTimePayments.getAll({ limit: 2, cursor });
-				allPayments.push(...page.items);
-
-				if (!page.hasMore()) break;
-				cursor = page.nextCursor;
-				pageCount++;
-			}
-
-			// Pagination must return a well-formed page; the test account may legitimately
-			// have no completed payments, so we assert shape rather than presence of data.
-			expect(Array.isArray(allPayments)).toBe(true);
-		});
-
-		it('should get all combined payments with pagination', async () => {
-			let cursor: string | null = null;
-			const allPayments = [];
-			let pageCount = 0;
-			const maxPages = 2;
-
-			while (pageCount < maxPages) {
-				const page = await client.oneTimePayments.getAllCombined({ limit: 50, cursor });
-				allPayments.push(...page.items);
-
-				if (!page.hasMore()) break;
-				cursor = page.nextCursor;
-				pageCount++;
-			}
-
-			expect(Array.isArray(allPayments)).toBe(true);
-		});
-
-		it('should get customer for a transaction', async () => {
-			// Create a payment session and use its uuid as the transaction reference
-			expect(createdProduct).not.toBeNull();
-			if (!createdProduct) return;
-
-			const session = await client.oneTimePayments.createSession({
-				productId: createdProduct.id,
-				customerUUID: createdCustomer?.uuid,
-			});
-
-			try {
-				const customer = await client.oneTimePayments.getCustomerForTransaction(
-					session.uuid
-				);
-				expect(customer.uuid).toBeDefined();
-			} catch {
-				// Expected if the transaction has not been completed yet
-			}
-		});
+			expect(updated.phoneNumber).toBeUndefined();
+			expect(updated.lastName).toBeUndefined();
+			expect(updated.metadata).toEqual({});
+			expect(updated.email).toBe(cust.email);
+			await c.customers.delete(cust.uuid);
+		} finally {
+			await cleanup(() => c.customers.delete(cust.uuid));
+		}
 	});
 
-	describe('Subscriptions', () => {
-		it('should create subscription session with productId', async () => {
-			expect(createdCustomer).not.toBeNull();
-			if (!createdCustomer) return;
-			expect(createdProduct).not.toBeNull();
-			if (!createdProduct) return;
-
-			const response = await client.subscriptions.createSession({
-				productId: createdProduct.id,
-				frequency: { value: 1, unit: 'months' } as Duration,
-				trialPeriod: { value: 7, unit: 'days' } as Duration,
-				customerUUID: createdCustomer.uuid,
+	it('checkout session: create, status, expire', async () => {
+		if (!allowed) return;
+		let session;
+		try {
+			session = await c.checkoutSessions.createPayment({
+				productName: 'SDK JS test',
+				priceUsd: '1',
+				reference: `sdk-js-order-${suffix()}`,
+				metadata: { orderId: 'sdk-js' },
+				successUrl: 'https://example.com/ok?id={{UUID}}',
+				cancelUrl: 'https://example.com/cancel',
 			});
-
-			expect(response.uuid).toBeDefined();
-			expect(response.link).toBeDefined();
-		});
-
-		it('should create subscription session without trial period', async () => {
-			expect(createdProduct).not.toBeNull();
-			if (!createdProduct) return;
-
-			const response = await client.subscriptions.createSession({
-				productId: createdProduct.id,
-				frequency: { value: 1, unit: 'weeks' } as Duration,
-				customerUUID: createdCustomer?.uuid,
+		} catch (err) {
+			if (err instanceof ConflictError && err.code === 'merchant_not_ready') return; // no currency accepted
+			throw err;
+		}
+		try {
+			expect(session.link).toBeTruthy();
+			expect(session.expiresAt).toBeTruthy();
+			const status = await c.checkoutSessions.get(session.uuid);
+			expect(status.status).toBe('created');
+			expect(status.expiresAt).toBeTruthy();
+			// Nobody pays: the wait times out on the last status seen (not final).
+			const waited = await c.checkoutSessions.waitForCompletion(session.uuid, {
+				timeout: 2_500,
+				interval: 1_000,
 			});
-
-			expect(response.uuid).toBeDefined();
-			expect(response.link).toBeDefined();
-		});
-
-		it('should create subscription session with inline product details', async () => {
-			const response = await client.subscriptions.createSession({
-				productName: 'Monthly Newsletter',
-				description: 'Monthly news digest',
-				price: 4.99,
-				frequency: { value: 1, unit: 'months' } as Duration,
-				customerUUID: createdCustomer?.uuid,
+			expect(waited.status).toBe('created');
+			expect((await c.checkoutSessions.expire(session.uuid)).status).toBe('expired');
+			// Final now: returned at once.
+			expect((await c.checkoutSessions.waitForCompletion(session.uuid)).status).toBe(
+				'expired'
+			);
+			// The payment does not exist (the session expired unpaid): its reference finds nothing.
+			await expect(
+				c.payments.getByReference(`sdk-js-order-none-${suffix()}`)
+			).rejects.toBeInstanceOf(NotFoundError);
+		} finally {
+			await c.checkoutSessions.expire(session.uuid).catch((err: unknown) => {
+				if (!(err instanceof ConflictError) && !(err instanceof NotFoundError)) throw err; // already final
 			});
-
-			expect(response.uuid).toBeDefined();
-			expect(response.link).toBeDefined();
-		});
-
-		it('should get subscription session', async () => {
-			expect(createdProduct).not.toBeNull();
-			if (!createdProduct) return;
-
-			const created = await client.subscriptions.createSession({
-				productId: createdProduct.id,
-				frequency: { value: 1, unit: 'months' } as Duration,
-				customerUUID: createdCustomer?.uuid,
-			});
-
-			const session = await client.subscriptions.getSession(created.uuid);
-
-			expect(session.uuid).toBe(created.uuid);
-			expect(session.price).toBeGreaterThan(0);
-			expect(session.availableCurrencies.length).toBeGreaterThan(0);
-		});
+		}
 	});
 
-	// Pay-as-you-go is temporarily disabled
-	// describe('Pay-as-you-go', () => { ... });
-
-	describe('Transaction Status', () => {
-		it('should get transaction status (or throw NotFoundException if not started)', async () => {
-			expect(createdProduct).not.toBeNull();
-			if (!createdProduct) return;
-
-			const session = await client.oneTimePayments.createSession({
-				productId: createdProduct.id,
-				customerUUID: createdCustomer?.uuid,
+	it('checkout sessions with fees: create, status, expire', async () => {
+		if (!allowed) return;
+		let session;
+		const fees: CheckoutFees = {
+			items: [{ label: 'Shipping', description: 'Standard, 3 to 5 days', amountUsd: '0.75' }],
+			processingFee: true,
+		};
+		try {
+			// The documentation's fees checkout: $3.99 + $0.75 shipping + the processing fee, under
+			// the test-mode cap of $5 (fees included).
+			session = await c.checkoutSessions.createPayment({
+				productName: 'T-shirt',
+				description: 'Blue, size M',
+				priceUsd: '3.99',
+				reference: `order-1044-${suffix()}`,
+				successUrl: 'https://shop.example.com/orders/success?uuid={{UUID}}',
+				cancelUrl: 'https://shop.example.com/orders/cancel',
+				fees,
 			});
+		} catch (err) {
+			if (err instanceof ConflictError && err.code === 'merchant_not_ready') return; // no currency accepted
+			throw err;
+		}
+		try {
+			expect(session.uuid.startsWith('pay@')).toBe(true);
+			expect(session.link).toBeTruthy();
+			expect((await c.checkoutSessions.get(session.uuid)).status).toBe('created');
+			expect((await c.checkoutSessions.expire(session.uuid)).status).toBe('expired');
+		} finally {
+			await c.checkoutSessions.expire(session.uuid).catch((err: unknown) => {
+				if (!(err instanceof ConflictError) && !(err instanceof NotFoundError)) throw err; // already final
+			});
+		}
 
-			try {
-				const status = await client.transactionStatus.get(
-					session.uuid,
-					TransactionType.ONE_TIME_PAYMENT
-				);
-				expect(status.type).toBe(TransactionType.ONE_TIME_PAYMENT);
-			} catch (error) {
-				expect(error).toBeInstanceOf(NotFoundException);
+		// A subscription checkout takes the same fees, charged with every bill.
+		let sub;
+		try {
+			sub = await c.checkoutSessions.createSubscription({
+				productName: 'Pro',
+				description: 'Monthly plan',
+				priceUsd: '3.99',
+				reference: `sub-1044-${suffix()}`,
+				frequency: { value: 1, unit: 'months' },
+				successUrl: 'https://shop.example.com/orders/success?uuid={{UUID}}',
+				cancelUrl: 'https://shop.example.com/orders/cancel',
+				fees,
+			});
+		} catch (err) {
+			if (err instanceof PermissionDeniedError && err.code === 'policy_disabled') {
+				console.warn('subscriptions are off for this member (members.subscriptions)');
+				return;
 			}
-		});
+			throw err;
+		}
+		try {
+			expect(sub.uuid.startsWith('sub@')).toBe(true);
+			expect(sub.link).toBeTruthy();
+		} finally {
+			await c.checkoutSessions.expire(sub.uuid).catch((err: unknown) => {
+				if (!(err instanceof ConflictError) && !(err instanceof NotFoundError)) throw err; // already final
+			});
+		}
 	});
 
-	describe('Refunds', () => {
-		it('should get refund by transaction UUID (or throw NotFoundException)', async () => {
-			try {
-				const refund = await client.refunds.getByTransaction('non-existent-uuid');
-				expect(refund.uuid).toBeDefined();
-			} catch (error) {
-				expect(error).toBeInstanceOf(NotFoundException);
+	it('webhook endpoint: create, get, update, delete', async () => {
+		if (!allowed) return;
+		const created = await c.webhooks.endpoints.create({
+			url: 'https://example.com/qbitflow-sdk-test',
+			events: ['payment.completed'],
+			description: `JS SDK test ${suffix()}`,
+		});
+		try {
+			expect(created.secret).toBeTruthy();
+			const got = await c.webhooks.endpoints.get(created.uuid);
+			expect([got.url, got.includeMembers]).toEqual([created.url, created.includeMembers]);
+			let found = false;
+			for await (const e of c.webhooks.endpoints.iterate({ limit: 1 })) {
+				found = found || e.uuid === created.uuid;
 			}
-		});
-
-		it('should get all active refunds', async () => {
-			const refunds = await client.refunds.getAll();
-			expect(Array.isArray(refunds)).toBe(true);
-		});
-
-		it('should get inactive refunds with pagination', async () => {
-			const result = await client.refunds.getAllInactive({ limit: 10 });
-			expect(Array.isArray(result.items)).toBe(true);
-			expect(typeof result.hasMore).toBe('function');
-		});
+			expect(found).toBe(true);
+			const updated = await c.webhooks.endpoints.update(created.uuid, {
+				description: '',
+				enabled: false,
+			});
+			expect(updated.description).toBeUndefined();
+			expect(updated.disabledAt).toBeTruthy();
+			await c.webhooks.endpoints.delete(created.uuid);
+		} finally {
+			await cleanup(() => c.webhooks.endpoints.delete(created.uuid));
+		}
 	});
 
-	describe('Accounting', () => {
-		it('should export accounting data as JSON', async () => {
-			const events = await client.accounting.export('2024-11-01', '2024-12-31', 'json');
-			expect(Array.isArray(events)).toBe(true);
-		});
-
-		it('should export accounting data as CSV', async () => {
-			const csv = await client.accounting.export('2024-11-01', '2024-12-31', 'csv');
-			expect(typeof csv).toBe('string');
-		});
-	});
-
-	describe('Claims', () => {
-		it('should get claim funds for the organization', async () => {
-			const funds = await client.claims.getFunds();
-			expect(Array.isArray(funds)).toBe(true);
-		});
-
-		it('should create a claim request for a user', async () => {
-			expect(createdUser).not.toBeNull();
-			if (!createdUser) return;
-
-			const result = await client.claims.createRequest(createdUser.id);
-			expect(result.message).toBeDefined();
-			expect(result.link).toBeDefined();
-			expect(result.link).toContain('http');
-		});
-	});
-
-	describe('Validation', () => {
-		it('should throw validation error for empty customer UUID', async () => {
-			await expect(client.customers.get('')).rejects.toThrow();
-		});
-
-		it('should throw validation error for invalid product ID', async () => {
-			await expect(client.products.get(-1)).rejects.toThrow();
-		});
-
-		it('should validate email format', async () => {
-			await expect(client.customers.getByEmail('invalid-email')).rejects.toThrow();
-		});
-
-		it('should validate accounting export requires dates', async () => {
-			await expect(client.accounting.export('', '', 'json')).rejects.toThrow();
-		});
+	it('subscription metadata: set then delete a key on the latest subscription', async () => {
+		if (!allowed) return;
+		const subs = await c.subscriptions.list({ limit: 1 });
+		const sub = subs.items[0];
+		const key = 'sdkJsTest';
+		if (!sub || key in sub.metadata) return; // nothing to update
+		let updated;
+		try {
+			updated = await c.subscriptions.update(sub.uuid, { metadata: { [key]: suffix() } });
+		} catch (err) {
+			if (err instanceof PermissionDeniedError && err.code === 'policy_disabled') {
+				console.warn('subscriptions are off for this member (members.subscriptions)');
+				return;
+			}
+			throw err;
+		}
+		try {
+			expect(updated.metadata[key]).toBeTruthy();
+			expect(Object.keys(updated.metadata)).toHaveLength(
+				Object.keys(sub.metadata).length + 1
+			);
+		} finally {
+			await c.subscriptions.update(sub.uuid, { metadata: { [key]: '' } });
+		}
 	});
 });
