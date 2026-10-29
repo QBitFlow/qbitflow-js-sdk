@@ -44,8 +44,8 @@ export interface CheckoutSessionStatus {
 	 */
 	lastAttempt?: Attempt;
 	/**
-	 * When the checkout can no longer be paid, while it is open (on `expire`'s answer: when it was
-	 * expired); absent once completed, or expired at its time.
+	 * When the checkout can no longer be paid, while it is open (on `expire`'s first answer: when it
+	 * was expired); absent once completed, expired at its time, or on a repeated `expire`.
 	 */
 	expiresAt?: string;
 }

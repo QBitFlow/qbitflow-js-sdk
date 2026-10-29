@@ -68,8 +68,8 @@ if (!subscriptionUuid) {
 
 {
 	// docs:start has-access
-	// Grant access while now < currentPeriodEnd, whatever the status: a stopped or paused
-	// subscription has paid for its period.
+	// Grant access while now < accessUntil, whatever the status: a stopped or paused
+	// subscription has paid for its period, and an active one keeps it while its renewal is billed.
 	const subscription = await client.subscriptions.get(subscriptionUuid);
 	if (hasAccess(subscription)) {
 		console.log('serve the premium content');

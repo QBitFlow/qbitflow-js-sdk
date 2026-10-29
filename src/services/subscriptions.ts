@@ -26,7 +26,7 @@ import { checkPathTxId } from '../validate.js';
  * Reads subscriptions and their bills, updates their metadata, cancels them, and runs a test
  * bill (`/subscriptions…`, `/bills…`). Reach it as `client.subscriptions`.
  *
- * Grant access while `now < subscription.currentPeriodEnd`, whatever the status
+ * Grant access while `now < subscription.accessUntil`, whatever the status
  * (`hasAccess(subscription)`).
  */
 export class SubscriptionsService {

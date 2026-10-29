@@ -215,7 +215,7 @@ export interface EventEnvelope<T extends string, D> {
 export type PaymentCompletedEvent = EventEnvelope<'payment.completed', PaymentCompleted>;
 /**
  * `subscription.created`: the subscription (status `active`, or `trial`), as `subscriptions.get`
- * returns it, its `managementPageLink` included. Grant access until `currentPeriodEnd`.
+ * returns it, its `managementPageLink` included. Grant access until `accessUntil` (`hasAccess`).
  */
 export type SubscriptionCreatedEvent = EventEnvelope<'subscription.created', Subscription>;
 /** `subscription.billed`: the bill paid and its subscription (`data.bill`, `data.subscription`). */

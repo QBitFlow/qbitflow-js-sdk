@@ -613,7 +613,8 @@ mode needs `https` redirect and webhook URLs. Check the mode at start-up with
 
 ### Subscriptions and access
 
-**Grant access while `now < currentPeriodEnd`**, whatever the status: a check like
+**Grant access while `now < accessUntil`** (from 3.1.0; `currentPeriodEnd`, plus an hour for an
+`active` subscription while its renewal is billed), whatever the status: a check like
 `status === 'active'` cuts off customers who paid (`stopped`, `paused`) and keeps serving
 `pastDue` ones. `hasAccess(subscription)` applies the rule.
 
@@ -637,7 +638,7 @@ fulfil on `payment.completed`, release the order on `checkout.expired`.
 - [ ] Webhook route reads the raw body and verifies with `webhooks.router` or
   `webhooks.constructEvent`; handlers deduplicate on `event.id`; endpoint and secret created for
   v2.
-- [ ] Subscription access checks use `currentPeriodEnd` (`hasAccess`).
+- [ ] Subscription access checks use `accessUntil` (`hasAccess`).
 - [ ] Tested end to end with a test-mode key, then deployed with the live key.
 
 Questions? Email [support@qbitflow.app](mailto:support@qbitflow.app). The

@@ -17,7 +17,8 @@ async function invite(client: QBitFlow): Promise<void> {
 		organizationFeePercent: '10', // your commission on their payments: '0' to '50' %
 		redirectUrl: 'https://shop.example.com/sellers/welcome',
 	});
-	// The link is also emailed. They are a member once they accepted (the member.joined webhook).
+	// QBitFlow also emails them a link of their own. They are a member once they accepted (the
+	// member.joined webhook).
 	console.log(`invitation ${created.uuid}: ${created.link}`);
 	// docs:end members-invite
 }
@@ -116,10 +117,15 @@ async function manage(client: QBitFlow, memberUuid: string): Promise<void> {
 
 	if (process.env.TRUST === '1') {
 		// docs:start members-trust
-		// Their new payments go to their own wallets directly. What is already held stays held
-		// until you release it from the dashboard (heldFunds.released tells you).
-		const trusted = await client.members.trust(memberUuid);
-		console.log(`trusted since ${trusted.trustedAt}`);
+		// Their new payments go to their own wallets directly (one-way). What is already held stays
+		// held until you release it from the dashboard (heldFunds.released tells you).
+		try {
+			const trusted = await client.members.trust(memberUuid);
+			console.log(`trusted since ${trusted.trustedAt}`);
+		} catch (err) {
+			if (!(err instanceof ConflictError && err.code === 'member_has_no_wallet')) throw err;
+			console.log('not trusted: their own wallets accept none of your currencies yet');
+		}
 		// docs:end members-trust
 	}
 

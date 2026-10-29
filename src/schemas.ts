@@ -431,6 +431,7 @@ const subscriptionFields: Fields<Subscription> = {
 	status: enumString<SubscriptionStatus>(),
 	actionRequired: optional(enumString<ActionRequired>()),
 	currentPeriodEnd: optTimestamp,
+	accessUntil: optTimestamp,
 	priceUsd: string,
 	fees: list(FeeLineSchema),
 	allowance: optional(AllowanceSchema),
@@ -742,6 +743,9 @@ export const EndpointDeliverySchema = object<EndpointDelivery>({
 	url: string,
 	delivered: boolean,
 	attempts: list(DeliveryAttemptSchema),
+	pending: boolean,
+	nextAttemptAt: optTimestamp,
+	waitingFor: optString,
 });
 
 // ── Webhook event data ──────────────────────────────────────────────────────

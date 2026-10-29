@@ -2,10 +2,11 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { EventType, FeeLineType, LedgerEntryType } from '../src/enums';
-import { ValidationError } from '../src/errors';
+import { ServerError, ValidationError } from '../src/errors';
 import { hasAccess } from '../src/helpers';
 import type { Event, KnownEvent } from '../src/models/events';
 import type { Refund } from '../src/models/refunds';
+import type { EndpointDelivery } from '../src/models/webhooks';
 import { EVENT_DATA_SCHEMAS, EventDetailSchema } from '../src/schemas';
 import { decodeResponse } from '../src/transport';
 import {
@@ -140,9 +141,13 @@ describe('typed data', () => {
 			created.allowance?.maxPerPeriodMinUnits,
 		]).toEqual(['110', 11, '30000000']);
 		expect(created.dunning).toBeUndefined();
+		// Active: access runs to accessUntil, an hour past currentPeriodEnd (the renewal on its way).
 		const end = Date.parse(created.currentPeriodEnd ?? '');
+		const until = Date.parse(created.accessUntil ?? '');
+		expect(until - end).toBe(3_600_000);
 		expect(hasAccess(created, new Date(Date.UTC(2026, 9, 30)))).toBe(true);
-		expect(hasAccess(created, new Date(end))).toBe(false);
+		expect(hasAccess(created, new Date(end))).toBe(true);
+		expect(hasAccess(created, new Date(until))).toBe(false);
 
 		// subscription.billed is nested: {bill, subscription}.
 		const { bill, subscription } = eventData(
@@ -471,5 +476,55 @@ describe('the event log', () => {
 		expect([a[0].statusCode, a[0].skipped]).toEqual([500, false]);
 		expect([a[1].statusCode, a[1].skipped]).toEqual([undefined, true]);
 		expect(a[1].durationMs).toBe(30000);
+	});
+
+	const decodeDetail = (body: string) =>
+		decodeResponse(EventDetailSchema, {
+			status: 200,
+			headers: new Headers(),
+			body,
+		}) as unknown as {
+			deliveries: EndpointDelivery[];
+		};
+
+	it('tells the deliveries still in progress', () => {
+		const attempt = (uuid: string, delivered: boolean, statusCode: number): string =>
+			`{"uuid":"${uuid}","attempt":1,"delivered":${delivered},"statusCode":${statusCode},` +
+			'"durationMs":40,"attemptedAt":"2026-10-01T12:00:01Z"}';
+		const d = decodeDetail(
+			'{"id":"evt_2","type":"subscription.billed","version":"v2","data":{},"deliveries":[' +
+				`{"endpointUuid":"e1","url":"https://x.io","delivered":false,"attempts":[${attempt('a1', false, 503)}],` +
+				'"pending":true,"nextAttemptAt":"2026-10-01T12:05:01Z"},' +
+				'{"endpointUuid":"e2","url":"https://y.io","delivered":false,"attempts":[],"pending":true,"waitingFor":"evt_1"},' +
+				'{"endpointUuid":"e3","url":"https://z.io","delivered":false,"attempts":[],"pending":true},' +
+				`{"endpointUuid":"e4","url":"https://w.io","delivered":true,"attempts":[${attempt('a2', true, 200)}],"pending":false},` +
+				'{"endpointUuid":"e5","url":"https://v.io","delivered":false,"attempts":null}]}'
+		);
+		const progress = d.deliveries.map(({ pending, nextAttemptAt, waitingFor, attempts }) => [
+			pending,
+			nextAttemptAt,
+			waitingFor,
+			attempts.length,
+		]);
+		expect(progress).toEqual([
+			[true, '2026-10-01T12:05:01Z', undefined, 1], // retried
+			[true, undefined, 'evt_1', 0], // queued behind an earlier event of its publication
+			[true, undefined, undefined, 0], // about to start
+			[false, undefined, undefined, 1], // delivered
+			[false, undefined, undefined, 0], // no pending: a server before it
+		]);
+		expect('nextAttemptAt' in d.deliveries[1]).toBe(false);
+		expect('waitingFor' in d.deliveries[0]).toBe(false);
+	});
+
+	it.each([
+		['pending', '"pending":"true"'],
+		['nextAttemptAt', '"nextAttemptAt":"soon"'],
+		['waitingFor', '"waitingFor":1'],
+	])('refuses a delivery whose %s has the wrong JSON type', (_name, field) => {
+		const body =
+			'{"id":"evt_2","type":"webhook.test","version":"v2","data":{},' +
+			`"deliveries":[{"endpointUuid":"e1",${field}}]}`;
+		expect(thrown(() => decodeDetail(body))).toBeInstanceOf(ServerError);
 	});
 });

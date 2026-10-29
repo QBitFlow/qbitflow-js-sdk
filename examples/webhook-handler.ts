@@ -69,7 +69,7 @@ router
 	})
 	.on('subscription.created', (sub) => {
 		console.log(
-			`subscription ${sub.uuid} created (${sub.status}), access: ${hasAccess(sub)} until ${sub.currentPeriodEnd ?? '—'}`
+			`subscription ${sub.uuid} created (${sub.status}), access: ${hasAccess(sub)} until ${sub.accessUntil ?? '—'}`
 		);
 	})
 	.on('subscription.billed', ({ bill, subscription }) => {

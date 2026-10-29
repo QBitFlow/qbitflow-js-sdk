@@ -208,6 +208,46 @@ describe('hasAccess', () => {
 		expect(hasAccess(sub(future))).toBe(true);
 		expect(hasAccess(sub(past))).toBe(false);
 	});
+
+	describe('accessUntil', () => {
+		const UNTIL = '2026-11-01T01:00:00Z'; // END + 1 hour: an active subscription's
+		const withUntil = (accessUntil: string | undefined, currentPeriodEnd = END): Subscription =>
+			({
+				uuid: 'sub@x',
+				status: 'active',
+				currentPeriodEnd,
+				accessUntil,
+			}) as unknown as Subscription;
+
+		it('keeps an active subscription between currentPeriodEnd and accessUntil', () => {
+			const s = withUntil(UNTIL);
+			expect(hasAccess(s, new Date('2026-10-31T23:59:59.999Z'))).toBe(true);
+			expect(hasAccess(s, new Date(END))).toBe(true);
+			expect(hasAccess(s, new Date('2026-11-01T00:30:00Z'))).toBe(true);
+			expect(hasAccess(s, new Date('2026-11-01T00:59:59.999Z'))).toBe(true);
+			expect(hasAccess(s, new Date(UNTIL))).toBe(false); // equal: no access
+			expect(hasAccess(s, new Date('2026-11-01T01:00:00.001Z'))).toBe(false);
+		});
+
+		it('decides when set, even before currentPeriodEnd', () => {
+			const s = withUntil('2026-10-31T23:00:00Z');
+			expect(hasAccess(s, new Date('2026-10-31T23:30:00Z'))).toBe(false);
+			expect(hasAccess({ accessUntil: UNTIL }, new Date(END))).toBe(true);
+		});
+
+		it('falls back to currentPeriodEnd when absent (stored before it existed)', () => {
+			for (const absent of [undefined, '', null as unknown as string]) {
+				const s = withUntil(absent);
+				expect(hasAccess(s, new Date('2026-10-31T23:59:59.999Z'))).toBe(true);
+				expect(hasAccess(s, new Date(END))).toBe(false);
+				expect(hasAccess(s, new Date('2026-11-01T00:30:00Z'))).toBe(false);
+			}
+		});
+
+		it('is false for an unparsable accessUntil (no fallback)', () => {
+			expect(hasAccess(withUntil('soon'), new Date('2026-10-01T00:00:00Z'))).toBe(false);
+		});
+	});
 });
 
 // ── H5 ─────────────────────────────────────────────────────────────────────
