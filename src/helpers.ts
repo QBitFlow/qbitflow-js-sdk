@@ -24,16 +24,18 @@ export const Placeholders = {
 } as const;
 
 /**
- * Whether a subscription grants access at `at` (default now): its `currentPeriodEnd` is set and
- * `at` is before it, whatever its status (a cancelled subscription keeps the period paid for).
- * Works on every model carrying `currentPeriodEnd` (a `Subscription`, the data of the
- * `subscription.*` events).
+ * Whether a subscription grants access at `at` (default now): `at` is before its `accessUntil`,
+ * whatever its status (a cancelled subscription keeps the period paid for; an `active` one an hour
+ * past `currentPeriodEnd`, while its renewal is billed). Without `accessUntil` (a subscription
+ * stored before the API sent it), it reads `currentPeriodEnd`. False when neither is set. Works on
+ * every model carrying them (a `Subscription`, the data of the `subscription.*` events).
  */
 export function hasAccess(
-	subscription: Pick<Subscription, 'currentPeriodEnd'>,
+	subscription: Pick<Subscription, 'accessUntil' | 'currentPeriodEnd'>,
 	at: Date = new Date()
 ): boolean {
-	const end = subscription?.currentPeriodEnd;
+	const until = subscription?.accessUntil;
+	const end = typeof until === 'string' && until !== '' ? until : subscription?.currentPeriodEnd;
 	if (typeof end !== 'string' || end === '') return false;
 	const endMs = Date.parse(end);
 	const atMs = at instanceof Date ? at.getTime() : Number.NaN;

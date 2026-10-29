@@ -141,9 +141,13 @@ describe('typed data', () => {
 			created.allowance?.maxPerPeriodMinUnits,
 		]).toEqual(['110', 11, '30000000']);
 		expect(created.dunning).toBeUndefined();
+		// Active: access runs to accessUntil, an hour past currentPeriodEnd (the renewal on its way).
 		const end = Date.parse(created.currentPeriodEnd ?? '');
+		const until = Date.parse(created.accessUntil ?? '');
+		expect(until - end).toBe(3_600_000);
 		expect(hasAccess(created, new Date(Date.UTC(2026, 9, 30)))).toBe(true);
-		expect(hasAccess(created, new Date(end))).toBe(false);
+		expect(hasAccess(created, new Date(end))).toBe(true);
+		expect(hasAccess(created, new Date(until))).toBe(false);
 
 		// subscription.billed is nested: {bill, subscription}.
 		const { bill, subscription } = eventData(

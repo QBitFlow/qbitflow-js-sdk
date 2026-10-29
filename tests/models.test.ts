@@ -509,6 +509,7 @@ describe('optional fields', () => {
 			'cancellableAt',
 			'dunning',
 			'actionRequired',
+			'accessUntil',
 		]) {
 			expect(absent in sub).toBe(false);
 		}

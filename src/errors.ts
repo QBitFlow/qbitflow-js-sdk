@@ -186,7 +186,7 @@ export class NotFoundError extends ApiError {
 
 /**
  * A 409 (`unique_violation` with `details.field`, `tx_already_sent`, `merchant_not_ready` with
- * `details.reason`, `held_funds_pending`, `already_joined`, `payment_not_due`,
+ * `details.reason`, `held_funds_pending`, `member_has_no_wallet`, `already_joined`, `payment_not_due`,
  * `subscription_already_stopped_or_inactive`, `conflict`, `idempotency_key_in_use`, …).
  */
 export class ConflictError extends ApiError {

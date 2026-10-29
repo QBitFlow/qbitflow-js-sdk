@@ -22,7 +22,7 @@ import type {
 } from './common.js';
 
 /**
- * A subscription (`sub@…`). Grant access while `now < currentPeriodEnd`, whatever the status
+ * A subscription (`sub@…`). Grant access while `now < accessUntil`, whatever the status
  * (`hasAccess(subscription)`): the status says why, `actionRequired` what its customer must do.
  */
 export interface Subscription {
@@ -69,12 +69,22 @@ export interface Subscription {
 	 */
 	actionRequired?: ActionRequired;
 	/**
-	 * The paid-through date: grant access while `now < currentPeriodEnd`, whatever the status. A
-	 * trial: its end; `active`, `paused`, `stopped`: the end of the period paid for; `pastDue`: the
-	 * start of the unpaid period (past); `cancelled`: when it was cancelled, or the end of its last
-	 * paid period if that came first. Absent when unknown.
+	 * The paid-through date, to display ("paid through"). A trial: its end; `active`, `paused`,
+	 * `stopped`: the end of the period paid for; `pastDue`: the start of the unpaid period (past);
+	 * `cancelled`: when it was cancelled, or the end of its last paid period if that came first.
+	 * For access, read `accessUntil`: an active subscription is renewed a few minutes after this
+	 * date. Absent when unknown.
 	 */
 	currentPeriodEnd?: string;
+	/**
+	 * When access ends: grant it while `now < accessUntil`, whatever the status
+	 * (`hasAccess(subscription)`). An `active` subscription: `currentPeriodEnd` plus 1 hour, since
+	 * its renewal is billed within minutes of its due date (a subscriber whose bill is on its way
+	 * keeps access; a failed bill makes it `pastDue`). Every other status: `currentPeriodEnd`.
+	 * Absent on a subscription stored before the API sent it (`hasAccess` then reads
+	 * `currentPeriodEnd`).
+	 */
+	accessUntil?: string;
 	/**
 	 * The price per period the customer subscribed at, in USD (a decimal string, `"9.99"`), locked
 	 * at signup (a free trial's too); never `"0"`. Every bill charges it plus `fees`, converted to

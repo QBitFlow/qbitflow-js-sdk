@@ -431,6 +431,7 @@ const subscriptionFields: Fields<Subscription> = {
 	status: enumString<SubscriptionStatus>(),
 	actionRequired: optional(enumString<ActionRequired>()),
 	currentPeriodEnd: optTimestamp,
+	accessUntil: optTimestamp,
 	priceUsd: string,
 	fees: list(FeeLineSchema),
 	allowance: optional(AllowanceSchema),

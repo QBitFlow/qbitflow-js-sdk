@@ -224,8 +224,9 @@ export interface Invitation {
  */
 export interface CreatedInvitation extends Invitation {
 	/**
-	 * The link to accept it, also emailed to the person unless `sendEmail` was `false`: share it
-	 * in your own onboarding if you prefer.
+	 * A link to accept it, to share in your own onboarding if you prefer (with `sendEmail` `false`,
+	 * the only one). Signing up through it emails the person a confirmation first. The link
+	 * QBitFlow emails has its own token, never returned: it differs from this one.
 	 */
 	link: string;
 }
@@ -253,9 +254,9 @@ export interface CreateInvitationParams {
 	 */
 	redirectUrl?: string;
 	/**
-	 * Whether QBitFlow emails the link to the person (absent = `true`). `false` sends no
-	 * invitation email: share the returned `link` yourself. Signing up through the link still
-	 * emails the person a confirmation.
+	 * Whether QBitFlow emails the person a link of their own (absent = `true`; signing up through it
+	 * needs no confirmation: it proves the inbox). `false` sends no invitation email: share the
+	 * returned `link` yourself (signing up through it emails the person a confirmation first).
 	 */
 	sendEmail?: boolean;
 }

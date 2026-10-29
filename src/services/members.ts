@@ -98,7 +98,7 @@ export class MembersService {
 	 * organization. Organization key only. Not retried.
 	 *
 	 * Errors: 409 `held_funds_pending` while the organization holds live funds for them (release
-	 * them in the dashboard first).
+	 * them from the dashboard first).
 	 */
 	async remove(userUuid: string, options?: RequestOptions): Promise<void> {
 		checkPathUUID('userUuid', userUuid);
@@ -113,6 +113,13 @@ export class MembersService {
 	 * (`POST /members/:userUuid/trust`) and returns the member with `trustedAt` set. What the
 	 * organization already holds for them stays held until released (in the dashboard).
 	 * Organization key only. Not retried.
+	 *
+	 * Trust is one-way (there is no untrust) and narrows the member's `acceptedCurrencies` to their
+	 * own wallets' (within the organization's). Trusting a trusted member changes nothing.
+	 *
+	 * Errors: 409 `member_has_no_wallet` (a `ConflictError`) when the member's own wallets accept
+	 * none of the organization's currencies: nothing changes (they stay held, their checkouts keep
+	 * working); trust them once they've added a wallet.
 	 */
 	async trust(userUuid: string, options?: RequestOptions): Promise<Member> {
 		checkPathUUID('userUuid', userUuid);
@@ -166,8 +173,8 @@ export class InvitationsService {
 
 	/**
 	 * Invites someone to join the organization as a member in the key's mode
-	 * (`POST /invitations`, 201) and returns the invitation with its `link` (also emailed, unless
-	 * `sendEmail` is `false`). The SDK always sends role `user`: the team is invited from the
+	 * (`POST /invitations`, 201) and returns the invitation with its `link` (QBitFlow also emails
+	 * the person a link of their own, unless `sendEmail` is `false`). The SDK always sends role `user`: the team is invited from the
 	 * dashboard. Sends an `Idempotency-Key` and is retried on transient failures. Organization key
 	 * only; rate limited (50 an hour per organization, emailed or not: beyond, a `RateLimitError`
 	 * at once, the wait being over the SDK's 60 s retry cap).

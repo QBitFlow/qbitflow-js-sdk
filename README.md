@@ -153,7 +153,8 @@ never on the customer's redirect to your success page.
   percent (`feePercent: '0.99'` is 0.99 %, `refundPercent: '50'`). Inputs are checked before
   sending: at most 2 decimals, no sign or exponent (`'12.50'` is fine; a JSON number would be
   refused by the API). Compare or add them with a decimal library, or `formatAmount` /
-  `parseAmount`.
+  `parseAmount`. They come back canonical (`'12.50'` reads back `'12.5'`, `'12.00'` as `'12'`):
+  compare amounts as decimals, never as strings.
 - **Metadata:** products, customers, checkouts and subscriptions carry `metadata`, your own
   `Record<string, string>` (an order id, a CRM key): at most 50 keys of 1 to 40 characters among
   `A-Z a-z 0-9 _ - . :`, values of at most 500 characters without control or bidirectional
@@ -302,14 +303,16 @@ if (final.status === CheckoutSessionStatusValue.Completed) {
 
 ### Access control
 
-Grant access while `now < currentPeriodEnd`, whatever the subscription's status: `hasAccess`
-does exactly that. `hasAccess(subscription, at)` checks at a given time, and it takes the
+Grant access while `now < accessUntil`, whatever the subscription's status: the end of the period
+paid for, plus an hour for an `active` one, since its renewal is billed within minutes of its due
+date. `hasAccess` does exactly that, reading `currentPeriodEnd` for a subscription you stored before
+the API sent `accessUntil`. `hasAccess(subscription, at)` checks at a given time, and it takes the
 subscription the `subscription.*` webhooks carry (`event.data`) too.
 
 <!-- docs:snippet has-access -->
 ```ts
-// Grant access while now < currentPeriodEnd, whatever the status: a stopped or paused
-// subscription has paid for its period.
+// Grant access while now < accessUntil, whatever the status: a stopped or paused
+// subscription has paid for its period, and an active one keeps it while its renewal is billed.
 const subscription = await client.subscriptions.get(subscriptionUuid);
 if (hasAccess(subscription)) {
 	console.log('serve the premium content');
@@ -433,7 +436,8 @@ to switch per request.
   be `http` (a local shop), subscriptions are billed only when you call
   [`subscriptions.testBill`](#test-billing), and the frequency may be as short as 5 minutes.
 - **Live mode** needs `https` redirect and webhook URLs, a live subscription's price above
-  `'0.25'` USD, and a frequency of at least 1 hour. `subscriptions.testBill` answers a
+  `'0.25'` USD, and a frequency of at least 1 hour (a development server lowers it to 1 minute;
+  production never does). `subscriptions.testBill` answers a
   `BadRequestError` `test_mode_only`.
 - Webhook endpoints, members, invitations, products and customers are per mode too. Every event
   says its mode (`event.test`), and `currencies.list({ test: true })` lists the test networks'
@@ -484,6 +488,12 @@ console.log(`Redirect the customer to ${session.link}`);
 ```
 <!-- /docs:snippet -->
 
+- **Products and checkout kinds.** A payment checkout of a subscription product sells it **once**,
+  at its price (its terms are ignored, nothing recurs). A subscription checkout of a one-time
+  product needs `frequency`, else a `ValidationError` on `frequency` naming the product. An inline
+  product of a **subscription** checkout creates a hidden product (`isActive: false`), reused by
+  the next checkouts with the same name, description and price (`products.list({ includeHidden:
+  true })` shows it); a payment's inline product creates none.
 - **Other fields:** `reference` (your order id, unique per space), `customerUuid` or
   `customerReference` (kept on the payment; **no receipt without a QBitFlow customer**: see
   [Products and customers](#products-and-customers)), `expiresInMinutes` (10 to 1440; left out: the
@@ -612,8 +622,9 @@ scripts, tests and back-office jobs: [fulfil orders on the webhook](#integration
 ### Expire
 
 End a session early (an order cancelled on your side). It answers its status (`expired`,
-`expiresAt` the time you expired it), and `checkout.expired` follows. Once the customer paid or is paying it is a `ConflictError`
-`tx_already_sent`.
+`expiresAt` the time you expired it), and `checkout.expired` follows. Expiring it again answers
+`expired` too, without `expiresAt` (only the first answer has it). Once the customer paid or is
+paying it is a `ConflictError` `tx_already_sent`.
 
 <!-- docs:snippet checkout-expire -->
 ```ts
@@ -626,8 +637,9 @@ console.log(`checkout ${expired.status}`); // expired
 
 ## Products and customers
 
-Products are optional (a checkout can name an inline product) and give you a reusable catalog
-with payment links. A subscription product carries its terms
+Products are optional for payments (a payment checkout can name an inline product; a
+subscription checkout's inline product becomes a hidden product: [Checkout sessions](#checkout-sessions))
+and give you a reusable catalog with payment links. A subscription product carries its terms
 (`subscription: { frequency: { value: 1, unit: DurationUnit.Months } }`). A member's key gives a
 product terms (on `create` or `update`) only while the organization's `members.subscriptions`
 policy allows it (`403 policy_disabled` otherwise); with the policy off, the links of the
@@ -802,9 +814,13 @@ the free trial. It keeps the checkout's `sub@…` id for life.
 | `stopped` | Cancelled during its period: never billed again, `cancelled` at `nextBillingAt` |
 | `cancelled` | Over (`cancellationReason` says why). Final |
 
-**Access rule: grant access while `now < currentPeriodEnd`, whatever the status.** A `stopped` or
-`paused` subscription has paid for its period; a `pastDue` one's period has ended.
-`hasAccess(sub, at?)` (exported by `qbitflow`) applies it: see [Access control](#access-control).
+**Access rule: grant access while `now < accessUntil`, whatever the status.** `accessUntil` is
+`currentPeriodEnd` (the paid-through date), plus 1 hour for an `active` subscription: QBitFlow
+bills a renewal within minutes of its due date, so checking `currentPeriodEnd` would cut every
+subscriber off for those minutes at each renewal (show it as "paid through", don't gate on it). A
+`stopped` or `paused` subscription has paid for its period; a `pastDue` one's period has ended.
+`hasAccess(sub, at?)` (exported by `qbitflow`) applies it, reading `currentPeriodEnd` for a
+subscription stored before `accessUntil` existed: see [Access control](#access-control).
 
 `actionRequired` says what the customer must do (`topUpAllowance`, `raiseMaximum`,
 `confirmTrial`; absent: nothing): point them to the subscription's `managementPageLink`.
@@ -812,7 +828,9 @@ the free trial. It keeps the checkout's `sub@…` id for life.
 A subscription's price is locked at signup: `priceUsd` plus its `fees` lines, every bill. Its
 `allowance` (absent during a trial) is what the subscriber's wallet still lets QBitFlow bill
 (`amount`, `amountMinUnits`, `amountUsd`), how many bills that covers (`remainingPeriods`) and the
-most one bill may charge (`maxPerPeriod`). `lastBilledAt`, `nextBillingAt` and `cancellableAt` are
+most one bill may charge (`maxPerPeriod`). `remainingPeriods` counts bills before each bill's
+network fee, so it is usually higher than the checkout's "N payments" (an estimate that kept room
+for network fees). `lastBilledAt`, `nextBillingAt` and `cancellableAt` are
 absent when they don't apply; `metadata` is your own data, copied from its checkout.
 
 <!-- docs:snippet subscriptions-get -->
@@ -976,14 +994,16 @@ const created = await client.invitations.create({
 	organizationFeePercent: '10', // your commission on their payments: '0' to '50' %
 	redirectUrl: 'https://shop.example.com/sellers/welcome',
 });
-// The link is also emailed. They are a member once they accepted (the member.joined webhook).
+// QBitFlow also emails them a link of their own. They are a member once they accepted (the
+// member.joined webhook).
 console.log(`invitation ${created.uuid}: ${created.link}`);
 ```
 <!-- /docs:snippet -->
 
 The answer is a `CreatedInvitation`: the invitation's fields and its `link` (only here).
-`sendEmail: false` creates the invitation without emailing it: share `link` in your own
-onboarding (signing up through it still emails the person a confirmation). A `ConflictError`
+QBitFlow emails the person a link of their own (another token, never returned), so don't compare
+it with `link`. `sendEmail: false` creates the invitation without emailing it: share `link` in your
+own onboarding (signing up through it still emails the person a confirmation). A `ConflictError`
 `already_joined` for a member; a `RateLimitError` beyond 50 invitations an hour, emailed or not
 (raised at once: the wait is over the SDK's 60 s retry cap).
 
@@ -1019,8 +1039,10 @@ a subscription checkout in their space answers a `ConflictError` `merchant_not_r
 **4. Hear of every sale.** An organization webhook endpoint receives every seller's events by
 default; the event's `userUuid` names the seller. Use it as `onBehalfOf` for follow-up reads.
 
-**5. Commission and held funds.** Each payment records your fee in `settlement.organizationFee`
-and `settlement.split.organization`. While you hold a seller's funds (`holdFunds` true,
+**5. Commission and held funds.** Your commission is taken on what remains after QBitFlow's fee:
+`(amount − QBitFlow's fee) × organizationFeePercent / 100`, rounded down, the seller getting the
+rest (on $7.50 at 0.5 % and 10 %: QBitFlow 0.0375, you 0.74625, the seller 6.71625). Each payment
+records it in `settlement.organizationFee` and `settlement.split.organization`. While you hold a seller's funds (`holdFunds` true,
 `Member.trustedAt` absent), their payments go to your wallet and the net is owed to them
 (`HeldFunds.totalUsd`, each `LedgerEntry` with what it counts for: `owed`, `owedMinUnits`,
 `owedUsd`, negative on a refund line):
@@ -1046,14 +1068,21 @@ console.log(`held for this member: ${held.totalUsd} USD`);
 <!-- /docs:snippet -->
 
 Trust them, and their new payments go to their own wallets. What is held stays held until you
-release it from the dashboard (`heldFunds.released` tells you):
+release it from the dashboard (`heldFunds.released` tells you). Trust is one-way and narrows the
+seller's currencies to their own wallets': a seller whose wallets accept none of yours is a
+`ConflictError` `member_has_no_wallet` (nothing changes; trust them once they've added one):
 
 <!-- docs:snippet members-trust -->
 ```ts
-// Their new payments go to their own wallets directly. What is already held stays held
-// until you release it from the dashboard (heldFunds.released tells you).
-const trusted = await client.members.trust(memberUuid);
-console.log(`trusted since ${trusted.trustedAt}`);
+// Their new payments go to their own wallets directly (one-way). What is already held stays
+// held until you release it from the dashboard (heldFunds.released tells you).
+try {
+	const trusted = await client.members.trust(memberUuid);
+	console.log(`trusted since ${trusted.trustedAt}`);
+} catch (err) {
+	if (!(err instanceof ConflictError && err.code === 'member_has_no_wallet')) throw err;
+	console.log('not trusted: their own wallets accept none of your currencies yet');
+}
 ```
 <!-- /docs:snippet -->
 
@@ -1074,7 +1103,7 @@ console.log(`fee now ${updated.organizationFeePercent} %`);
   complete the reads.
 - `members.remove` ends a seller's membership in the key's mode: their keys stop working and their
   checkouts close (`204`). It is a `409 held_funds_pending` while you hold their live funds:
-  release them first.
+  release them from the dashboard first.
 - `invitations.list` / `iterate` (by `status`; member invitations only, the team's being managed
   from the dashboard) and `invitations.revoke` (`204`, resolves to `void`) manage the invitations.
 - A seller who already uses QBitFlow joins with the same account: accepting while it belongs to
@@ -1329,7 +1358,7 @@ like a comparison, and `webhooks.eventData(event, type)` returns the typed data 
 | `subscription.statusChanged` | the `Subscription` + `previousStatus` |
 | `subscription.actionRequiredChanged` | the `Subscription` + `previousActionRequired` |
 | `subscription.billingFailed` | the `Subscription` + `reason`, `billUuid`, `amountUsd` (a string), `attempt`, `remainingAttempts`, `nextAttemptAt` |
-| `subscription.upcomingBill` | the `Subscription` + `billingAt`, `amountUsd` (a string), `trialEnding`, `balanceSufficient`, `allowanceSufficient` |
+| `subscription.upcomingBill` | the `Subscription` + `billingAt`, `amountUsd` (a string), `trialEnding`, `balanceSufficient`, `allowanceSufficient`. Sent the dashboard's `subscriptions.upcomingBillDays` before the bill (3 days by default, 0 = never), checked daily; not for a subscription whose period (a trial: the trial) is no longer than that |
 | `refund.requested` / `.approved` / `.rejected` | the `Refund` (`refund.approved` and `refund.rejected` were `refund.completed` and `refund.denied`) |
 | `member.joined` | the `Member` + `invitationUuid` |
 | `member.removed` | the `Member` |
@@ -1384,6 +1413,10 @@ disabled or deleted. If QBitFlow can't read a delivery's progress at that moment
 from the attempts: true while the retry schedule still attempts the event again (a delivery being
 retried never reads as abandoned), without `nextAttemptAt`; a delivery queued with no attempt yet
 isn't listed until its progress can be read: read the event again a moment later.
+
+A member's deliveries to your organization's endpoints show from the organization:
+`webhooks.events.list({ includeMembers: true })`, then `get`. Read on behalf of the member, the
+event lists only the member's own endpoints (`deliveries: []` without any).
 
 ## Currencies
 
@@ -1474,7 +1507,7 @@ builds, even with two copies of the package installed):
 | `AuthenticationError` | 401 | a missing, unknown, expired or revoked key (a removed member's keys too) |
 | `PermissionDeniedError` | 403 | `forbidden` (no details): the key's role may not do it (an admin method with a member's key or `onBehalfOf`), or the resource is another's. `policy_disabled`: a member's key doing what its organization's policy doesn't allow; `details.policy` names the policy, and `details.field` the request field it governs (a checkout's `successUrl` / `cancelUrl` under `members.checkoutRedirects`) |
 | `NotFoundError` | 404 | unknown, deleted, or outside the request's space; also a `getByReference` that found nothing (code `not_found`, the list's `requestId`) |
-| `ConflictError` | 409 | `unique_violation` (`details.field`), `tx_already_sent`, `merchant_not_ready` (`details.reason`), `held_funds_pending`, `already_joined`, `payment_not_due`, `subscription_already_stopped_or_inactive`, `idempotency_key_in_use`, `conflict` |
+| `ConflictError` | 409 | `unique_violation` (`details.field`), `tx_already_sent`, `merchant_not_ready` (`details.reason`), `held_funds_pending`, `member_has_no_wallet`, `already_joined`, `payment_not_due`, `subscription_already_stopped_or_inactive`, `idempotency_key_in_use`, `conflict` |
 | `GoneError` | 410 | `merchant_closed`: a removed member's or a closed organization's space |
 | `IdempotencyError` | 422 `idempotency_key_reused` | an `Idempotency-Key` reused for another request: a bug, never retried |
 | `RateLimitError` | 429 | `retryAfter` (seconds), `limit`, `periodSeconds` |
@@ -1525,7 +1558,8 @@ and `category`, invitation `status`), and exclusive filters. A failure is a `Val
 `status` `undefined`, `code` `''`, its message `validation failed` followed by the field list, and
 nothing is sent. What depends on the key's mode or on stored data is left to the API: the `'5'` USD
 test-mode cap, `https`-only live URLs, the live subscription minimum (`'0.25'`), the frequency
-minimum (1 hour live, 5 minutes test), the 92-day export window, the 50-key cap on merged metadata,
+minimum (1 hour live, 5 minutes test; a development server lowers the live one to 1 minute,
+production never does), the 92-day export window, the 50-key cap on merged metadata,
 uniqueness.
 
 ## Retries and idempotency
