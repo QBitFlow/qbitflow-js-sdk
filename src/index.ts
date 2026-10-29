@@ -1,5 +1,5 @@
 /**
- * QBitFlow JavaScript/TypeScript SDK 3.0.0, for QBitFlow API v2.
+ * QBitFlow JavaScript/TypeScript SDK 3.1.0, for QBitFlow API v2.
  *
  * ```ts
  * import { QBitFlow, webhooks, NotFoundError } from 'qbitflow';

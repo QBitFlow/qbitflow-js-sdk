@@ -485,7 +485,8 @@ console.log(`Redirect the customer to ${session.link}`);
 <!-- /docs:snippet -->
 
 - **Other fields:** `reference` (your order id, unique per space), `customerUuid` or
-  `customerReference` (kept on the payment), `expiresInMinutes` (10 to 1440; left out: the
+  `customerReference` (kept on the payment; **no receipt without a QBitFlow customer**: see
+  [Products and customers](#products-and-customers)), `expiresInMinutes` (10 to 1440; left out: the
   default), `metadata` (copied onto the payment or the subscription and into their webhooks:
   `payment.completed`, `subscription.*`, `checkout.expired`).
 - **The answer** is a `CreatedCheckoutSession`: `link`, `uuid` and `expiresAt`, always set.
@@ -696,8 +697,14 @@ console.log(customer.uuid === byReference.uuid);
 `customers.get`, `list` / `iterate` (by `email` or `reference`) and `delete` (`204`) complete the
 set. A checkout given `customerUuid` or `customerReference` asks the customer
 nothing (`customerReference` is kept on the payment, and links your customer with that reference
-if there is one); without either, the checkout asks what your `checkout.customerDetails` setting
-says (the full details by default).
+if there is one; none is created); without either, the checkout asks what your
+`checkout.customerDetails` setting says (the full details by default).
+
+**Without a QBitFlow customer, the buyer gets no receipt and no other customer email** (a
+subscription's billing emails included): QBitFlow has no address for them. To have them, create
+the customer with that reference and their email first
+(`customers.create({ reference: 'crm-42', firstName: 'Ada', email: 'ada@example.com' })`). That
+works even after the checkout was created, as long as it is before the payment is recorded.
 
 ## Payments and failures
 
@@ -1284,6 +1291,12 @@ QBitFlow itself: 2xx for every event it accepts, the ignored types included.
 - **Answer 2xx fast**, within 30 seconds, **including to the types you ignore** (the router does):
   anything else is retried (for 3 days in live mode), and an endpoint failing for 3 days is
   disabled. Keep handlers short: store the event, answer, then process it in the background.
+- **Order is per publication, never per subscription.** The events published together (a
+  `subscription.created` and its first `subscription.billed`) reach an endpoint in that order,
+  each once the previous one is delivered or abandoned; meanwhile the event log shows the waiting
+  one `pending` with `waitingFor` the earlier event ([The event log](#the-event-log)). Nothing
+  waits across publications: a renewal's `subscription.billed` never waits for an earlier event
+  your endpoint is failing. Order those by `createdAt` and the resources' own timestamps.
 - **Secret rotation** needs nothing on your side: for 24 hours after a rotation the header carries
   two `v1=` signatures, the new secret's and the previous one's, and either secret verifies. Switch
   your secret within the day.
@@ -1353,9 +1366,24 @@ if (page.hasMore) {
 ```ts
 const detail = await client.webhooks.events.get(eventId); // evt_…
 for (const d of detail.deliveries) {
-	console.log(d.url, d.delivered, d.attempts.length);
+	if (d.delivered) console.log(d.url, `delivered after ${d.attempts.length} attempts`);
+	else if (d.nextAttemptAt) console.log(d.url, `failed, retried at ${d.nextAttemptAt}`);
+	else if (d.waitingFor) console.log(d.url, `queued behind ${d.waitingFor}`); // no attempt yet
+	else if (d.pending) console.log(d.url, 'about to start'); // no attempt yet
+	else console.log(d.url, `not delivered, gave up after ${d.attempts.length} attempts`);
 }
 ```
+
+`pending` is true while QBitFlow still attempts the event on its own: `nextAttemptAt` is set while
+it is retried after a failed attempt, `waitingFor` (an `evt_…`) while it is queued behind an earlier
+event of the same publication, and neither while its delivery is about to start (within a minute).
+**A queued or starting delivery has no `attempts` yet**: check `d.attempts.length` before reading
+the last one. Once `pending` is false nothing more happens on its own, and `delivered: false` means
+it was abandoned after its retries (3 days in live mode, 3 hours in test mode) or the endpoint was
+disabled or deleted. If QBitFlow can't read a delivery's progress at that moment, `pending` comes
+from the attempts: true while the retry schedule still attempts the event again (a delivery being
+retried never reads as abandoned), without `nextAttemptAt`; a delivery queued with no attempt yet
+isn't listed until its progress can be read: read the event again a moment later.
 
 ## Currencies
 
@@ -1599,7 +1627,7 @@ naming it), `QBITFLOW_BASE_URL` and `QBITFLOW_ON_BEHALF_OF` (values are trimmed;
 
 A bad option makes the constructor throw a `ValidationError`. A client's configuration never
 changes after construction; `client.onBehalfOf` derives clients that share it. Every request sends
-`User-Agent: qbitflow-js/3.0.0` (`VERSION`).
+`User-Agent: qbitflow-js/3.1.0` (`VERSION`).
 
 ## What the SDK doesn't cover
 

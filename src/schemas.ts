@@ -742,6 +742,9 @@ export const EndpointDeliverySchema = object<EndpointDelivery>({
 	url: string,
 	delivered: boolean,
 	attempts: list(DeliveryAttemptSchema),
+	pending: boolean,
+	nextAttemptAt: optTimestamp,
+	waitingFor: optString,
 });
 
 // ── Webhook event data ──────────────────────────────────────────────────────

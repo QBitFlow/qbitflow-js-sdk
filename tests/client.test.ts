@@ -172,7 +172,7 @@ describe('headers', () => {
 		const [get, post] = ts.recorded;
 		for (const r of ts.recorded) {
 			expect(r.headers['x-api-key']).toBe(TEST_API_KEY);
-			expect(r.headers['user-agent']).toBe('qbitflow-js/3.0.0');
+			expect(r.headers['user-agent']).toBe('qbitflow-js/3.1.0');
 			expect(r.headers.accept).toBe('application/json');
 			expect(r.headers['on-behalf-of']).toBeUndefined();
 		}

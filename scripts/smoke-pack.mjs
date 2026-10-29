@@ -66,7 +66,7 @@ try {
 		join(consumer, 'esm.mjs'),
 		"import { QBitFlow, VERSION, SubscriptionStatus, ConflictError, NotFoundError, webhooks } from 'qbitflow';\n" +
 			"const c = new QBitFlow('sk_smoke');\n" +
-			"if (typeof c.products.list !== 'function' || typeof c.transactions.list !== 'function' || VERSION !== '3.0.0' || SubscriptionStatus.PastDue !== 'pastDue' || !ConflictError) process.exit(2);\n" +
+			"if (typeof c.products.list !== 'function' || typeof c.transactions.list !== 'function' || VERSION !== '3.1.0' || SubscriptionStatus.PastDue !== 'pastDue' || !ConflictError) process.exit(2);\n" +
 			"if (typeof c.onBehalfOf('019eca82-5680-7b00-8000-0000000000b1').checkoutSessions.createPayment !== 'function') process.exit(3);\n" +
 			"const e = webhooks.parseEvent('{\"id\":\"evt_1\",\"type\":\"webhook.test\",\"version\":\"v2\",\"createdAt\":\"2026-10-01T12:00:00Z\",\"data\":{}}');\n" +
 			"if (e.data.endpointUuid !== '') process.exit(4);\n" +
