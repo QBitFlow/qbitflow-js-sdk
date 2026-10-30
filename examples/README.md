@@ -1,6 +1,6 @@
 # QBitFlow SDK examples
 
-Runnable TypeScript programs for the QBitFlow JavaScript/TypeScript SDK 3.1.0 (API v2). Each one
+Runnable TypeScript programs for the QBitFlow JavaScript/TypeScript SDK 3.1.1 (API v2). Each one
 imports from `'qbitflow'` and reads its configuration from the environment: never hardcode a key.
 
 | File | Shows |

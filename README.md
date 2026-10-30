@@ -901,15 +901,18 @@ if (pending) {
 <!-- /docs:snippet -->
 
 `cancel` answers 200 when done and 202 (`pending: true`) while confirming on-chain. A
-`ConflictError` `subscription_already_stopped_or_inactive`, or a 404 once cancelled. A trial is
-cancelled immediately only (`immediate: false`: a 400). It is never retried automatically.
+subscription cancelled already, or stopped already with `immediate: false`, is a `ConflictError`
+`subscription_already_stopped_or_inactive`; a `NotFoundError` only means it isn't in your space
+(or doesn't exist). A trial is cancelled immediately only (`immediate: false`: a 400). It is never
+retried automatically.
 
 ### Test billing
 
 In test mode a subscription is billed only when you ask, with live's statuses and webhooks.
 `testBill` resolves once the attempt settled: a `TestBill` with the bill's `sub-hist@…` id
 (`billUuid`), its `stage` and, once done, its `outcome` (a live subscription: a `BadRequestError`
-`test_mode_only`; a bill not due: a `ConflictError` `payment_not_due`):
+`test_mode_only`; a bill not due: a `ConflictError` `payment_not_due`; a cancelled subscription: a
+`ConflictError` `subscription_already_stopped_or_inactive`):
 
 <!-- docs:snippet subscriptions-test-bill -->
 ```ts
@@ -1196,7 +1199,9 @@ Up to 10 endpoints per space and mode; live endpoints need `https` and a public 
 organization endpoint also receives its members' events unless created with
 `includeMembers: false`. `endpoints.list` / `iterate` (paginated), `get`, `update` (`PATCH`:
 `{ enabled: false }` pauses it, `{ enabled: true }` enables it again, `{ description: '' }` clears
-it, `{ events: [] }` receives every type) and `delete` (`204`) manage them. An endpoint's secret is
+it, `{ events: [] }` receives every type) and `delete` (`204`) manage them. `delete` also deletes
+the endpoint's delivery history: `events.get` no longer lists its deliveries. To keep it, disable
+the endpoint instead. An endpoint's secret is
 shown and rotated in the dashboard only. A replay of the create's `Idempotency-Key` within 24 hours
 returns the same endpoint and secret.
 
@@ -1409,7 +1414,9 @@ event of the same publication, and neither while its delivery is about to start 
 **A queued or starting delivery has no `attempts` yet**: check `d.attempts.length` before reading
 the last one. Once `pending` is false nothing more happens on its own, and `delivered: false` means
 it was abandoned after its retries (3 days in live mode, 3 hours in test mode) or the endpoint was
-disabled or deleted. If QBitFlow can't read a delivery's progress at that moment, `pending` comes
+disabled. **A deleted endpoint's deliveries aren't listed at all**: they are deleted with it, the
+successful ones included. To keep an endpoint's history, disable it (`{ enabled: false }`) rather
+than delete it. If QBitFlow can't read a delivery's progress at that moment, `pending` comes
 from the attempts: true while the retry schedule still attempts the event again (a delivery being
 retried never reads as abandoned), without `nextAttemptAt`; a delivery queued with no attempt yet
 isn't listed until its progress can be read: read the event again a moment later.
@@ -1661,7 +1668,7 @@ naming it), `QBITFLOW_BASE_URL` and `QBITFLOW_ON_BEHALF_OF` (values are trimmed;
 
 A bad option makes the constructor throw a `ValidationError`. A client's configuration never
 changes after construction; `client.onBehalfOf` derives clients that share it. Every request sends
-`User-Agent: qbitflow-js/3.1.0` (`VERSION`).
+`User-Agent: qbitflow-js/3.1.1` (`VERSION`).
 
 ## What the SDK doesn't cover
 

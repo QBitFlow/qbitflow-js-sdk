@@ -1,6 +1,6 @@
 # QBitFlow SDK tests
 
-The test suites of the QBitFlow JavaScript/TypeScript SDK 3.1.0 (jest + ts-jest). They import the
+The test suites of the QBitFlow JavaScript/TypeScript SDK 3.1.1 (jest + ts-jest). They import the
 TypeScript sources directly (`../src/…`); `tests/` is type-checked with the sources
 (`tsconfig.test.json`).
 

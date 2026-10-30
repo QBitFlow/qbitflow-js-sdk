@@ -1254,9 +1254,11 @@ describe('errors reach the caller typed', () => {
 			await rejection(testClient(ts2).client.accounting.exportCsv('2026-01-01', '2026-09-30'))
 		).toBeInstanceOf(BadRequestError);
 
+		// Another space's subscription (or none) is still a 404.
 		const ts3 = await testServer(staticReply(404, '{"error":"not found","code":"not_found"}'));
 		const c3 = testClient(ts3).client;
 		expect(await rejection(c3.subscriptions.cancel(SUB_ID))).toBeInstanceOf(NotFoundError);
+		expect(await rejection(c3.subscriptions.testBill(SUB_ID))).toBeInstanceOf(NotFoundError);
 		expect(await rejection(c3.products.delete(UUID_A))).toBeInstanceOf(NotFoundError);
 		expect(await rejection(c3.invitations.revoke(UUID_A))).toBeInstanceOf(NotFoundError);
 		expect(await rejection(collect(c3.customers.iterate()))).toBeInstanceOf(NotFoundError);
@@ -1273,6 +1275,32 @@ describe('errors reach the caller typed', () => {
 		)) as BadRequestError;
 		expect([err instanceof BadRequestError, err.code]).toEqual([true, 'test_mode_only']);
 		expect(ts.recorded).toHaveLength(1); // never retried
+	});
+
+	it('cancelling or test-billing a cancelled subscription is a ConflictError, not a NotFoundError', async () => {
+		const ts = await testServer(
+			staticReply(
+				409,
+				'{"error":"subscription already stopped or inactive",' +
+					'"code":"subscription_already_stopped_or_inactive","requestId":"r-5"}'
+			)
+		);
+		const { client } = testClient(ts);
+		for (const call of [
+			() => client.subscriptions.cancel(SUB_ID),
+			() => client.subscriptions.cancel(SUB_ID, { immediate: false }),
+			() => client.subscriptions.testBill(SUB_ID),
+		]) {
+			const err = (await rejection(call())) as ConflictError;
+			expect([
+				err instanceof ConflictError,
+				err instanceof NotFoundError,
+				err.status,
+				err.code,
+				err.requestId,
+			]).toEqual([true, false, 409, 'subscription_already_stopped_or_inactive', 'r-5']);
+		}
+		expect(ts.recorded).toHaveLength(3); // never retried
 	});
 
 	it('a 204 delete ignores any body; a 200 one too', async () => {

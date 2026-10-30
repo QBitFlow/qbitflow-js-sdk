@@ -139,7 +139,9 @@ export class WebhookEndpointsService {
 
 	/**
 	 * Deletes a webhook endpoint (`DELETE /webhooks/endpoints/:uuid`, 204): it receives nothing
-	 * more. Not retried.
+	 * more, pending retries included. Its delivery history is deleted with it: `events.get` no
+	 * longer lists its deliveries, successful ones included. To keep that history, disable the
+	 * endpoint instead (`update` with `{ enabled: false }`). Not retried.
 	 */
 	async delete(uuid: string, options?: RequestOptions): Promise<void> {
 		checkPathUUID('uuid', uuid);

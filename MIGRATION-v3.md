@@ -322,7 +322,7 @@ package. Every 3.0 method also takes [request options](#request-options) as its 
 | `subscriptions.get(uuid)` | `subscriptions.get(uuid)` | returns cancelled subscriptions too: a 404 no longer means "cancelled" |
 | `subscriptions.getByReference(ref)` | `subscriptions.getByReference(ref)` | a `NotFoundError` when none |
 | `subscriptions.getPaymentHistory(uuid)` | `subscriptions.listBills(uuid)`, `subscriptions.iterateBills(uuid)` | every bill, page by page |
-| `subscriptions.forceCancel(uuid)` | `subscriptions.cancel(uuid, { immediate? })` | returns `{ subscription, pending }`; never retried |
+| `subscriptions.forceCancel(uuid)` | `subscriptions.cancel(uuid, { immediate? })` | returns `{ subscription, pending }`; never retried; one cancelled already is a `ConflictError` (`subscription_already_stopped_or_inactive`), a `NotFoundError` only another space's |
 | `subscriptions.executeTestBilling(uuid)` | `subscriptions.testBill(uuid)` | test mode only; returns a `TestBill` (`billUuid`, `stage`, `outcome`) |
 | — | `subscriptions.list`, `subscriptions.iterate`, `subscriptions.update` (metadata), `subscriptions.getBill` | new |
 
